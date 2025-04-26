@@ -9,11 +9,10 @@ import SwiftUI
 import AVKit
 
 struct VideoPlayerView: UIViewControllerRepresentable {
-    let url: URL
+    let player: AVPlayer
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = AVPlayerViewController()
-        let player = AVPlayer(url: url)
         controller.player = player
         controller.player?.play()
         return controller

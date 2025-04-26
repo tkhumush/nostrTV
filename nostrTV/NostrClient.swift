@@ -70,6 +70,7 @@ class NostrClient {
         var streamURL: String?
         var streamID: String?
         var status: String?
+        var imageURL: String?
 
         for tag in tags {
             guard let key = tag.first as? String else { continue }
@@ -85,6 +86,8 @@ class NostrClient {
                 streamID = tag.dropFirst().first as? String
             case "status":
                 status = tag.dropFirst().first as? String
+            case "image":
+                imageURL = tag.dropFirst().first as? String
             default:
                 break
             }
@@ -108,8 +111,7 @@ class NostrClient {
 
         print("🎥 Stream: \(combinedTitle) | URL: \(url)")
 
-        let stream = Stream(streamID: streamID, title: combinedTitle, streaming_url: url)
-        DispatchQueue.main.async {
+        let stream = Stream(streamID: streamID, title: combinedTitle, streaming_url: url, imageURL: imageURL);        DispatchQueue.main.async {
             self.onStreamReceived?(stream)
         }
     }

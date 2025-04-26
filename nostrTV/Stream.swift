@@ -8,9 +8,10 @@
 import Foundation
 
 struct Stream: Identifiable, Codable, Equatable {
-    let streamID: String          // from the "d" tag
+    let streamID: String
     let title: String
     let streaming_url: String
+    let imageURL: String?
 
     var id: String { streamID }
 
