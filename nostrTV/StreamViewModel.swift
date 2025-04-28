@@ -27,4 +27,10 @@ class StreamViewModel: ObservableObject {
     deinit {
         nostrClient.disconnect()
     }
+
+    func refreshStreams() {
+        streams.removeAll()
+        nostrClient.disconnect()
+        nostrClient.connect()
+    }
 }
