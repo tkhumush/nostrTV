@@ -60,10 +60,15 @@ struct ContentView: View {
                     }
                 }
             }
+            .onAppear {
+                viewModel.refreshStreams()
+            }
         }
-        .sheet(isPresented: $showPlayer) {
+        .ignoresSafeArea()
+        .fullScreenCover(isPresented: $showPlayer) {
             if let player = player {
                 VideoPlayerView(player: player)
+                    .ignoresSafeArea()
             }
         }
         .onChange(of: showPlayer) { oldValue, newValue in

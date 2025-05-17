@@ -7,9 +7,16 @@
 
 import Foundation
 
+struct NostrEvent: Codable {
+    let kind: Int
+    let tags: [[String]]
+}
+
 class NostrClient {
     private var webSocketTask: URLSessionWebSocketTask?
     private let relayURL = URL(string: "wss://relay.snort.social")!
+    private var reconnectAttempts = 0
+    private let maxReconnectAttempts = 5
 
     var onStreamReceived: ((Stream) -> Void)?
 
@@ -17,7 +24,7 @@ class NostrClient {
         let session = URLSession(configuration: .default)
         webSocketTask = session.webSocketTask(with: relayURL)
         webSocketTask?.resume()
-        print("🔌 Connecting to relay...")
+        print("🔌 Connecting to relay \(relayURL)...")
 
         let req: [Any] = [
             "REQ",
@@ -31,69 +38,83 @@ class NostrClient {
     private func sendJSON(_ message: [Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: message),
               let jsonString = String(data: data, encoding: .utf8) else {
+            print("❌ Failed to serialize message to JSON")
             return
         }
         webSocketTask?.send(.string(jsonString)) { error in
             if let error = error {
-                print("WebSocket send error: \(error)")
+                print("❌ WebSocket send error: \(error)")
+            } else {
+                print("✅ Sent message: \(jsonString)")
             }
         }
     }
 
     private func listen() {
         webSocketTask?.receive { [weak self] result in
+            guard let self = self else { return }
             switch result {
             case .failure(let error):
-                print("WebSocket receive error: \(error)")
+                print("❌ WebSocket receive error: \(error)")
+                self.handleReconnect()
             case .success(let message):
                 if case let .string(text) = message {
-                    self?.handleMessage(text)
+                    print("⬅️ Received message: \(text)")
+                    self.handleMessage(text)
                 }
-                self?.listen()
+                self.listen()
             }
         }
+    }
+
+    private func handleReconnect() {
+        guard reconnectAttempts < maxReconnectAttempts else {
+            print("⚠️ Max reconnect attempts reached. Giving up.")
+            return
+        }
+        reconnectAttempts += 1
+        let delay = pow(2.0, Double(reconnectAttempts))
+        print("🔄 Attempting to reconnect in \(delay) seconds (attempt \(reconnectAttempts))...")
+        DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.connect()
+        }
+    }
+
+    private func extractTagValue(_ key: String, from tags: [[Any]]) -> String? {
+        for tag in tags {
+            guard let tagKey = tag.first as? String, tagKey == key,
+                  tag.count > 1,
+                  let value = tag[1] as? String else {
+                continue
+            }
+            return value
+        }
+        return nil
     }
 
     private func handleMessage(_ text: String) {
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [Any],
               json.count >= 3,
-              let event = json[2] as? [String: Any],
-              let kind = event["kind"] as? Int,
+              let eventDict = json[2] as? [String: Any],
+              let kind = eventDict["kind"] as? Int,
               kind == 30311,
-              let tags = event["tags"] as? [[Any]] else {
+              let tagsAny = eventDict["tags"] as? [[Any]] else {
+            print("⚠️ Message does not contain expected event data")
             return
         }
 
-        var title: String?
-        var summary: String?
-        var streamURL: String?
-        var streamID: String?
-        var status: String?
-        var imageURL: String?
+        let title = extractTagValue("title", from: tagsAny)
+        let summary = extractTagValue("summary", from: tagsAny)
+        let streamURL = extractTagValue("streaming", from: tagsAny) ?? extractTagValue("streaming_url", from: tagsAny)
+        let streamID = extractTagValue("d", from: tagsAny)
+        let status = extractTagValue("status", from: tagsAny)
+        let imageURL = extractTagValue("image", from: tagsAny)
 
-        for tag in tags {
-            guard let key = tag.first as? String else { continue }
-
-            switch key {
-            case "title":
-                title = tag.dropFirst().first as? String
-            case "summary":
-                summary = tag.dropFirst().first as? String
-            case "streaming", "streaming_url":
-                streamURL = tag.dropFirst().first as? String
-            case "d":
-                streamID = tag.dropFirst().first as? String
-            case "status":
-                status = tag.dropFirst().first as? String
-            case "image":
-                imageURL = tag.dropFirst().first as? String
-            default:
-                break
-            }
+        guard status == "live", let streamID = streamID, let url = streamURL else {
+            print("ℹ️ Stream is not live or missing required info")
+            return
         }
-
-        guard status == "live", let streamID = streamID, let url = streamURL else { return }
 
         let combinedTitle: String = {
             if let title = title, !title.isEmpty {
@@ -111,12 +132,15 @@ class NostrClient {
 
         print("🎥 Stream: \(combinedTitle) | URL: \(url)")
 
-        let stream = Stream(streamID: streamID, title: combinedTitle, streaming_url: url, imageURL: imageURL);        DispatchQueue.main.async {
+        let stream = Stream(streamID: streamID, title: combinedTitle, streaming_url: url, imageURL: imageURL)
+        DispatchQueue.main.async {
             self.onStreamReceived?(stream)
         }
     }
     
     func disconnect() {
         webSocketTask?.cancel(with: .goingAway, reason: nil)
+        webSocketTask = nil
+        print("🔌 Disconnected from relay")
     }
 }
