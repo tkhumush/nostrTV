@@ -1,5 +1,5 @@
 //
-//  Untitled 2.swift
+//  NostrClient.swift
 //  nostrTV
 //
 //  Created by Taymur Khumush on 4/24/25.
@@ -13,72 +13,69 @@ struct NostrEvent: Codable {
 }
 
 class NostrClient {
-    private var webSocketTask: URLSessionWebSocketTask?
-    private let relayURL = URL(string: "wss://relay.snort.social")!
-    private var reconnectAttempts = 0
-    private let maxReconnectAttempts = 5
+    private var webSocketTasks: [URL: URLSessionWebSocketTask] = [:]
 
     var onStreamReceived: ((Stream) -> Void)?
 
     func connect() {
         let session = URLSession(configuration: .default)
-        webSocketTask = session.webSocketTask(with: relayURL)
-        webSocketTask?.resume()
-        print("🔌 Connecting to relay \(relayURL)...")
-
-        let req: [Any] = [
-            "REQ",
-            "live-streams",
-            ["kinds": [30311], "limit": 50]
+        let relayURLs = [
+            URL(string: "wss://relay.snort.social")!,
+            URL(string: "wss://relay.tunestr.io")!,
+            URL(string: "wss://relay.damus.io")!,
+            URL(string: "wss://relay.primal.net")!
         ]
-        sendJSON(req)
-        listen()
+
+        for url in relayURLs {
+            let task = session.webSocketTask(with: url)
+            webSocketTasks[url] = task
+            task.resume()
+            print("🔌 Connecting to relay \(url)...")
+
+            let req: [Any] = [
+                "REQ",
+                "live-streams",
+                ["kinds": [30311], "limit": 50]
+            ]
+            sendJSON(req, on: task)
+            listen(on: task, from: url)
+        }
     }
 
-    private func sendJSON(_ message: [Any]) {
+    private func sendJSON(_ message: [Any], on task: URLSessionWebSocketTask) {
         guard let data = try? JSONSerialization.data(withJSONObject: message),
               let jsonString = String(data: data, encoding: .utf8) else {
             print("❌ Failed to serialize message to JSON")
             return
         }
-        webSocketTask?.send(.string(jsonString)) { error in
+
+        task.send(.string(jsonString)) { error in
             if let error = error {
                 print("❌ WebSocket send error: \(error)")
             } else {
-                print("✅ Sent message: \(jsonString)")
+                print("✅ Sent message to \(task.originalRequest?.url?.absoluteString ?? "?"): \(jsonString)")
             }
         }
     }
 
-    private func listen() {
-        webSocketTask?.receive { [weak self] result in
+    private func listen(on task: URLSessionWebSocketTask, from relayURL: URL) {
+        task.receive { [weak self] result in
             guard let self = self else { return }
+
             switch result {
             case .failure(let error):
-                print("❌ WebSocket receive error: \(error)")
-                self.handleReconnect()
+                print("❌ WebSocket receive error from \(relayURL): \(error)")
             case .success(let message):
                 if case let .string(text) = message {
-                    print("⬅️ Received message: \(text)")
+                    print("⬅️ [\(relayURL)] Received message: \(text)")
                     self.handleMessage(text)
                 }
-                self.listen()
+                self.listen(on: task, from: relayURL)
             }
         }
     }
 
-    private func handleReconnect() {
-        guard reconnectAttempts < maxReconnectAttempts else {
-            print("⚠️ Max reconnect attempts reached. Giving up.")
-            return
-        }
-        reconnectAttempts += 1
-        let delay = pow(2.0, Double(reconnectAttempts))
-        print("🔄 Attempting to reconnect in \(delay) seconds (attempt \(reconnectAttempts))...")
-        DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in
-            self?.connect()
-        }
-    }
+    // handleReconnect removed (no longer used)
 
     private func extractTagValue(_ key: String, from tags: [[Any]]) -> String? {
         for tag in tags {
@@ -139,8 +136,10 @@ class NostrClient {
     }
     
     func disconnect() {
-        webSocketTask?.cancel(with: .goingAway, reason: nil)
-        webSocketTask = nil
-        print("🔌 Disconnected from relay")
+        for (_, task) in webSocketTasks {
+            task.cancel(with: .goingAway, reason: nil)
+        }
+        webSocketTasks.removeAll()
+        print("🔌 Disconnected from all relays")
     }
 }
