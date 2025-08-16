@@ -25,6 +25,7 @@ struct ContentView: View {
                     }
                 }) {
                     HStack(spacing: 12) {
+                        // Stream thumbnail
                         if let imageURL = stream.imageURL, let url = URL(string: imageURL) {
                             AsyncImage(url: url) { image in
                                 image
@@ -41,13 +42,58 @@ struct ContentView: View {
                             Color.gray.frame(width: 200, height: 120)
                                 .cornerRadius(8)
                         }
-
-                        Text(stream.title)
-                            .font(.headline)
-                            .multilineTextAlignment(.leading)
-                            .lineLimit(2)
+                        
+                        // Stream info including profile
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(stream.title)
+                                .font(.headline)
+                                .multilineTextAlignment(.leading)
+                                .lineLimit(2)
+                            
+                            // Profile info
+                            HStack(spacing: 6) {
+                                // Profile picture
+                                if let pubkey = stream.pubkey,
+                                   let profile = viewModel.getProfile(for: pubkey),
+                                   let pictureURL = profile.picture,
+                                   let url = URL(string: pictureURL) {
+                                    AsyncImage(url: url) { image in
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                            .frame(width: 24, height: 24)
+                                            .clipShape(Circle())
+                                    } placeholder: {
+                                        Circle()
+                                            .fill(Color.gray)
+                                            .frame(width: 24, height: 24)
+                                    }
+                                } else {
+                                    // Default profile picture
+                                    Circle()
+                                        .fill(Color.blue)
+                                        .frame(width: 24, height: 24)
+                                        .overlay(
+                                            Image(systemName: "person.fill")
+                                                .foregroundColor(.white)
+                                                .font(.system(size: 12))
+                                        )
+                                }
+                                
+                                // Username
+                                Text({
+                                    if let pubkey = stream.pubkey,
+                                       let profile = viewModel.getProfile(for: pubkey) {
+                                        return profile.displayNameOrName
+                                    }
+                                    return "Unknown"
+                                }())
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 6)
                     }
-                    .padding(.vertical, 6)
                 }
             }
             .navigationTitle("Live Streams")

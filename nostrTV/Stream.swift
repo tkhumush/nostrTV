@@ -12,6 +12,8 @@ struct Stream: Identifiable, Codable, Equatable {
     let title: String
     let streaming_url: String
     let imageURL: String?
+    let pubkey: String?
+    let profile: Profile?
 
     var id: String { streamID }
 

@@ -1,10 +1,3 @@
-//
-//  StreamViewModel.swift
-//  nostrTV
-//
-//  Created by Taymur Khumush on 4/24/25.
-//
-
 import Foundation
 
 class StreamViewModel: ObservableObject {
@@ -21,6 +14,7 @@ class StreamViewModel: ObservableObject {
                 }
             }
         }
+        
         nostrClient.connect()
     }
 
@@ -32,5 +26,9 @@ class StreamViewModel: ObservableObject {
         streams.removeAll()
         nostrClient.disconnect()
         nostrClient.connect()
+    }
+    
+    func getProfile(for pubkey: String) -> Profile? {
+        return nostrClient.getProfile(for: pubkey)
     }
 }
