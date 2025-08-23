@@ -7,12 +7,14 @@
 
 import SwiftUI
 import AVKit
+import CoreImage.CIFilterBuiltins
 
 struct ContentView: View {
     @StateObject var viewModel = StreamViewModel()
     @State private var selectedStreamURL: URL?
     @State private var showPlayer = false
     @State private var player: AVPlayer?
+    @State private var selectedLightningAddress: String?
 
     var body: some View {
         NavigationView {
@@ -21,6 +23,12 @@ struct ContentView: View {
                     if let url = URL(string: stream.streaming_url) {
                         let player = AVPlayer(url: url)
                         self.player = player
+                        if let pubkey = stream.pubkey, let profile = viewModel.getProfile(for: pubkey) {
+                            self.selectedLightningAddress = profile.lud16
+                        } else {
+                            self.selectedLightningAddress = nil
+                        }
+                        print("Selected Lightning Address: \(self.selectedLightningAddress ?? "nil")")
                         self.showPlayer = true
                     }
                 }) {
@@ -113,7 +121,7 @@ struct ContentView: View {
         .ignoresSafeArea()
         .fullScreenCover(isPresented: $showPlayer) {
             if let player = player {
-                VideoPlayerView(player: player)
+                VideoPlayerView(player: player, lightningAddress: selectedLightningAddress)
                     .ignoresSafeArea()
             }
         }
