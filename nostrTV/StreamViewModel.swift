@@ -9,29 +9,56 @@ class StreamViewModel: ObservableObject {
     @Published var streams: [Stream] = []
     @Published var categorizedStreams: [StreamCategory] = []
     private var nostrClient = NostrClient()
+    private var refreshTimer: Timer?
 
     init() {
         nostrClient.onStreamReceived = { [weak self] stream in
             DispatchQueue.main.async {
                 guard let self = self else { return }
-                // Avoid duplicates by streamID
-                if !self.streams.contains(where: { $0.streamID == stream.streamID }) {
-                    self.streams.append(stream)
-                    self.updateCategorizedStreams()
+
+                // Always remove exact duplicates by streamID first
+                self.streams.removeAll { existingStream in
+                    existingStream.streamID == stream.streamID
                 }
+
+                // For live streams, prevent duplicates from the same pubkey
+                // Only remove other LIVE streams from the same pubkey, not ended ones
+                if stream.isLive, let pubkey = stream.pubkey {
+                    self.streams.removeAll { existingStream in
+                        existingStream.pubkey == pubkey && existingStream.isLive
+                    }
+                }
+
+                self.streams.append(stream)
+                self.updateCategorizedStreams()
             }
         }
 
-        nostrClient.connect()
+        startAutoRefresh()
     }
 
     deinit {
+        stopAutoRefresh()
         nostrClient.disconnect()
     }
 
+    private func startAutoRefresh() {
+        // Initial connection
+        nostrClient.connect()
+
+        // Set up timer for automatic refresh every 30 seconds
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+            self?.refreshStreams()
+        }
+    }
+
+    private func stopAutoRefresh() {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+    }
+
     func refreshStreams() {
-        streams.removeAll()
-        categorizedStreams.removeAll()
+        // Don't clear existing streams immediately - let new data come in and replace
         nostrClient.disconnect()
         nostrClient.connect()
     }

@@ -192,18 +192,6 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("Live Streams")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        viewModel.refreshStreams()
-                    }) {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
-            }
-            .onAppear {
-                viewModel.refreshStreams()
-            }
         }
         .ignoresSafeArea()
         .fullScreenCover(isPresented: $showPlayer) {
