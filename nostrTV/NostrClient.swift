@@ -38,7 +38,8 @@ class NostrClient {
             URL(string: "wss://relay.snort.social")!,
             URL(string: "wss://relay.tunestr.io")!,
             URL(string: "wss://relay.damus.io")!,
-            URL(string: "wss://relay.primal.net")!
+            URL(string: "wss://relay.primal.net")!,
+            URL(string: "wss://purplepag.es")!
         ]
 
         for url in relayURLs {
@@ -107,6 +108,19 @@ class NostrClient {
         return nil
     }
 
+    private func extractTagValues(_ key: String, from tags: [[Any]]) -> [String] {
+        var values: [String] = []
+        for tag in tags {
+            guard let tagKey = tag.first as? String, tagKey == key,
+                  tag.count > 1,
+                  let value = tag[1] as? String else {
+                continue
+            }
+            values.append(value)
+        }
+        return values
+    }
+
     private func handleMessage(_ text: String) {
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [Any],
@@ -157,12 +171,25 @@ class NostrClient {
         let summary = extractTagValue("summary", from: tagsAny)
         let streamURL = extractTagValue("streaming", from: tagsAny) ?? extractTagValue("streaming_url", from: tagsAny)
         let streamID = extractTagValue("d", from: tagsAny)
-        let status = extractTagValue("status", from: tagsAny)
+        let status = extractTagValue("status", from: tagsAny) ?? "unknown"
         let imageURL = extractTagValue("image", from: tagsAny)
         let pubkey = extractTagValue("p", from: tagsAny) ?? eventDict["pubkey"] as? String
 
-        guard status == "live", let streamID = streamID, let url = streamURL else {
-            print("ℹ️ Stream is not live or missing required info")
+        // Extract hashtags and other tags for categorization
+        let hashtags = extractTagValues("t", from: tagsAny)
+        let allTags = hashtags + extractTagValues("g", from: tagsAny) // g tags are also used for categories
+
+        // Extract created_at timestamp
+        let createdAt: Date? = {
+            if let timestamp = eventDict["created_at"] as? TimeInterval {
+                return Date(timeIntervalSince1970: timestamp)
+            }
+            return nil
+        }()
+
+        // Only require streamID for processing
+        guard let streamID = streamID else {
+            print("ℹ️ Stream missing required streamID")
             return
         }
 
@@ -180,14 +207,28 @@ class NostrClient {
             }
         }()
 
-        print("🎥 Stream: \(combinedTitle) | URL: \(url) | Pubkey: \(pubkey ?? "Unknown")")
+        // Use a placeholder URL for ended streams if no URL is provided
+        let finalStreamURL = streamURL ?? "ended://\(streamID)"
 
-        // Create stream with pubkey
-        let stream = Stream(streamID: streamID, title: combinedTitle, streaming_url: url, imageURL: imageURL, pubkey: pubkey, profile: nil)
+        print("🎥 Stream: \(combinedTitle) | Status: \(status) | URL: \(finalStreamURL) | Tags: \(allTags) | Pubkey: \(pubkey ?? "Unknown")")
+
+        // Create stream with all information
+        let stream = Stream(
+            streamID: streamID,
+            title: combinedTitle,
+            streaming_url: finalStreamURL,
+            imageURL: imageURL,
+            pubkey: pubkey,
+            profile: nil,
+            status: status,
+            tags: allTags,
+            createdAt: createdAt
+        )
+
         DispatchQueue.main.async {
             self.onStreamReceived?(stream)
         }
-        
+
         // If we have a pubkey, request the profile if we don't have it
         if let pubkey = pubkey, self.profiles[pubkey] == nil {
             requestProfile(for: pubkey)
