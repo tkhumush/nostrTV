@@ -33,8 +33,24 @@ struct ContentView: View {
                     }
                 }) {
                     HStack(spacing: 12) {
-                        // Stream thumbnail
+                        // Stream thumbnail with profile picture fallback
                         if let imageURL = stream.imageURL, let url = URL(string: imageURL) {
+                            AsyncImage(url: url) { image in
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(width: 200, height: 120)
+                                    .clipped()
+                                    .cornerRadius(8)
+                            } placeholder: {
+                                Color.gray.frame(width: 200, height: 120)
+                                    .cornerRadius(8)
+                            }
+                        } else if let pubkey = stream.pubkey,
+                                  let profile = viewModel.getProfile(for: pubkey),
+                                  let pictureURL = profile.picture,
+                                  let url = URL(string: pictureURL) {
+                            // Use profile picture as fallback thumbnail
                             AsyncImage(url: url) { image in
                                 image
                                     .resizable()
