@@ -21,18 +21,6 @@ struct VideoPlayerView: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = CustomAVPlayerViewController()
         controller.player = player
-        // Add logo overlay
-        let logoImageView = UIImageView(image: UIImage(named: "Logo"))
-        logoImageView.translatesAutoresizingMaskIntoConstraints = false
-        logoImageView.contentMode = .scaleAspectFit
-        controller.contentOverlayView?.addSubview(logoImageView)
-
-        NSLayoutConstraint.activate([
-            logoImageView.topAnchor.constraint(equalTo: controller.view.safeAreaLayoutGuide.topAnchor, constant: 10),
-            logoImageView.trailingAnchor.constraint(equalTo: controller.view.safeAreaLayoutGuide.trailingAnchor, constant: -10),
-            logoImageView.widthAnchor.constraint(equalToConstant: 100),
-            logoImageView.heightAnchor.constraint(equalToConstant: 50)
-        ])
 
         if let address = lightningAddress, let qrImage = generateQRCode(from: address) {
             let qrImageView = UIImageView(image: qrImage)
@@ -61,6 +49,9 @@ struct VideoPlayerView: UIViewControllerRepresentable {
                 emojiLabel.widthAnchor.constraint(equalToConstant: 70),
                 emojiLabel.heightAnchor.constraint(equalToConstant: 70)
             ])
+
+            // Set up auto-hide functionality
+            controller.setupQRCodeAutoHide(qrImageView: qrImageView)
         }
 
         controller.player?.play()
@@ -91,8 +82,12 @@ struct VideoPlayerView: UIViewControllerRepresentable {
     }
 }
 
-// Custom controller that disables the idle timer
+// Custom controller that disables the idle timer and manages QR code auto-hide
 class CustomAVPlayerViewController: AVPlayerViewController {
+    private var qrCodeImageView: UIImageView?
+    private var hideTimer: Timer?
+    private var gestureRecognizers: [UIGestureRecognizer] = []
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         UIApplication.shared.isIdleTimerDisabled = true
@@ -101,5 +96,75 @@ class CustomAVPlayerViewController: AVPlayerViewController {
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         UIApplication.shared.isIdleTimerDisabled = false
+        hideTimer?.invalidate()
+        hideTimer = nil
+    }
+
+    func setupQRCodeAutoHide(qrImageView: UIImageView) {
+        self.qrCodeImageView = qrImageView
+
+        // Start the initial hide timer
+        startHideTimer()
+
+        // Add gesture recognizers to detect user interaction
+        setupInteractionDetection()
+    }
+
+    private func setupInteractionDetection() {
+        // Clear any existing gesture recognizers
+        gestureRecognizers.forEach { view.removeGestureRecognizer($0) }
+        gestureRecognizers.removeAll()
+
+        // Add tap gesture recognizer
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(userInteracted))
+        tapGesture.cancelsTouchesInView = false
+        view.addGestureRecognizer(tapGesture)
+        gestureRecognizers.append(tapGesture)
+
+        // Add pan gesture recognizer for swipe detection
+        let panGesture = UIPanGestureRecognizer(target: self, action: #selector(userInteracted))
+        panGesture.cancelsTouchesInView = false
+        view.addGestureRecognizer(panGesture)
+        gestureRecognizers.append(panGesture)
+    }
+
+    @objc private func userInteracted() {
+        // Show QR code and restart timer
+        showQRCode()
+        startHideTimer()
+    }
+
+    private func startHideTimer() {
+        hideTimer?.invalidate()
+        hideTimer = Timer.scheduledTimer(withTimeInterval: 7.0, repeats: false) { [weak self] _ in
+            self?.hideQRCode()
+        }
+    }
+
+    private func showQRCode() {
+        guard let qrImageView = qrCodeImageView else { return }
+
+        UIView.animate(withDuration: 0.3) {
+            qrImageView.alpha = 1.0
+        }
+    }
+
+    private func hideQRCode() {
+        guard let qrImageView = qrCodeImageView else { return }
+
+        UIView.animate(withDuration: 0.5) {
+            qrImageView.alpha = 0.0
+        }
+    }
+
+    // Override remote control methods to detect Apple TV remote interactions
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        super.pressesBegan(presses, with: event)
+        userInteracted()
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        super.pressesEnded(presses, with: event)
+        userInteracted()
     }
 }
