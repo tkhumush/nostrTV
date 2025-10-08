@@ -88,12 +88,37 @@ struct ProfileSettingsView: View {
             } else {
                 // Loading or error state
                 VStack(spacing: 20) {
-                    ProgressView()
-                        .scaleEffect(2)
-                        .tint(.white)
-                    Text("Loading profile...")
-                        .font(.system(size: 28))
-                        .foregroundColor(.gray)
+                    if authManager.isLoadingProfile {
+                        ProgressView()
+                            .scaleEffect(2)
+                            .tint(.white)
+                        Text("Loading profile...")
+                            .font(.system(size: 28))
+                            .foregroundColor(.gray)
+                    } else {
+                        // Not loading but no profile - show error
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 80))
+                            .foregroundColor(.orange)
+
+                        Text(authManager.errorMessage ?? "Profile not available")
+                            .font(.system(size: 28))
+                            .foregroundColor(.gray)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 40)
+
+                        Button(action: {
+                            authManager.fetchUserData()
+                        }) {
+                            Text("Retry")
+                                .font(.system(size: 28, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 200, height: 60)
+                                .background(Color.blue.opacity(0.8))
+                                .cornerRadius(10)
+                        }
+                        .padding(.top, 20)
+                    }
                 }
             }
 
@@ -101,5 +126,12 @@ struct ProfileSettingsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
+        .onAppear {
+            // If profile is not loaded but user is authenticated, fetch it
+            if authManager.currentProfile == nil && authManager.isAuthenticated {
+                print("⚠️ Profile is nil on appear, fetching user data...")
+                authManager.fetchUserData()
+            }
+        }
     }
 }

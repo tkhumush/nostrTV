@@ -25,6 +25,53 @@ class NostrAuthManager: ObservableObject {
            let savedPubkey = UserDefaults.standard.string(forKey: "nostrUserPubkey") {
             currentUser = UserSession(nip05: savedNip05, hexPubkey: savedPubkey)
             isAuthenticated = true
+
+            // Load cached profile data
+            loadCachedProfile()
+
+            // Ensure loading state is false when using cached data
+            isLoadingProfile = false
+        }
+    }
+
+    private func loadCachedProfile() {
+        guard let profileData = UserDefaults.standard.data(forKey: "nostrUserProfile") else { return }
+
+        do {
+            let decoder = JSONDecoder()
+            currentProfile = try decoder.decode(Profile.self, from: profileData)
+        } catch {
+            print("Failed to decode cached profile: \(error)")
+        }
+
+        // Load follow list
+        if let followData = UserDefaults.standard.data(forKey: "nostrUserFollowList") {
+            do {
+                let decoder = JSONDecoder()
+                followList = try decoder.decode([String].self, from: followData)
+            } catch {
+                print("Failed to decode cached follow list: \(error)")
+            }
+        }
+    }
+
+    private func saveProfileToCache(_ profile: Profile) {
+        do {
+            let encoder = JSONEncoder()
+            let data = try encoder.encode(profile)
+            UserDefaults.standard.set(data, forKey: "nostrUserProfile")
+        } catch {
+            print("Failed to encode profile: \(error)")
+        }
+    }
+
+    private func saveFollowListToCache(_ follows: [String]) {
+        do {
+            let encoder = JSONEncoder()
+            let data = try encoder.encode(follows)
+            UserDefaults.standard.set(data, forKey: "nostrUserFollowList")
+        } catch {
+            print("Failed to encode follow list: \(error)")
         }
     }
 
@@ -107,6 +154,12 @@ class NostrAuthManager: ObservableObject {
     func fetchUserData() {
         guard let user = currentUser else { return }
 
+        // Don't fetch if already loading
+        guard !isLoadingProfile else {
+            print("⚠️ Already loading profile, skipping fetch")
+            return
+        }
+
         isLoadingProfile = true
         errorMessage = nil
 
@@ -115,6 +168,7 @@ class NostrAuthManager: ObservableObject {
             DispatchQueue.main.async {
                 self?.currentProfile = profile
                 self?.isLoadingProfile = false
+                self?.saveProfileToCache(profile)
             }
         }
 
@@ -122,6 +176,17 @@ class NostrAuthManager: ObservableObject {
         nostrClient.onFollowListReceived = { [weak self] follows in
             DispatchQueue.main.async {
                 self?.followList = follows
+                self?.saveFollowListToCache(follows)
+            }
+        }
+
+        // Set a timeout to stop loading after 10 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) { [weak self] in
+            guard let self = self else { return }
+            if self.isLoadingProfile {
+                print("⚠️ Profile fetch timed out")
+                self.isLoadingProfile = false
+                self.errorMessage = "Failed to load profile. Using cached data if available."
             }
         }
 
@@ -137,6 +202,8 @@ class NostrAuthManager: ObservableObject {
         // Clear UserDefaults
         UserDefaults.standard.removeObject(forKey: userDefaultsKey)
         UserDefaults.standard.removeObject(forKey: "nostrUserPubkey")
+        UserDefaults.standard.removeObject(forKey: "nostrUserProfile")
+        UserDefaults.standard.removeObject(forKey: "nostrUserFollowList")
 
         // Clear state
         currentUser = nil

@@ -31,6 +31,10 @@ class NostrClient {
     var onFollowListReceived: (([String]) -> Void)?
     
     func getProfile(for pubkey: String) -> Profile? {
+        guard !pubkey.isEmpty else {
+            print("⚠️ getProfile called with empty pubkey")
+            return nil
+        }
         return profiles[pubkey]
     }
 
