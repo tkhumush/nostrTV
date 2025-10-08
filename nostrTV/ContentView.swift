@@ -169,10 +169,12 @@ struct StreamRowView: View {
 
 struct ContentView: View {
     @StateObject var viewModel = StreamViewModel()
+    @EnvironmentObject var authManager: NostrAuthManager
     @State private var selectedStreamURL: URL?
     @State private var showPlayer = false
     @State private var player: AVPlayer?
     @State private var selectedLightningAddress: String?
+    @State private var showProfilePage = false
 
     var body: some View {
         NavigationView {
@@ -192,6 +194,43 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("Live Streams")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {
+                        showProfilePage = true
+                    }) {
+                        HStack(spacing: 8) {
+                            // Profile picture
+                            if let pictureURL = authManager.currentProfile?.picture,
+                               let url = URL(string: pictureURL) {
+                                AsyncImage(url: url) { image in
+                                    image
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                        .frame(width: 32, height: 32)
+                                        .clipShape(Circle())
+                                } placeholder: {
+                                    Circle()
+                                        .fill(Color.gray)
+                                        .frame(width: 32, height: 32)
+                                }
+                            } else {
+                                Circle()
+                                    .fill(Color.blue)
+                                    .frame(width: 32, height: 32)
+                                    .overlay(
+                                        Image(systemName: "person.fill")
+                                            .foregroundColor(.white)
+                                            .font(.system(size: 16))
+                                    )
+                            }
+                            Image(systemName: "gear")
+                                .font(.system(size: 20))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
         .ignoresSafeArea()
         .fullScreenCover(isPresented: $showPlayer) {
@@ -199,6 +238,9 @@ struct ContentView: View {
                 VideoPlayerView(player: player, lightningAddress: selectedLightningAddress)
                     .ignoresSafeArea()
             }
+        }
+        .fullScreenCover(isPresented: $showProfilePage) {
+            ProfileSettingsView(authManager: authManager, isPresented: $showProfilePage)
         }
         .onChange(of: showPlayer) { oldValue, newValue in
             if oldValue == true && newValue == false {
