@@ -131,8 +131,9 @@ class NostrAuthManager: ObservableObject {
                         // Update state
                         self.currentUser = UserSession(nip05: nip05, hexPubkey: pubkey)
 
-                        // Fetch profile and follow list
-                        self.fetchUserData()
+                        // Keep isLoadingProfile true and fetch profile data
+                        // Don't set isLoadingProfile to false here - let fetchUserData manage it
+                        self.fetchUserData(force: true)
                     }
                 } else {
                     DispatchQueue.main.async {
@@ -151,11 +152,11 @@ class NostrAuthManager: ObservableObject {
         task.resume()
     }
 
-    func fetchUserData() {
+    func fetchUserData(force: Bool = false) {
         guard let user = currentUser else { return }
 
-        // Don't fetch if already loading
-        guard !isLoadingProfile else {
+        // Don't fetch if already loading (unless forced during initial login)
+        guard force || !isLoadingProfile else {
             print("⚠️ Already loading profile, skipping fetch")
             return
         }
