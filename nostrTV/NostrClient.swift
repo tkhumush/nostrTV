@@ -27,6 +27,8 @@ class NostrClient {
     private var session: URLSession!
 
     var onStreamReceived: ((Stream) -> Void)?
+    var onProfileReceived: ((Profile) -> Void)?
+    var onFollowListReceived: (([String]) -> Void)?
     
     func getProfile(for pubkey: String) -> Profile? {
         return profiles[pubkey]
@@ -150,10 +152,12 @@ class NostrClient {
             print("⚠️ Event message does not contain expected event data")
             return
         }
-        
+
         switch kind {
         case 0:
             handleProfileEvent(eventDict)
+        case 3:
+            handleFollowListEvent(eventDict)
         case 30311:
             handleStreamEvent(eventDict)
         default:
@@ -241,14 +245,14 @@ class NostrClient {
             print("⚠️ Profile event missing required fields")
             return
         }
-        
+
         // Parse the content as JSON
         guard let data = content.data(using: .utf8),
               let profileData = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             print("⚠️ Profile content is not valid JSON")
             return
         }
-        
+
         // Create profile object
         let profile = Profile(
             pubkey: pubkey,
@@ -259,10 +263,40 @@ class NostrClient {
             nip05: profileData["nip05"] as? String,
             lud16: profileData["lud16"] as? String
         )
-        
+
         // Store profile
         self.profiles[pubkey] = profile
         print("👤 Profile updated for pubkey: \(pubkey)")
+
+        // Notify callback if set
+        DispatchQueue.main.async {
+            self.onProfileReceived?(profile)
+        }
+    }
+
+    private func handleFollowListEvent(_ eventDict: [String: Any]) {
+        guard let tagsAny = eventDict["tags"] as? [[Any]] else {
+            print("⚠️ Follow list event does not contain tags")
+            return
+        }
+
+        // Extract all "p" tags which represent followed pubkeys
+        var follows: [String] = []
+        for tag in tagsAny {
+            guard let tagKey = tag.first as? String, tagKey == "p",
+                  tag.count > 1,
+                  let pubkey = tag[1] as? String else {
+                continue
+            }
+            follows.append(pubkey)
+        }
+
+        print("📋 Follow list received with \(follows.count) follows")
+
+        // Notify callback
+        DispatchQueue.main.async {
+            self.onFollowListReceived?(follows)
+        }
     }
     
     private func requestProfile(for pubkey: String) {
@@ -279,6 +313,43 @@ class NostrClient {
         }
     }
     
+    func connectAndFetchUserData(pubkey: String) {
+        session = URLSession(configuration: .default)
+        let relayURLs = [
+            URL(string: "wss://relay.snort.social")!,
+            URL(string: "wss://relay.tunestr.io")!,
+            URL(string: "wss://relay.damus.io")!,
+            URL(string: "wss://relay.primal.net")!,
+            URL(string: "wss://purplepag.es")!
+        ]
+
+        for url in relayURLs {
+            let task = session.webSocketTask(with: url)
+            webSocketTasks[url] = task
+            task.resume()
+            print("🔌 Connecting to relay \(url) for user data...")
+
+            // Request user profile (kind 0)
+            let profileReq: [Any] = [
+                "REQ",
+                "user-profile",
+                ["kinds": [0], "authors": [pubkey], "limit": 1]
+            ]
+            sendJSON(profileReq, on: task)
+
+            // Request follow list (kind 3)
+            let followReq: [Any] = [
+                "REQ",
+                "user-follows",
+                ["kinds": [3], "authors": [pubkey], "limit": 1]
+            ]
+            sendJSON(followReq, on: task)
+
+            // Listen for messages
+            listen(on: task, from: url)
+        }
+    }
+
     func disconnect() {
         for (_, task) in webSocketTasks {
             task.cancel(with: .goingAway, reason: nil)

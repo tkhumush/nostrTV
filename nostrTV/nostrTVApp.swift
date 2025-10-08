@@ -9,9 +9,20 @@ import SwiftUI
 
 @main
 struct StreamViewerApp: App {
+    @StateObject private var authManager = NostrAuthManager()
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            if authManager.isAuthenticated {
+                ContentView()
+                    .environmentObject(authManager)
+            } else if authManager.currentUser != nil {
+                // User has entered npub but hasn't logged in yet
+                ProfileConfirmationView(authManager: authManager)
+            } else {
+                // No user, show welcome screen
+                WelcomeView(authManager: authManager)
+            }
         }
     }
 }
