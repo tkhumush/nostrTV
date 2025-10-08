@@ -38,9 +38,6 @@ struct StreamRowView: View {
 
     var body: some View {
         Button(action: {
-            // Only allow playback for live streams
-            guard stream.isLive else { return }
-
             if let url = URL(string: stream.streaming_url) {
                 let lightningAddress: String? = {
                     if let pubkey = stream.pubkey, let profile = viewModel.getProfile(for: pubkey) {
@@ -162,7 +159,6 @@ struct StreamRowView: View {
                 Spacer()
             }
         }
-        .disabled(!stream.isLive) // Disable button for ended streams
         .opacity(stream.isLive ? 1.0 : 0.6) // Dim ended streams
     }
 }
