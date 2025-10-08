@@ -242,6 +242,14 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $showProfilePage) {
             ProfileSettingsView(authManager: authManager, isPresented: $showProfilePage)
         }
+        .onAppear {
+            // Update follow list when view appears
+            viewModel.updateFollowList(authManager.followList)
+        }
+        .onChange(of: authManager.followList) { oldValue, newValue in
+            // Update filter when follow list changes
+            viewModel.updateFollowList(newValue)
+        }
         .onChange(of: showPlayer) { oldValue, newValue in
             if oldValue == true && newValue == false {
                 player?.pause()

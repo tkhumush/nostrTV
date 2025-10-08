@@ -61,7 +61,7 @@ class NostrClient {
                 ["kinds": [30311], "limit": 50]
             ]
             sendJSON(streamReq, on: task)
-            
+
             // Listen for messages
             listen(on: task, from: url)
         }
@@ -200,6 +200,7 @@ class NostrClient {
             print("ℹ️ Stream missing required streamID")
             return
         }
+
 
         let combinedTitle: String = {
             if let title = title, !title.isEmpty {
