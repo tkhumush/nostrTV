@@ -196,30 +196,9 @@ struct ContentView: View {
                         showProfilePage = true
                     }) {
                         HStack(spacing: 8) {
-                            // Profile picture
-                            if let pictureURL = authManager.currentProfile?.picture,
-                               let url = URL(string: pictureURL) {
-                                AsyncImage(url: url) { image in
-                                    image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fill)
-                                        .frame(width: 32, height: 32)
-                                        .clipShape(Circle())
-                                } placeholder: {
-                                    Circle()
-                                        .fill(Color.gray)
-                                        .frame(width: 32, height: 32)
-                                }
-                            } else {
-                                Circle()
-                                    .fill(Color.blue)
-                                    .frame(width: 32, height: 32)
-                                    .overlay(
-                                        Image(systemName: "person.fill")
-                                            .foregroundColor(.white)
-                                            .font(.system(size: 16))
-                                    )
-                            }
+                            // Standard user profile icon
+                            Image(systemName: "person.circle.fill")
+                                .font(.system(size: 32))
                             Image(systemName: "gear")
                                 .font(.system(size: 20))
                         }
