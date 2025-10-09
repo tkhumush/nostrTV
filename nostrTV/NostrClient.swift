@@ -24,11 +24,14 @@ struct NostrProfile: Codable {
 class NostrClient {
     private var webSocketTasks: [URL: URLSessionWebSocketTask] = [:]
     private var profiles: [String: Profile] = [:] // pubkey -> Profile
+    private var followListEvents: [String: (timestamp: Int, follows: [String])] = [:] // pubkey -> (created_at, follows)
+    private var userRelays: [String] = [] // User's relay list from NIP-65 (kind 10002) or kind 3
     private var session: URLSession!
 
     var onStreamReceived: ((Stream) -> Void)?
     var onProfileReceived: ((Profile) -> Void)?
     var onFollowListReceived: (([String]) -> Void)?
+    var onUserRelaysReceived: (([String]) -> Void)?
     
     func getProfile(for pubkey: String) -> Profile? {
         guard !pubkey.isEmpty else {
@@ -162,6 +165,8 @@ class NostrClient {
             handleProfileEvent(eventDict)
         case 3:
             handleFollowListEvent(eventDict)
+        case 10002:
+            handleRelayListEvent(eventDict)
         case 30311:
             handleStreamEvent(eventDict)
         default:
@@ -280,9 +285,20 @@ class NostrClient {
     }
 
     private func handleFollowListEvent(_ eventDict: [String: Any]) {
-        guard let tagsAny = eventDict["tags"] as? [[Any]] else {
-            print("⚠️ Follow list event does not contain tags")
+        guard let tagsAny = eventDict["tags"] as? [[Any]],
+              let pubkey = eventDict["pubkey"] as? String,
+              let createdAt = eventDict["created_at"] as? Int else {
+            print("⚠️ Follow list event missing required fields")
             return
+        }
+
+        // Check if we already have a follow list for this pubkey
+        if let existing = followListEvents[pubkey] {
+            // Only process if this event is newer
+            if createdAt <= existing.timestamp {
+                print("⏭️ Skipping older follow list event (existing: \(existing.timestamp), received: \(createdAt))")
+                return
+            }
         }
 
         // Extract all "p" tags which represent followed pubkeys
@@ -290,17 +306,81 @@ class NostrClient {
         for tag in tagsAny {
             guard let tagKey = tag.first as? String, tagKey == "p",
                   tag.count > 1,
-                  let pubkey = tag[1] as? String else {
+                  let followedPubkey = tag[1] as? String else {
                 continue
             }
-            follows.append(pubkey)
+            follows.append(followedPubkey)
         }
 
-        print("📋 Follow list received with \(follows.count) follows")
+        print("📋 Follow list received for \(pubkey.prefix(8))... with \(follows.count) follows (timestamp: \(createdAt))")
+
+        // Store the most recent follow list
+        followListEvents[pubkey] = (timestamp: createdAt, follows: follows)
+
+        // Extract relay list from content field (fallback if NIP-65 not available)
+        if userRelays.isEmpty, let content = eventDict["content"] as? String, !content.isEmpty {
+            extractRelaysFromKind3Content(content)
+        }
 
         // Notify callback
         DispatchQueue.main.async {
             self.onFollowListReceived?(follows)
+        }
+    }
+
+    private func extractRelaysFromKind3Content(_ content: String) {
+        // Kind 3 content can contain a JSON object with relay URLs
+        guard let data = content.data(using: .utf8),
+              let relayDict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+
+        // Extract relay URLs from the dictionary keys
+        var relays: [String] = []
+        for (relayURL, _) in relayDict {
+            // Validate that it looks like a WebSocket URL
+            if relayURL.hasPrefix("wss://") || relayURL.hasPrefix("ws://") {
+                relays.append(relayURL)
+            }
+        }
+
+        if !relays.isEmpty {
+            print("🔗 Extracted \(relays.count) relays from kind 3 content")
+            userRelays = relays
+
+            DispatchQueue.main.async {
+                self.onUserRelaysReceived?(relays)
+            }
+        }
+    }
+
+    private func handleRelayListEvent(_ eventDict: [String: Any]) {
+        guard let tagsAny = eventDict["tags"] as? [[Any]] else {
+            print("⚠️ Relay list event does not contain tags")
+            return
+        }
+
+        // Extract all "r" tags which represent relay URLs (NIP-65)
+        var relays: [String] = []
+        for tag in tagsAny {
+            guard let tagKey = tag.first as? String, tagKey == "r",
+                  tag.count > 1,
+                  let relayURL = tag[1] as? String else {
+                continue
+            }
+            // Validate WebSocket URL
+            if relayURL.hasPrefix("wss://") || relayURL.hasPrefix("ws://") {
+                relays.append(relayURL)
+            }
+        }
+
+        if !relays.isEmpty {
+            print("🔗 Relay list (NIP-65) received with \(relays.count) relays")
+            userRelays = relays
+
+            DispatchQueue.main.async {
+                self.onUserRelaysReceived?(relays)
+            }
         }
     }
     
@@ -320,7 +400,9 @@ class NostrClient {
     
     func connectAndFetchUserData(pubkey: String) {
         session = URLSession(configuration: .default)
-        let relayURLs = [
+
+        // Phase 1: Connect to default relays to fetch user's relay list
+        let defaultRelayURLs = [
             URL(string: "wss://relay.snort.social")!,
             URL(string: "wss://relay.tunestr.io")!,
             URL(string: "wss://relay.damus.io")!,
@@ -328,11 +410,19 @@ class NostrClient {
             URL(string: "wss://purplepag.es")!
         ]
 
-        for url in relayURLs {
+        for url in defaultRelayURLs {
             let task = session.webSocketTask(with: url)
             webSocketTasks[url] = task
             task.resume()
             print("🔌 Connecting to relay \(url) for user data...")
+
+            // Request user's relay list (NIP-65, kind 10002) - highest priority
+            let relayListReq: [Any] = [
+                "REQ",
+                "user-relays",
+                ["kinds": [10002], "authors": [pubkey], "limit": 1]
+            ]
+            sendJSON(relayListReq, on: task)
 
             // Request user profile (kind 0)
             let profileReq: [Any] = [
@@ -342,11 +432,81 @@ class NostrClient {
             ]
             sendJSON(profileReq, on: task)
 
-            // Request follow list (kind 3)
+            // Request follow list (kind 3) - also contains relay info in content
+            // Request multiple events to ensure we get the most recent one across relays
             let followReq: [Any] = [
                 "REQ",
                 "user-follows",
-                ["kinds": [3], "authors": [pubkey], "limit": 1]
+                ["kinds": [3], "authors": [pubkey], "limit": 10]
+            ]
+            sendJSON(followReq, on: task)
+
+            // Listen for messages
+            listen(on: task, from: url)
+        }
+
+        // Phase 2: After receiving relay list, reconnect using user's relays
+        // This happens automatically via the callback when relays are received
+        setupRelayListCallback(pubkey: pubkey)
+    }
+
+    private func setupRelayListCallback(pubkey: String) {
+        // Set up a one-time callback to reconnect with user's relays
+        var hasReconnected = false
+
+        let originalCallback = onUserRelaysReceived
+        onUserRelaysReceived = { [weak self] relays in
+            guard let self = self, !hasReconnected else {
+                originalCallback?(relays)
+                return
+            }
+            hasReconnected = true
+
+            // Call original callback first
+            originalCallback?(relays)
+
+            print("🔄 Reconnecting to user's \(relays.count) personal relays...")
+
+            // Disconnect from default relays
+            self.disconnect()
+
+            // Wait a brief moment before reconnecting
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.connectToUserRelays(pubkey: pubkey, relays: relays)
+            }
+        }
+    }
+
+    private func connectToUserRelays(pubkey: String, relays: [String]) {
+        session = URLSession(configuration: .default)
+
+        // Convert relay strings to URLs and connect
+        let relayURLs = relays.compactMap { URL(string: $0) }
+
+        guard !relayURLs.isEmpty else {
+            print("⚠️ No valid relay URLs found, staying with default relays")
+            return
+        }
+
+        for url in relayURLs {
+            let task = session.webSocketTask(with: url)
+            webSocketTasks[url] = task
+            task.resume()
+            print("🔌 Connecting to user's relay \(url)...")
+
+            // Request user profile (kind 0) again from user's relays
+            let profileReq: [Any] = [
+                "REQ",
+                "user-profile-personal",
+                ["kinds": [0], "authors": [pubkey], "limit": 1]
+            ]
+            sendJSON(profileReq, on: task)
+
+            // Request follow list (kind 3) from user's relays - most likely to have latest
+            let followReq: [Any] = [
+                "REQ",
+                "user-follows-personal",
+                ["kinds": [3], "authors": [pubkey], "limit": 10]
             ]
             sendJSON(followReq, on: task)
 
