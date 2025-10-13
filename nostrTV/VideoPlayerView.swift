@@ -102,9 +102,12 @@ class CustomAVPlayerViewController: AVPlayerViewController {
         super.viewDidAppear(animated)
         UIApplication.shared.isIdleTimerDisabled = true
 
-        // Initialize LiveActivityManager with the shared NostrClient
+        // Initialize LiveActivityManager with the shared NostrClient (which has active connections)
         if let nostrClient = nostrClient {
             liveActivityManager = LiveActivityManager(nostrClient: nostrClient)
+
+            print("🔌 LiveActivityManager initialized with NostrClient")
+            print("   WebSocket connections available: \(nostrClient)")
         }
 
         // Announce joining the stream
@@ -117,7 +120,7 @@ class CustomAVPlayerViewController: AVPlayerViewController {
                     // Start periodic presence updates (every 30 seconds)
                     startPresenceUpdates()
                 } catch {
-                    print("⚠️ Failed to announce joining stream: \(error.localizedDescription)")
+                    print("❌ Error joining stream: \(error)")
                 }
             }
         }
@@ -140,7 +143,7 @@ class CustomAVPlayerViewController: AVPlayerViewController {
                     try await activityManager.leaveStream(stream)
                     // Successfully announced leaving stream
                 } catch {
-                    print("⚠️ Failed to announce leaving stream: \(error.localizedDescription)")
+                    // Failed to announce leaving stream
                 }
             }
         }
@@ -154,7 +157,7 @@ class CustomAVPlayerViewController: AVPlayerViewController {
                 do {
                     try await activityManager.updatePresence()
                 } catch {
-                    print("⚠️ Failed to update presence: \(error.localizedDescription)")
+                    // Failed to update presence
                 }
             }
         }

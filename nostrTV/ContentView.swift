@@ -184,7 +184,6 @@ struct ContentView: View {
                                 self.player = player
                                 self.selectedLightningAddress = lightningAddress
                                 self.selectedStream = selectedStream
-                                print("Selected Lightning Address: \(self.selectedLightningAddress ?? "nil")")
                                 self.showPlayer = true
                             }
                         }

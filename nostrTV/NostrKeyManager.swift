@@ -8,12 +8,15 @@ class NostrKeyManager: ObservableObject {
 
     @Published private(set) var currentKeyPair: NostrKeyPair?
     @Published private(set) var isKeyGenerated: Bool = false
+    @Published private(set) var hasPublishedProfile: Bool = false
 
     private let userDefaults = UserDefaults.standard
     private let privateKeyKey = "nostr_ephemeral_private_key"
+    private let profilePublishedKey = "nostr_ephemeral_profile_published"
 
     private init() {
         loadStoredKey()
+        hasPublishedProfile = userDefaults.bool(forKey: profilePublishedKey)
     }
 
     // MARK: - Key Generation
@@ -24,9 +27,6 @@ class NostrKeyManager: ObservableObject {
         let keyPair = try NostrKeyPair.generate()
         self.currentKeyPair = keyPair
         self.isKeyGenerated = true
-
-        print("🔑 Generated new ephemeral key pair")
-        print("   npub: \(keyPair.npub)")
     }
 
     /// Generate and save key pair to UserDefaults
@@ -44,17 +44,15 @@ class NostrKeyManager: ObservableObject {
     /// Save key pair to UserDefaults
     private func saveKeyPair(_ keyPair: NostrKeyPair) {
         userDefaults.set(keyPair.privateKeyHex, forKey: privateKeyKey)
-        print("💾 Key pair saved to storage")
     }
 
     /// Load stored key pair from UserDefaults
     private func loadStoredKey() {
         guard let privateKeyHex = userDefaults.string(forKey: privateKeyKey) else {
-            print("🔑 No stored key pair found, generating new ephemeral key pair...")
             do {
                 try generateAndSaveKeyPair(persist: true)
             } catch {
-                print("❌ Failed to generate ephemeral key pair: \(error)")
+                // Failed to generate ephemeral key pair
             }
             return
         }
@@ -63,16 +61,13 @@ class NostrKeyManager: ObservableObject {
             let keyPair = try NostrKeyPair(privateKeyHex: privateKeyHex)
             self.currentKeyPair = keyPair
             self.isKeyGenerated = true
-            print("✅ Loaded existing key pair from storage")
-            print("   npub: \(keyPair.npub)")
         } catch {
-            print("❌ Failed to load stored key pair: \(error)")
             clearStoredKey()
             // Try to generate a new one
             do {
                 try generateAndSaveKeyPair(persist: true)
             } catch {
-                print("❌ Failed to generate new key pair: \(error)")
+                // Failed to generate new key pair
             }
         }
     }
@@ -82,7 +77,6 @@ class NostrKeyManager: ObservableObject {
         userDefaults.removeObject(forKey: privateKeyKey)
         self.currentKeyPair = nil
         self.isKeyGenerated = false
-        print("Cleared stored key pair")
     }
 
     // MARK: - Import Keys
@@ -96,9 +90,6 @@ class NostrKeyManager: ObservableObject {
         if persist {
             saveKeyPair(keyPair)
         }
-
-        print("Imported key pair from nsec")
-        print("npub: \(keyPair.npub)")
     }
 
     /// Import key pair from hex private key
@@ -110,9 +101,6 @@ class NostrKeyManager: ObservableObject {
         if persist {
             saveKeyPair(keyPair)
         }
-
-        print("Imported key pair from hex")
-        print("npub: \(keyPair.npub)")
     }
 
     // MARK: - Signing
@@ -160,6 +148,64 @@ class NostrKeyManager: ObservableObject {
     /// Check if a key pair is available
     var hasKeyPair: Bool {
         return currentKeyPair != nil
+    }
+
+    // MARK: - Profile Publishing
+
+    /// Publish a profile metadata event (kind 0) for this ephemeral key
+    /// - Parameter nostrClient: The NostrClient to use for publishing
+    func publishEphemeralProfile(using nostrClient: NostrClient) throws {
+        guard let keyPair = currentKeyPair else {
+            throw NostrKeyError.invalidPrivateKey
+        }
+
+        // Generate a random bot-like name
+        let adjectives = ["Swift", "Quick", "Bright", "Silent", "Bold", "Calm", "Noble", "Wise", "Free"]
+        let nouns = ["Watcher", "Viewer", "Observer", "Guest", "Visitor", "Traveler", "Wanderer"]
+        let randomAdjective = adjectives.randomElement()!
+        let randomNoun = nouns.randomElement()!
+        let randomNumber = Int.random(in: 100...999)
+        let displayName = "\(randomAdjective) \(randomNoun) \(randomNumber)"
+
+        // Create profile metadata JSON
+        let profileMetadata: [String: Any] = [
+            "name": "nostrtv_\(randomNumber)",
+            "display_name": displayName,
+            "about": "Ephemeral nostrTV viewer",
+            "picture": "https://api.dicebear.com/7.x/bottts/svg?seed=\(keyPair.publicKeyHex)"
+        ]
+
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: profileMetadata),
+              let jsonString = String(data: jsonData, encoding: .utf8) else {
+            throw NostrKeyError.signingFailed
+        }
+
+        // Create and sign the profile event (kind 0)
+        let profileEvent = try nostrClient.createSignedEvent(
+            kind: 0,
+            content: jsonString,
+            tags: [],
+            using: keyPair
+        )
+
+        // Publish to relays
+        try nostrClient.publishEvent(profileEvent)
+
+        // Mark as published
+        userDefaults.set(true, forKey: profilePublishedKey)
+        hasPublishedProfile = true
+
+        print("\n" + String(repeating: "=", count: 80))
+        print("📝 EPHEMERAL PROFILE PUBLISHED")
+        print(String(repeating: "=", count: 80))
+        print("Display Name: \(displayName)")
+        print("Username:     nostrtv_\(randomNumber)")
+        print("About:        Ephemeral nostrTV viewer")
+        print("npub:         \(keyPair.npub)")
+        print("Pubkey (hex): \(keyPair.publicKeyHex)")
+        print("Profile JSON:")
+        print(jsonString)
+        print(String(repeating: "=", count: 80) + "\n")
     }
 }
 

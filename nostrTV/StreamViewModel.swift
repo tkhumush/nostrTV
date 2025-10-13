@@ -141,7 +141,6 @@ class StreamViewModel: ObservableObject {
         guard !stream.streaming_url.hasPrefix("ended://") else { return }
 
         guard let url = URL(string: stream.streaming_url) else {
-            print("⚠️ Invalid stream URL: \(stream.streaming_url)")
             removeInvalidStream(stream)
             return
         }

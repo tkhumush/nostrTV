@@ -47,7 +47,6 @@ class NostrClient {
     
     func getProfile(for pubkey: String) -> Profile? {
         guard !pubkey.isEmpty else {
-            print("⚠️ getProfile called with empty pubkey")
             return nil
         }
         return profiles[pubkey]
@@ -67,7 +66,6 @@ class NostrClient {
             let task = session.webSocketTask(with: url)
             webSocketTasks[url] = task
             task.resume()
-            print("🔌 Connecting to relay \(url)...")
 
             // Request live streams
             let streamReq: [Any] = [
@@ -85,15 +83,11 @@ class NostrClient {
     private func sendJSON(_ message: [Any], on task: URLSessionWebSocketTask, relayURL: URL) {
         guard let data = try? JSONSerialization.data(withJSONObject: message),
               let jsonString = String(data: data, encoding: .utf8) else {
-            print("❌ Failed to serialize message to JSON")
             return
         }
 
         task.send(.string(jsonString)) { error in
-            if let error = error {
-                print("❌ WebSocket send error: \(error)")
-            }
-            // Message sent successfully (removed verbose logging)
+            // Error handling silently
         }
     }
 
@@ -102,11 +96,10 @@ class NostrClient {
             guard let self = self else { return }
 
             switch result {
-            case .failure(let error):
-                print("❌ WebSocket receive error from \(relayURL): \(error)")
+            case .failure:
+                break
             case .success(let message):
                 if case let .string(text) = message {
-                    // Received message (removed verbose logging)
                     self.handleMessage(text)
                 }
                 self.listen(on: task, from: relayURL)
@@ -146,7 +139,6 @@ class NostrClient {
               let json = try? JSONSerialization.jsonObject(with: data) as? [Any],
               json.count >= 2,
               let messageType = json[0] as? String else {
-            print("⚠️ Message does not contain expected data format")
             return
         }
 
@@ -161,20 +153,26 @@ class NostrClient {
             // End of stored events (silent)
             break
         case "OK":
+            // Handle relay response to our published events
             if json.count >= 3 {
                 let eventId = json[1] as? String ?? "unknown"
                 let accepted = json[2] as? Bool ?? false
                 let message = json.count >= 4 ? (json[3] as? String ?? "") : ""
+
                 if accepted {
-                    print("✅ Event accepted by relay: \(eventId.prefix(8))...")
+                    print("✅ Relay accepted event: \(eventId.prefix(8))...")
                 } else {
-                    print("❌ Event rejected by relay: \(eventId.prefix(8))... - \(message)")
+                    print("❌ Relay rejected event: \(eventId.prefix(8))...")
+                    print("   Reason: \(message)")
                 }
             }
+            break
         case "NOTICE":
+            // Relay notice
             if json.count >= 2, let notice = json[1] as? String {
                 print("📢 Relay notice: \(notice)")
             }
+            break
         default:
             break
         }
@@ -183,7 +181,6 @@ class NostrClient {
     private func handleEvent(_ json: [Any]) {
         guard let eventDict = json[2] as? [String: Any],
               let kind = eventDict["kind"] as? Int else {
-            print("⚠️ Event message does not contain expected event data")
             return
         }
 
@@ -197,13 +194,12 @@ class NostrClient {
         case 30311:
             handleStreamEvent(eventDict)
         default:
-            print("ℹ️ Ignoring event kind: \(kind)")
+            break
         }
     }
     
     private func handleStreamEvent(_ eventDict: [String: Any]) {
         guard let tagsAny = eventDict["tags"] as? [[Any]] else {
-            print("⚠️ Stream event does not contain tags")
             return
         }
 
@@ -229,7 +225,6 @@ class NostrClient {
 
         // Only require streamID for processing
         guard let streamID = streamID else {
-            print("ℹ️ Stream missing required streamID")
             return
         }
 
@@ -279,14 +274,12 @@ class NostrClient {
     private func handleProfileEvent(_ eventDict: [String: Any]) {
         guard let pubkey = eventDict["pubkey"] as? String,
               let content = eventDict["content"] as? String else {
-            print("⚠️ Profile event missing required fields")
             return
         }
 
         // Parse the content as JSON
         guard let data = content.data(using: .utf8),
               let profileData = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            print("⚠️ Profile content is not valid JSON")
             return
         }
 
@@ -315,7 +308,6 @@ class NostrClient {
         guard let tagsAny = eventDict["tags"] as? [[Any]],
               let pubkey = eventDict["pubkey"] as? String,
               let createdAt = eventDict["created_at"] as? Int else {
-            print("⚠️ Follow list event missing required fields")
             return
         }
 
@@ -383,7 +375,6 @@ class NostrClient {
 
     private func handleRelayListEvent(_ eventDict: [String: Any]) {
         guard let tagsAny = eventDict["tags"] as? [[Any]] else {
-            print("⚠️ Relay list event does not contain tags")
             return
         }
 
@@ -441,7 +432,6 @@ class NostrClient {
             let task = session.webSocketTask(with: url)
             webSocketTasks[url] = task
             task.resume()
-            print("🔌 Connecting to relay \(url) for user data...")
 
             // Request user's relay list (NIP-65, kind 10002) - highest priority
             let relayListReq: [Any] = [
@@ -511,7 +501,6 @@ class NostrClient {
         let relayURLs = relays.compactMap { URL(string: $0) }
 
         guard !relayURLs.isEmpty else {
-            print("⚠️ No valid relay URLs found, staying with default relays")
             return
         }
 
@@ -519,7 +508,6 @@ class NostrClient {
             let task = session.webSocketTask(with: url)
             webSocketTasks[url] = task
             task.resume()
-            print("🔌 Connecting to user's relay \(url)...")
 
             // Request user profile (kind 0) again from user's relays
             let profileReq: [Any] = [
@@ -583,9 +571,6 @@ class NostrClient {
             throw NostrEventError.serializationFailed
         }
 
-        // Debug: print the JSON being hashed
-        print("🔍 JSON for hashing: \(jsonString)")
-
         // Hash the serialized event
         let eventHash = jsonString.data(using: .utf8)!.sha256()
         let eventId = eventHash.hexString
@@ -631,16 +616,20 @@ class NostrClient {
 
         let message: [Any] = ["EVENT", eventDict]
 
-        // Debug: Show the event being published
-        if let debugData = try? JSONSerialization.data(withJSONObject: eventDict, options: .prettyPrinted),
-           let debugString = String(data: debugData, encoding: .utf8) {
-            print("📤 Publishing event object:\n\(debugString)")
+        // Log relay connections
+        print("📡 Publishing to \(webSocketTasks.count) relay(s):")
+        for (url, _) in webSocketTasks {
+            print("   - \(url)")
         }
 
         // Send to all connected relays
         for (url, task) in webSocketTasks {
             sendJSON(message, on: task, relayURL: url)
-            // Publishing event (removed verbose logging)
+            print("   ✓ Sent to \(url)")
+        }
+
+        if webSocketTasks.isEmpty {
+            print("⚠️ WARNING: No WebSocket connections available!")
         }
     }
 

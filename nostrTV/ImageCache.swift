@@ -50,7 +50,7 @@ actor ImageCache {
                     return image
                 }
             } catch {
-                print("Failed to load image from \(url): \(error)")
+                // Failed to load image
             }
             return nil
         }
