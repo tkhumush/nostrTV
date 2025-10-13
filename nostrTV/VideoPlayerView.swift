@@ -12,15 +12,21 @@ import CoreImage.CIFilterBuiltins
 struct VideoPlayerView: UIViewControllerRepresentable {
     let player: AVPlayer
     let lightningAddress: String?
+    let stream: Stream?
+    let nostrClient: NostrClient
 
-    init(player: AVPlayer, lightningAddress: String? = nil) {
+    init(player: AVPlayer, lightningAddress: String? = nil, stream: Stream? = nil, nostrClient: NostrClient) {
         self.player = player
         self.lightningAddress = lightningAddress
+        self.stream = stream
+        self.nostrClient = nostrClient
     }
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = CustomAVPlayerViewController()
         controller.player = player
+        controller.stream = stream  // Pass stream to controller for activity tracking
+        controller.nostrClient = nostrClient  // Pass NostrClient for publishing events
 
         if let address = lightningAddress, let qrImage = generateQRCode(from: address) {
             let qrImageView = UIImageView(image: qrImage)
@@ -86,11 +92,38 @@ struct VideoPlayerView: UIViewControllerRepresentable {
 class CustomAVPlayerViewController: AVPlayerViewController {
     private var qrCodeImageView: UIImageView?
     private var hideTimer: Timer?
+    private var presenceTimer: Timer?  // Timer for periodic presence updates
     private var gestureRecognizers: [UIGestureRecognizer] = []
+    var stream: Stream?  // Stream being watched
+    var nostrClient: NostrClient?  // NostrClient for publishing events
+    private var liveActivityManager: LiveActivityManager?
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         UIApplication.shared.isIdleTimerDisabled = true
+
+        // Initialize LiveActivityManager with the shared NostrClient (which has active connections)
+        if let nostrClient = nostrClient {
+            liveActivityManager = LiveActivityManager(nostrClient: nostrClient)
+
+            print("🔌 LiveActivityManager initialized with NostrClient")
+            print("   WebSocket connections available: \(nostrClient)")
+        }
+
+        // Announce joining the stream
+        if let stream = stream, let activityManager = liveActivityManager {
+            Task {
+                do {
+                    try await activityManager.joinStreamWithConnection(stream)
+                    // Successfully announced joining stream
+
+                    // Start periodic presence updates (every 30 seconds)
+                    startPresenceUpdates()
+                } catch {
+                    print("❌ Error joining stream: \(error)")
+                }
+            }
+        }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -98,6 +131,36 @@ class CustomAVPlayerViewController: AVPlayerViewController {
         UIApplication.shared.isIdleTimerDisabled = false
         hideTimer?.invalidate()
         hideTimer = nil
+
+        // Stop presence updates
+        presenceTimer?.invalidate()
+        presenceTimer = nil
+
+        // Announce leaving the stream
+        if let stream = stream, let activityManager = liveActivityManager {
+            Task {
+                do {
+                    try await activityManager.leaveStream(stream)
+                    // Successfully announced leaving stream
+                } catch {
+                    // Failed to announce leaving stream
+                }
+            }
+        }
+    }
+
+    private func startPresenceUpdates() {
+        // Update presence every 60 seconds to show continued viewing
+        presenceTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
+            guard let self = self, let activityManager = self.liveActivityManager else { return }
+            Task {
+                do {
+                    try await activityManager.updatePresence()
+                } catch {
+                    // Failed to update presence
+                }
+            }
+        }
     }
 
     func setupQRCodeAutoHide(qrImageView: UIImageView) {

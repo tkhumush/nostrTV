@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		10DAA88C2E9C9D7200C2AF37 /* secp256k1 in Frameworks */ = {isa = PBXBuildFile; productRef = 10DAA88B2E9C9D7200C2AF37 /* secp256k1 */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		10BC75E72DBB150D00D5062B /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				10DAA88C2E9C9D7200C2AF37 /* secp256k1 in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +117,7 @@
 			);
 			name = nostrTV;
 			packageProductDependencies = (
+				10DAA88B2E9C9D7200C2AF37 /* secp256k1 */,
 			);
 			productName = nostrTV;
 			productReference = 10BC75D92DBB150C00D5062B /* nostrTV.app */;
@@ -195,6 +201,9 @@
 			);
 			mainGroup = 10BC75D02DBB150C00D5062B;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				10DAA88A2E9C9D7200C2AF37 /* XCRemoteSwiftPackageReference "secp256k1" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 10BC75DA2DBB150C00D5062B /* Products */;
 			projectDirPath = "";
@@ -566,6 +575,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		10DAA88A2E9C9D7200C2AF37 /* XCRemoteSwiftPackageReference "secp256k1" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/jb55/secp256k1.swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.7.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		10DAA88B2E9C9D7200C2AF37 /* secp256k1 */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 10DAA88A2E9C9D7200C2AF37 /* XCRemoteSwiftPackageReference "secp256k1" */;
+			productName = secp256k1;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 10BC75D12DBB150C00D5062B /* Project object */;
 }

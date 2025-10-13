@@ -14,6 +14,11 @@ class StreamViewModel: ObservableObject {
     private var followList: [String] = []
     private var validationTasks: Set<String> = [] // Track ongoing validations
 
+    /// Expose the NostrClient for use by other components
+    var client: NostrClient {
+        return nostrClient
+    }
+
     init() {
         nostrClient.onStreamReceived = { [weak self] stream in
             DispatchQueue.main.async {
@@ -136,13 +141,12 @@ class StreamViewModel: ObservableObject {
         guard !stream.streaming_url.hasPrefix("ended://") else { return }
 
         guard let url = URL(string: stream.streaming_url) else {
-            print("⚠️ Invalid stream URL: \(stream.streaming_url)")
             removeInvalidStream(stream)
             return
         }
 
         validationTasks.insert(stream.streamID)
-        print("🔍 Validating stream: \(stream.title) - URL: \(stream.streaming_url)")
+        // Validating stream (removed verbose logging)
 
         // Use AVAsset to validate if the URL is actually a playable stream
         Task {
@@ -157,16 +161,15 @@ class StreamViewModel: ObservableObject {
                 await MainActor.run {
                     self.validationTasks.remove(stream.streamID)
                     if !isPlayable {
-                        print("❌ Stream not playable: \(stream.title)")
+                        // Stream not playable (removed verbose logging)
                         self.removeInvalidStream(stream)
-                    } else {
-                        print("✅ Stream validated as playable: \(stream.title)")
                     }
+                    // Stream validated (removed verbose logging)
                 }
             } catch {
                 await MainActor.run {
                     self.validationTasks.remove(stream.streamID)
-                    print("❌ Stream validation failed: \(stream.title) - \(error.localizedDescription)")
+                    // Stream validation failed (removed verbose logging)
                     self.removeInvalidStream(stream)
                 }
             }

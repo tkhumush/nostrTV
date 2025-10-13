@@ -41,7 +41,7 @@ class NostrAuthManager: ObservableObject {
             let decoder = JSONDecoder()
             currentProfile = try decoder.decode(Profile.self, from: profileData)
         } catch {
-            print("Failed to decode cached profile: \(error)")
+            // Failed to decode cached profile
         }
 
         // Load follow list
@@ -50,7 +50,7 @@ class NostrAuthManager: ObservableObject {
                 let decoder = JSONDecoder()
                 followList = try decoder.decode([String].self, from: followData)
             } catch {
-                print("Failed to decode cached follow list: \(error)")
+                // Failed to decode cached follow list
             }
         }
     }
@@ -61,7 +61,7 @@ class NostrAuthManager: ObservableObject {
             let data = try encoder.encode(profile)
             UserDefaults.standard.set(data, forKey: "nostrUserProfile")
         } catch {
-            print("Failed to encode profile: \(error)")
+            // Failed to encode profile
         }
     }
 
@@ -71,7 +71,7 @@ class NostrAuthManager: ObservableObject {
             let data = try encoder.encode(follows)
             UserDefaults.standard.set(data, forKey: "nostrUserFollowList")
         } catch {
-            print("Failed to encode follow list: \(error)")
+            // Failed to encode follow list
         }
     }
 
@@ -157,7 +157,6 @@ class NostrAuthManager: ObservableObject {
 
         // Don't fetch if already loading (unless forced during initial login)
         guard force || !isLoadingProfile else {
-            print("⚠️ Already loading profile, skipping fetch")
             return
         }
 
@@ -185,7 +184,6 @@ class NostrAuthManager: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) { [weak self] in
             guard let self = self else { return }
             if self.isLoadingProfile {
-                print("⚠️ Profile fetch timed out")
                 self.isLoadingProfile = false
                 self.errorMessage = "Failed to load profile. Using cached data if available."
             }

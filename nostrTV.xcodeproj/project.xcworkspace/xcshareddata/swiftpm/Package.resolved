@@ -1,0 +1,15 @@
+{
+  "originHash" : "b6107c43fa3fe5c7bb6a3483fc176cf93e072d290ad2279dd9d3841ad9b6378a",
+  "pins" : [
+    {
+      "identity" : "secp256k1.swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/jb55/secp256k1.swift",
+      "state" : {
+        "revision" : "1a796f738bdcd84b41d05f92593188b23163e60b",
+        "version" : "0.7.0"
+      }
+    }
+  ],
+  "version" : 3
+}

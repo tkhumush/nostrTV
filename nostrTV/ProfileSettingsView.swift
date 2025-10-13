@@ -129,7 +129,6 @@ struct ProfileSettingsView: View {
         .onAppear {
             // If profile is not loaded but user is authenticated, fetch it
             if authManager.currentProfile == nil && authManager.isAuthenticated {
-                print("⚠️ Profile is nil on appear, fetching user data...")
                 authManager.fetchUserData()
             }
         }

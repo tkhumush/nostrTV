@@ -6,10 +6,22 @@
 //
 
 import Foundation
+import CommonCrypto
 
 struct NostrEvent: Codable {
     let kind: Int
     let tags: [[String]]
+
+    // Full event structure for creating and signing
+    var id: String?
+    var pubkey: String?
+    var created_at: Int?
+    var content: String?
+    var sig: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, pubkey, created_at, content, kind, tags, sig
+    }
 }
 
 struct NostrProfile: Codable {
@@ -35,7 +47,6 @@ class NostrClient {
     
     func getProfile(for pubkey: String) -> Profile? {
         guard !pubkey.isEmpty else {
-            print("⚠️ getProfile called with empty pubkey")
             return nil
         }
         return profiles[pubkey]
@@ -55,7 +66,6 @@ class NostrClient {
             let task = session.webSocketTask(with: url)
             webSocketTasks[url] = task
             task.resume()
-            print("🔌 Connecting to relay \(url)...")
 
             // Request live streams
             let streamReq: [Any] = [
@@ -63,26 +73,21 @@ class NostrClient {
                 "live-streams",
                 ["kinds": [30311], "limit": 50]
             ]
-            sendJSON(streamReq, on: task)
+            sendJSON(streamReq, on: task, relayURL: url)
 
             // Listen for messages
             listen(on: task, from: url)
         }
     }
 
-    private func sendJSON(_ message: [Any], on task: URLSessionWebSocketTask) {
+    private func sendJSON(_ message: [Any], on task: URLSessionWebSocketTask, relayURL: URL) {
         guard let data = try? JSONSerialization.data(withJSONObject: message),
               let jsonString = String(data: data, encoding: .utf8) else {
-            print("❌ Failed to serialize message to JSON")
             return
         }
 
         task.send(.string(jsonString)) { error in
-            if let error = error {
-                print("❌ WebSocket send error: \(error)")
-            } else {
-                print("✅ Sent message to \(task.originalRequest?.url?.absoluteString ?? "?"): \(jsonString)")
-            }
+            // Error handling silently
         }
     }
 
@@ -91,11 +96,10 @@ class NostrClient {
             guard let self = self else { return }
 
             switch result {
-            case .failure(let error):
-                print("❌ WebSocket receive error from \(relayURL): \(error)")
+            case .failure:
+                break
             case .success(let message):
                 if case let .string(text) = message {
-                    print("⬅️ [\(relayURL)] Received message: \(text)")
                     self.handleMessage(text)
                 }
                 self.listen(on: task, from: relayURL)
@@ -133,30 +137,50 @@ class NostrClient {
     private func handleMessage(_ text: String) {
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [Any],
-              json.count >= 3 else {
-            print("⚠️ Message does not contain expected data format")
+              json.count >= 2,
+              let messageType = json[0] as? String else {
             return
         }
-        
+
         // Handle different message types
-        if let messageType = json[0] as? String {
-            switch messageType {
-            case "EVENT":
-                handleEvent(json)
-            case "EOSE":
-                print("🔚 End of stored events for subscription \(json[1] as? String ?? "unknown")")
-            case "OK":
-                print("✅ Event processed: \(json[1] as? String ?? "unknown")")
-            default:
-                print("❓ Unknown message type: \(messageType)")
+        switch messageType {
+        case "EVENT":
+            guard json.count >= 3 else {
+                return
             }
+            handleEvent(json)
+        case "EOSE":
+            // End of stored events (silent)
+            break
+        case "OK":
+            // Handle relay response to our published events
+            if json.count >= 3 {
+                let eventId = json[1] as? String ?? "unknown"
+                let accepted = json[2] as? Bool ?? false
+                let message = json.count >= 4 ? (json[3] as? String ?? "") : ""
+
+                if accepted {
+                    print("✅ Relay accepted event: \(eventId.prefix(8))...")
+                } else {
+                    print("❌ Relay rejected event: \(eventId.prefix(8))...")
+                    print("   Reason: \(message)")
+                }
+            }
+            break
+        case "NOTICE":
+            // Relay notice
+            if json.count >= 2, let notice = json[1] as? String {
+                print("📢 Relay notice: \(notice)")
+            }
+            break
+        default:
+            break
         }
     }
     
     private func handleEvent(_ json: [Any]) {
         guard let eventDict = json[2] as? [String: Any],
               let kind = eventDict["kind"] as? Int else {
-            print("⚠️ Event message does not contain expected event data")
             return
         }
 
@@ -170,13 +194,12 @@ class NostrClient {
         case 30311:
             handleStreamEvent(eventDict)
         default:
-            print("ℹ️ Ignoring event kind: \(kind)")
+            break
         }
     }
     
     private func handleStreamEvent(_ eventDict: [String: Any]) {
         guard let tagsAny = eventDict["tags"] as? [[Any]] else {
-            print("⚠️ Stream event does not contain tags")
             return
         }
 
@@ -202,7 +225,6 @@ class NostrClient {
 
         // Only require streamID for processing
         guard let streamID = streamID else {
-            print("ℹ️ Stream missing required streamID")
             return
         }
 
@@ -224,7 +246,7 @@ class NostrClient {
         // Use a placeholder URL for ended streams if no URL is provided
         let finalStreamURL = streamURL ?? "ended://\(streamID)"
 
-        print("🎥 Stream: \(combinedTitle) | Status: \(status) | URL: \(finalStreamURL) | Tags: \(allTags) | Pubkey: \(pubkey ?? "Unknown")")
+        // Stream received (removed verbose logging)
 
         // Create stream with all information
         let stream = Stream(
@@ -252,14 +274,12 @@ class NostrClient {
     private func handleProfileEvent(_ eventDict: [String: Any]) {
         guard let pubkey = eventDict["pubkey"] as? String,
               let content = eventDict["content"] as? String else {
-            print("⚠️ Profile event missing required fields")
             return
         }
 
         // Parse the content as JSON
         guard let data = content.data(using: .utf8),
               let profileData = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            print("⚠️ Profile content is not valid JSON")
             return
         }
 
@@ -276,7 +296,7 @@ class NostrClient {
 
         // Store profile
         self.profiles[pubkey] = profile
-        print("👤 Profile updated for pubkey: \(pubkey)")
+        // Profile updated (removed verbose logging)
 
         // Notify callback if set
         DispatchQueue.main.async {
@@ -288,7 +308,6 @@ class NostrClient {
         guard let tagsAny = eventDict["tags"] as? [[Any]],
               let pubkey = eventDict["pubkey"] as? String,
               let createdAt = eventDict["created_at"] as? Int else {
-            print("⚠️ Follow list event missing required fields")
             return
         }
 
@@ -296,7 +315,7 @@ class NostrClient {
         if let existing = followListEvents[pubkey] {
             // Only process if this event is newer
             if createdAt <= existing.timestamp {
-                print("⏭️ Skipping older follow list event (existing: \(existing.timestamp), received: \(createdAt))")
+                // Skipping older follow list event (silent)
                 return
             }
         }
@@ -312,7 +331,7 @@ class NostrClient {
             follows.append(followedPubkey)
         }
 
-        print("📋 Follow list received for \(pubkey.prefix(8))... with \(follows.count) follows (timestamp: \(createdAt))")
+        // Follow list received (removed verbose logging)
 
         // Store the most recent follow list
         followListEvents[pubkey] = (timestamp: createdAt, follows: follows)
@@ -345,7 +364,7 @@ class NostrClient {
         }
 
         if !relays.isEmpty {
-            print("🔗 Extracted \(relays.count) relays from kind 3 content")
+            // Extracted relays from kind 3 content (removed verbose logging)
             userRelays = relays
 
             DispatchQueue.main.async {
@@ -356,7 +375,6 @@ class NostrClient {
 
     private func handleRelayListEvent(_ eventDict: [String: Any]) {
         guard let tagsAny = eventDict["tags"] as? [[Any]] else {
-            print("⚠️ Relay list event does not contain tags")
             return
         }
 
@@ -375,7 +393,7 @@ class NostrClient {
         }
 
         if !relays.isEmpty {
-            print("🔗 Relay list (NIP-65) received with \(relays.count) relays")
+            // Relay list (NIP-65) received (removed verbose logging)
             userRelays = relays
 
             DispatchQueue.main.async {
@@ -391,10 +409,10 @@ class NostrClient {
             "profile-\(pubkey.prefix(8))", // Unique subscription ID
             ["kinds": [0], "authors": [pubkey], "limit": 1]
         ]
-        
+
         // Send to all connected relays
-        for (_, task) in webSocketTasks {
-            sendJSON(profileReq, on: task)
+        for (url, task) in webSocketTasks {
+            sendJSON(profileReq, on: task, relayURL: url)
         }
     }
     
@@ -414,7 +432,6 @@ class NostrClient {
             let task = session.webSocketTask(with: url)
             webSocketTasks[url] = task
             task.resume()
-            print("🔌 Connecting to relay \(url) for user data...")
 
             // Request user's relay list (NIP-65, kind 10002) - highest priority
             let relayListReq: [Any] = [
@@ -422,7 +439,7 @@ class NostrClient {
                 "user-relays",
                 ["kinds": [10002], "authors": [pubkey], "limit": 1]
             ]
-            sendJSON(relayListReq, on: task)
+            sendJSON(relayListReq, on: task, relayURL: url)
 
             // Request user profile (kind 0)
             let profileReq: [Any] = [
@@ -430,7 +447,7 @@ class NostrClient {
                 "user-profile",
                 ["kinds": [0], "authors": [pubkey], "limit": 1]
             ]
-            sendJSON(profileReq, on: task)
+            sendJSON(profileReq, on: task, relayURL: url)
 
             // Request follow list (kind 3) - also contains relay info in content
             // Request multiple events to ensure we get the most recent one across relays
@@ -439,7 +456,7 @@ class NostrClient {
                 "user-follows",
                 ["kinds": [3], "authors": [pubkey], "limit": 10]
             ]
-            sendJSON(followReq, on: task)
+            sendJSON(followReq, on: task, relayURL: url)
 
             // Listen for messages
             listen(on: task, from: url)
@@ -465,7 +482,7 @@ class NostrClient {
             // Call original callback first
             originalCallback?(relays)
 
-            print("🔄 Reconnecting to user's \(relays.count) personal relays...")
+            // Reconnecting to user's personal relays (removed verbose logging)
 
             // Disconnect from default relays
             self.disconnect()
@@ -484,7 +501,6 @@ class NostrClient {
         let relayURLs = relays.compactMap { URL(string: $0) }
 
         guard !relayURLs.isEmpty else {
-            print("⚠️ No valid relay URLs found, staying with default relays")
             return
         }
 
@@ -492,7 +508,6 @@ class NostrClient {
             let task = session.webSocketTask(with: url)
             webSocketTasks[url] = task
             task.resume()
-            print("🔌 Connecting to user's relay \(url)...")
 
             // Request user profile (kind 0) again from user's relays
             let profileReq: [Any] = [
@@ -500,7 +515,7 @@ class NostrClient {
                 "user-profile-personal",
                 ["kinds": [0], "authors": [pubkey], "limit": 1]
             ]
-            sendJSON(profileReq, on: task)
+            sendJSON(profileReq, on: task, relayURL: url)
 
             // Request follow list (kind 3) from user's relays - most likely to have latest
             let followReq: [Any] = [
@@ -508,7 +523,7 @@ class NostrClient {
                 "user-follows-personal",
                 ["kinds": [3], "authors": [pubkey], "limit": 10]
             ]
-            sendJSON(followReq, on: task)
+            sendJSON(followReq, on: task, relayURL: url)
 
             // Listen for messages
             listen(on: task, from: url)
@@ -520,6 +535,164 @@ class NostrClient {
             task.cancel(with: .goingAway, reason: nil)
         }
         webSocketTasks.removeAll()
-        print("🔌 Disconnected from all relays")
+        // Disconnected from all relays (removed verbose logging)
     }
+
+    // MARK: - Event Creation and Signing
+
+    /// Create a Nostr event with the given parameters
+    /// - Parameters:
+    ///   - kind: Event kind (e.g., 1 for text note, 4 for DM, etc.)
+    ///   - content: Event content
+    ///   - tags: Event tags (array of string arrays)
+    ///   - keyPair: Key pair to sign the event with
+    /// - Returns: Signed NostrEvent ready to publish
+    func createSignedEvent(kind: Int, content: String, tags: [[String]] = [], using keyPair: NostrKeyPair) throws -> NostrEvent {
+        let pubkey = keyPair.publicKeyHex
+        let created_at = Int(Date().timeIntervalSince1970)
+
+        // Create event for signing (without id and sig)
+        let eventForSigning: [Any] = [
+            0,
+            pubkey,
+            created_at,
+            kind,
+            tags,
+            content
+        ]
+
+        // Serialize to JSON for hashing with specific options
+        // NIP-01 requires compact JSON with no whitespace and specific formatting
+        guard let jsonData = try? JSONSerialization.data(
+            withJSONObject: eventForSigning,
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        ),
+              let jsonString = String(data: jsonData, encoding: .utf8) else {
+            throw NostrEventError.serializationFailed
+        }
+
+        // Hash the serialized event
+        let eventHash = jsonString.data(using: .utf8)!.sha256()
+        let eventId = eventHash.hexString
+
+        // Sign the event hash
+        let signature = try keyPair.sign(messageHash: eventHash)
+        let signatureHex = signature.hexString
+
+        // Create the full signed event
+        var event = NostrEvent(kind: kind, tags: tags)
+        event.id = eventId
+        event.pubkey = pubkey
+        event.created_at = created_at
+        event.content = content
+        event.sig = signatureHex
+
+        // Created and signed event (removed verbose logging)
+
+        return event
+    }
+
+    /// Publish a signed event to all connected relays
+    /// - Parameter event: The signed event to publish
+    func publishEvent(_ event: NostrEvent) throws {
+        guard let eventId = event.id,
+              let pubkey = event.pubkey,
+              let createdAt = event.created_at,
+              let content = event.content,
+              let sig = event.sig else {
+            throw NostrEventError.incompleteEvent
+        }
+
+        // Create EVENT message format: ["EVENT", {event}]
+        let eventDict: [String: Any] = [
+            "id": eventId,
+            "pubkey": pubkey,
+            "created_at": createdAt,
+            "kind": event.kind,
+            "tags": event.tags,
+            "content": content,
+            "sig": sig
+        ]
+
+        let message: [Any] = ["EVENT", eventDict]
+
+        // Log relay connections
+        print("📡 Publishing to \(webSocketTasks.count) relay(s):")
+        for (url, _) in webSocketTasks {
+            print("   - \(url)")
+        }
+
+        // Send to all connected relays
+        for (url, task) in webSocketTasks {
+            sendJSON(message, on: task, relayURL: url)
+            print("   ✓ Sent to \(url)")
+        }
+
+        if webSocketTasks.isEmpty {
+            print("⚠️ WARNING: No WebSocket connections available!")
+        }
+    }
+
+    /// Create and publish a text note (kind 1)
+    /// - Parameters:
+    ///   - content: Note content
+    ///   - replyTo: Optional event ID to reply to
+    ///   - keyPair: Key pair to sign with
+    func publishTextNote(_ content: String, replyTo: String? = nil, using keyPair: NostrKeyPair) throws {
+        var tags: [[String]] = []
+
+        if let replyEventId = replyTo {
+            tags.append(["e", replyEventId, "", "reply"])
+        }
+
+        let event = try createSignedEvent(kind: 1, content: content, tags: tags, using: keyPair)
+        try publishEvent(event)
+    }
+
+    /// Create and publish a reaction (kind 7)
+    /// - Parameters:
+    ///   - eventId: Event ID to react to
+    ///   - content: Reaction content (e.g., "+", "❤️", etc.)
+    ///   - eventPubkey: Pubkey of the event being reacted to
+    ///   - keyPair: Key pair to sign with
+    func publishReaction(to eventId: String, content: String = "+", eventPubkey: String, using keyPair: NostrKeyPair) throws {
+        let tags: [[String]] = [
+            ["e", eventId],
+            ["p", eventPubkey]
+        ]
+
+        let event = try createSignedEvent(kind: 7, content: content, tags: tags, using: keyPair)
+        try publishEvent(event)
+    }
+
+    /// Create and publish a zap request (kind 9734)
+    /// - Parameters:
+    ///   - eventId: Event ID to zap
+    ///   - amount: Amount in millisats
+    ///   - comment: Optional comment
+    ///   - eventPubkey: Pubkey of the event being zapped
+    ///   - keyPair: Key pair to sign with
+    func publishZapRequest(to eventId: String, amount: Int, comment: String? = nil, eventPubkey: String, using keyPair: NostrKeyPair) throws {
+        var tags: [[String]] = [
+            ["e", eventId],
+            ["p", eventPubkey],
+            ["amount", String(amount)]
+        ]
+
+        if let comment = comment {
+            tags.append(["comment", comment])
+        }
+
+        let event = try createSignedEvent(kind: 9734, content: comment ?? "", tags: tags, using: keyPair)
+        try publishEvent(event)
+    }
+}
+
+// MARK: - Nostr Event Errors
+
+enum NostrEventError: Error {
+    case serializationFailed
+    case incompleteEvent
+    case signingFailed
+    case publishFailed
 }
