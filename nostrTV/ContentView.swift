@@ -34,7 +34,7 @@ struct CategoryHeaderView: View {
 struct StreamRowView: View {
     let stream: Stream
     let viewModel: StreamViewModel
-    let onStreamSelected: (URL, String?) -> Void
+    let onStreamSelected: (URL, String?, Stream) -> Void
 
     var body: some View {
         Button(action: {
@@ -45,7 +45,7 @@ struct StreamRowView: View {
                     }
                     return nil
                 }()
-                onStreamSelected(url, lightningAddress)
+                onStreamSelected(url, lightningAddress, stream)
             }
         }) {
             HStack(spacing: 12) {
@@ -170,6 +170,7 @@ struct ContentView: View {
     @State private var showPlayer = false
     @State private var player: AVPlayer?
     @State private var selectedLightningAddress: String?
+    @State private var selectedStream: Stream?  // Track selected stream for live activity
     @State private var showProfilePage = false
 
     var body: some View {
@@ -178,10 +179,11 @@ struct ContentView: View {
                 ForEach(viewModel.categorizedStreams, id: \.name) { category in
                     Section(header: CategoryHeaderView(categoryName: category.name, streamCount: category.streams.count)) {
                         ForEach(category.streams) { stream in
-                            StreamRowView(stream: stream, viewModel: viewModel) { url, lightningAddress in
+                            StreamRowView(stream: stream, viewModel: viewModel) { url, lightningAddress, selectedStream in
                                 let player = AVPlayer(url: url)
                                 self.player = player
                                 self.selectedLightningAddress = lightningAddress
+                                self.selectedStream = selectedStream
                                 print("Selected Lightning Address: \(self.selectedLightningAddress ?? "nil")")
                                 self.showPlayer = true
                             }
@@ -210,7 +212,7 @@ struct ContentView: View {
         .ignoresSafeArea()
         .fullScreenCover(isPresented: $showPlayer) {
             if let player = player {
-                VideoPlayerView(player: player, lightningAddress: selectedLightningAddress)
+                VideoPlayerView(player: player, lightningAddress: selectedLightningAddress, stream: selectedStream)
                     .ignoresSafeArea()
             }
         }

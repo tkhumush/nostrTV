@@ -12,15 +12,18 @@ import CoreImage.CIFilterBuiltins
 struct VideoPlayerView: UIViewControllerRepresentable {
     let player: AVPlayer
     let lightningAddress: String?
+    let stream: Stream?
 
-    init(player: AVPlayer, lightningAddress: String? = nil) {
+    init(player: AVPlayer, lightningAddress: String? = nil, stream: Stream? = nil) {
         self.player = player
         self.lightningAddress = lightningAddress
+        self.stream = stream
     }
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = CustomAVPlayerViewController()
         controller.player = player
+        controller.stream = stream  // Pass stream to controller for activity tracking
 
         if let address = lightningAddress, let qrImage = generateQRCode(from: address) {
             let qrImageView = UIImageView(image: qrImage)
@@ -86,11 +89,29 @@ struct VideoPlayerView: UIViewControllerRepresentable {
 class CustomAVPlayerViewController: AVPlayerViewController {
     private var qrCodeImageView: UIImageView?
     private var hideTimer: Timer?
+    private var presenceTimer: Timer?  // Timer for periodic presence updates
     private var gestureRecognizers: [UIGestureRecognizer] = []
+    var stream: Stream?  // Stream being watched
+    private let liveActivityManager = LiveActivityManager.shared
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         UIApplication.shared.isIdleTimerDisabled = true
+
+        // Announce joining the stream
+        if let stream = stream {
+            Task {
+                do {
+                    try await liveActivityManager.joinStreamWithConnection(stream)
+                    print("✅ Successfully announced joining stream: \(stream.title)")
+
+                    // Start periodic presence updates (every 30 seconds)
+                    startPresenceUpdates()
+                } catch {
+                    print("⚠️ Failed to announce joining stream: \(error.localizedDescription)")
+                }
+            }
+        }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -98,6 +119,35 @@ class CustomAVPlayerViewController: AVPlayerViewController {
         UIApplication.shared.isIdleTimerDisabled = false
         hideTimer?.invalidate()
         hideTimer = nil
+
+        // Stop presence updates
+        presenceTimer?.invalidate()
+        presenceTimer = nil
+
+        // Announce leaving the stream
+        if let stream = stream {
+            Task {
+                do {
+                    try await liveActivityManager.leaveStream(stream)
+                    print("✅ Successfully announced leaving stream: \(stream.title)")
+                } catch {
+                    print("⚠️ Failed to announce leaving stream: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    private func startPresenceUpdates() {
+        // Update presence every 30 seconds to show continued viewing
+        presenceTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+            Task {
+                do {
+                    try await self?.liveActivityManager.updatePresence()
+                } catch {
+                    print("⚠️ Failed to update presence: \(error.localizedDescription)")
+                }
+            }
+        }
     }
 
     func setupQRCodeAutoHide(qrImageView: UIImageView) {
