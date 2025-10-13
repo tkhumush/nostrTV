@@ -6,10 +6,22 @@
 //
 
 import Foundation
+import CommonCrypto
 
 struct NostrEvent: Codable {
     let kind: Int
     let tags: [[String]]
+
+    // Full event structure for creating and signing
+    var id: String?
+    var pubkey: String?
+    var created_at: Int?
+    var content: String?
+    var sig: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, pubkey, created_at, content, kind, tags, sig
+    }
 }
 
 struct NostrProfile: Codable {
@@ -522,4 +534,148 @@ class NostrClient {
         webSocketTasks.removeAll()
         print("🔌 Disconnected from all relays")
     }
+
+    // MARK: - Event Creation and Signing
+
+    /// Create a Nostr event with the given parameters
+    /// - Parameters:
+    ///   - kind: Event kind (e.g., 1 for text note, 4 for DM, etc.)
+    ///   - content: Event content
+    ///   - tags: Event tags (array of string arrays)
+    ///   - keyPair: Key pair to sign the event with
+    /// - Returns: Signed NostrEvent ready to publish
+    func createSignedEvent(kind: Int, content: String, tags: [[String]] = [], using keyPair: NostrKeyPair) throws -> NostrEvent {
+        let pubkey = keyPair.publicKeyHex
+        let created_at = Int(Date().timeIntervalSince1970)
+
+        // Create event for signing (without id and sig)
+        let eventForSigning: [Any] = [
+            0,
+            pubkey,
+            created_at,
+            kind,
+            tags,
+            content
+        ]
+
+        // Serialize to JSON for hashing
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: eventForSigning),
+              let jsonString = String(data: jsonData, encoding: .utf8) else {
+            throw NostrEventError.serializationFailed
+        }
+
+        // Hash the serialized event
+        let eventHash = jsonString.data(using: .utf8)!.sha256()
+        let eventId = eventHash.hexString
+
+        // Sign the event hash
+        let signature = try keyPair.sign(messageHash: eventHash)
+        let signatureHex = signature.hexString
+
+        // Create the full signed event
+        var event = NostrEvent(kind: kind, tags: tags)
+        event.id = eventId
+        event.pubkey = pubkey
+        event.created_at = created_at
+        event.content = content
+        event.sig = signatureHex
+
+        print("✍️ Created and signed event: kind=\(kind), id=\(eventId.prefix(8))...")
+
+        return event
+    }
+
+    /// Publish a signed event to all connected relays
+    /// - Parameter event: The signed event to publish
+    func publishEvent(_ event: NostrEvent) throws {
+        guard let eventId = event.id,
+              let pubkey = event.pubkey,
+              let createdAt = event.created_at,
+              let content = event.content,
+              let sig = event.sig else {
+            throw NostrEventError.incompleteEvent
+        }
+
+        // Create EVENT message format: ["EVENT", {event}]
+        let eventDict: [String: Any] = [
+            "id": eventId,
+            "pubkey": pubkey,
+            "created_at": createdAt,
+            "kind": event.kind,
+            "tags": event.tags,
+            "content": content,
+            "sig": sig
+        ]
+
+        let message: [Any] = ["EVENT", eventDict]
+
+        // Send to all connected relays
+        for (url, task) in webSocketTasks {
+            sendJSON(message, on: task)
+            print("📤 Published event to \(url)")
+        }
+    }
+
+    /// Create and publish a text note (kind 1)
+    /// - Parameters:
+    ///   - content: Note content
+    ///   - replyTo: Optional event ID to reply to
+    ///   - keyPair: Key pair to sign with
+    func publishTextNote(_ content: String, replyTo: String? = nil, using keyPair: NostrKeyPair) throws {
+        var tags: [[String]] = []
+
+        if let replyEventId = replyTo {
+            tags.append(["e", replyEventId, "", "reply"])
+        }
+
+        let event = try createSignedEvent(kind: 1, content: content, tags: tags, using: keyPair)
+        try publishEvent(event)
+    }
+
+    /// Create and publish a reaction (kind 7)
+    /// - Parameters:
+    ///   - eventId: Event ID to react to
+    ///   - content: Reaction content (e.g., "+", "❤️", etc.)
+    ///   - eventPubkey: Pubkey of the event being reacted to
+    ///   - keyPair: Key pair to sign with
+    func publishReaction(to eventId: String, content: String = "+", eventPubkey: String, using keyPair: NostrKeyPair) throws {
+        let tags: [[String]] = [
+            ["e", eventId],
+            ["p", eventPubkey]
+        ]
+
+        let event = try createSignedEvent(kind: 7, content: content, tags: tags, using: keyPair)
+        try publishEvent(event)
+    }
+
+    /// Create and publish a zap request (kind 9734)
+    /// - Parameters:
+    ///   - eventId: Event ID to zap
+    ///   - amount: Amount in millisats
+    ///   - comment: Optional comment
+    ///   - eventPubkey: Pubkey of the event being zapped
+    ///   - keyPair: Key pair to sign with
+    func publishZapRequest(to eventId: String, amount: Int, comment: String? = nil, eventPubkey: String, using keyPair: NostrKeyPair) throws {
+        var tags: [[String]] = [
+            ["e", eventId],
+            ["p", eventPubkey],
+            ["amount", String(amount)]
+        ]
+
+        if let comment = comment {
+            tags.append(["comment", comment])
+        }
+
+        let event = try createSignedEvent(kind: 9734, content: comment ?? "", tags: tags, using: keyPair)
+        try publishEvent(event)
+    }
+}
+
+// MARK: - Nostr Event Errors
+
+enum NostrEventError: Error {
+    case serializationFailed
+    case incompleteEvent
+    case signingFailed
+    case publishFailed
 }
