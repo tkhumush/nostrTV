@@ -3,7 +3,6 @@ import Combine
 
 /// Manages Nostr key pairs for the application
 /// Handles ephemeral key generation and storage
-@MainActor
 class NostrKeyManager: ObservableObject {
     static let shared = NostrKeyManager()
 
@@ -26,9 +25,8 @@ class NostrKeyManager: ObservableObject {
         self.currentKeyPair = keyPair
         self.isKeyGenerated = true
 
-        print("Generated new ephemeral key pair:")
-        print("npub: \(keyPair.npub)")
-        print("nsec: \(keyPair.nsec)")
+        print("🔑 Generated new ephemeral key pair")
+        print("   npub: \(keyPair.npub)")
     }
 
     /// Generate and save key pair to UserDefaults
@@ -46,13 +44,18 @@ class NostrKeyManager: ObservableObject {
     /// Save key pair to UserDefaults
     private func saveKeyPair(_ keyPair: NostrKeyPair) {
         userDefaults.set(keyPair.privateKeyHex, forKey: privateKeyKey)
-        print("Key pair saved to UserDefaults")
+        print("💾 Key pair saved to storage")
     }
 
     /// Load stored key pair from UserDefaults
     private func loadStoredKey() {
         guard let privateKeyHex = userDefaults.string(forKey: privateKeyKey) else {
-            print("No stored key pair found")
+            print("🔑 No stored key pair found, generating new ephemeral key pair...")
+            do {
+                try generateAndSaveKeyPair(persist: true)
+            } catch {
+                print("❌ Failed to generate ephemeral key pair: \(error)")
+            }
             return
         }
 
@@ -60,11 +63,17 @@ class NostrKeyManager: ObservableObject {
             let keyPair = try NostrKeyPair(privateKeyHex: privateKeyHex)
             self.currentKeyPair = keyPair
             self.isKeyGenerated = true
-            print("Loaded existing key pair from storage")
-            print("npub: \(keyPair.npub)")
+            print("✅ Loaded existing key pair from storage")
+            print("   npub: \(keyPair.npub)")
         } catch {
-            print("Failed to load stored key pair: \(error)")
+            print("❌ Failed to load stored key pair: \(error)")
             clearStoredKey()
+            // Try to generate a new one
+            do {
+                try generateAndSaveKeyPair(persist: true)
+            } catch {
+                print("❌ Failed to generate new key pair: \(error)")
+            }
         }
     }
 

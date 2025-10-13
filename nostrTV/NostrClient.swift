@@ -75,14 +75,14 @@ class NostrClient {
                 "live-streams",
                 ["kinds": [30311], "limit": 50]
             ]
-            sendJSON(streamReq, on: task)
+            sendJSON(streamReq, on: task, relayURL: url)
 
             // Listen for messages
             listen(on: task, from: url)
         }
     }
 
-    private func sendJSON(_ message: [Any], on task: URLSessionWebSocketTask) {
+    private func sendJSON(_ message: [Any], on task: URLSessionWebSocketTask, relayURL: URL) {
         guard let data = try? JSONSerialization.data(withJSONObject: message),
               let jsonString = String(data: data, encoding: .utf8) else {
             print("❌ Failed to serialize message to JSON")
@@ -92,9 +92,8 @@ class NostrClient {
         task.send(.string(jsonString)) { error in
             if let error = error {
                 print("❌ WebSocket send error: \(error)")
-            } else {
-                print("✅ Sent message to \(task.originalRequest?.url?.absoluteString ?? "?"): \(jsonString)")
             }
+            // Message sent successfully (removed verbose logging)
         }
     }
 
@@ -107,7 +106,7 @@ class NostrClient {
                 print("❌ WebSocket receive error from \(relayURL): \(error)")
             case .success(let message):
                 if case let .string(text) = message {
-                    print("⬅️ [\(relayURL)] Received message: \(text)")
+                    // Received message (removed verbose logging)
                     self.handleMessage(text)
                 }
                 self.listen(on: task, from: relayURL)
@@ -145,23 +144,39 @@ class NostrClient {
     private func handleMessage(_ text: String) {
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [Any],
-              json.count >= 3 else {
+              json.count >= 2,
+              let messageType = json[0] as? String else {
             print("⚠️ Message does not contain expected data format")
             return
         }
-        
+
         // Handle different message types
-        if let messageType = json[0] as? String {
-            switch messageType {
-            case "EVENT":
-                handleEvent(json)
-            case "EOSE":
-                print("🔚 End of stored events for subscription \(json[1] as? String ?? "unknown")")
-            case "OK":
-                print("✅ Event processed: \(json[1] as? String ?? "unknown")")
-            default:
-                print("❓ Unknown message type: \(messageType)")
+        switch messageType {
+        case "EVENT":
+            guard json.count >= 3 else {
+                return
             }
+            handleEvent(json)
+        case "EOSE":
+            // End of stored events (silent)
+            break
+        case "OK":
+            if json.count >= 3 {
+                let eventId = json[1] as? String ?? "unknown"
+                let accepted = json[2] as? Bool ?? false
+                let message = json.count >= 4 ? (json[3] as? String ?? "") : ""
+                if accepted {
+                    print("✅ Event accepted by relay: \(eventId.prefix(8))...")
+                } else {
+                    print("❌ Event rejected by relay: \(eventId.prefix(8))... - \(message)")
+                }
+            }
+        case "NOTICE":
+            if json.count >= 2, let notice = json[1] as? String {
+                print("📢 Relay notice: \(notice)")
+            }
+        default:
+            break
         }
     }
     
@@ -236,7 +251,7 @@ class NostrClient {
         // Use a placeholder URL for ended streams if no URL is provided
         let finalStreamURL = streamURL ?? "ended://\(streamID)"
 
-        print("🎥 Stream: \(combinedTitle) | Status: \(status) | URL: \(finalStreamURL) | Tags: \(allTags) | Pubkey: \(pubkey ?? "Unknown")")
+        // Stream received (removed verbose logging)
 
         // Create stream with all information
         let stream = Stream(
@@ -288,7 +303,7 @@ class NostrClient {
 
         // Store profile
         self.profiles[pubkey] = profile
-        print("👤 Profile updated for pubkey: \(pubkey)")
+        // Profile updated (removed verbose logging)
 
         // Notify callback if set
         DispatchQueue.main.async {
@@ -308,7 +323,7 @@ class NostrClient {
         if let existing = followListEvents[pubkey] {
             // Only process if this event is newer
             if createdAt <= existing.timestamp {
-                print("⏭️ Skipping older follow list event (existing: \(existing.timestamp), received: \(createdAt))")
+                // Skipping older follow list event (silent)
                 return
             }
         }
@@ -324,7 +339,7 @@ class NostrClient {
             follows.append(followedPubkey)
         }
 
-        print("📋 Follow list received for \(pubkey.prefix(8))... with \(follows.count) follows (timestamp: \(createdAt))")
+        // Follow list received (removed verbose logging)
 
         // Store the most recent follow list
         followListEvents[pubkey] = (timestamp: createdAt, follows: follows)
@@ -357,7 +372,7 @@ class NostrClient {
         }
 
         if !relays.isEmpty {
-            print("🔗 Extracted \(relays.count) relays from kind 3 content")
+            // Extracted relays from kind 3 content (removed verbose logging)
             userRelays = relays
 
             DispatchQueue.main.async {
@@ -387,7 +402,7 @@ class NostrClient {
         }
 
         if !relays.isEmpty {
-            print("🔗 Relay list (NIP-65) received with \(relays.count) relays")
+            // Relay list (NIP-65) received (removed verbose logging)
             userRelays = relays
 
             DispatchQueue.main.async {
@@ -403,10 +418,10 @@ class NostrClient {
             "profile-\(pubkey.prefix(8))", // Unique subscription ID
             ["kinds": [0], "authors": [pubkey], "limit": 1]
         ]
-        
+
         // Send to all connected relays
-        for (_, task) in webSocketTasks {
-            sendJSON(profileReq, on: task)
+        for (url, task) in webSocketTasks {
+            sendJSON(profileReq, on: task, relayURL: url)
         }
     }
     
@@ -434,7 +449,7 @@ class NostrClient {
                 "user-relays",
                 ["kinds": [10002], "authors": [pubkey], "limit": 1]
             ]
-            sendJSON(relayListReq, on: task)
+            sendJSON(relayListReq, on: task, relayURL: url)
 
             // Request user profile (kind 0)
             let profileReq: [Any] = [
@@ -442,7 +457,7 @@ class NostrClient {
                 "user-profile",
                 ["kinds": [0], "authors": [pubkey], "limit": 1]
             ]
-            sendJSON(profileReq, on: task)
+            sendJSON(profileReq, on: task, relayURL: url)
 
             // Request follow list (kind 3) - also contains relay info in content
             // Request multiple events to ensure we get the most recent one across relays
@@ -451,7 +466,7 @@ class NostrClient {
                 "user-follows",
                 ["kinds": [3], "authors": [pubkey], "limit": 10]
             ]
-            sendJSON(followReq, on: task)
+            sendJSON(followReq, on: task, relayURL: url)
 
             // Listen for messages
             listen(on: task, from: url)
@@ -477,7 +492,7 @@ class NostrClient {
             // Call original callback first
             originalCallback?(relays)
 
-            print("🔄 Reconnecting to user's \(relays.count) personal relays...")
+            // Reconnecting to user's personal relays (removed verbose logging)
 
             // Disconnect from default relays
             self.disconnect()
@@ -512,7 +527,7 @@ class NostrClient {
                 "user-profile-personal",
                 ["kinds": [0], "authors": [pubkey], "limit": 1]
             ]
-            sendJSON(profileReq, on: task)
+            sendJSON(profileReq, on: task, relayURL: url)
 
             // Request follow list (kind 3) from user's relays - most likely to have latest
             let followReq: [Any] = [
@@ -520,7 +535,7 @@ class NostrClient {
                 "user-follows-personal",
                 ["kinds": [3], "authors": [pubkey], "limit": 10]
             ]
-            sendJSON(followReq, on: task)
+            sendJSON(followReq, on: task, relayURL: url)
 
             // Listen for messages
             listen(on: task, from: url)
@@ -532,7 +547,7 @@ class NostrClient {
             task.cancel(with: .goingAway, reason: nil)
         }
         webSocketTasks.removeAll()
-        print("🔌 Disconnected from all relays")
+        // Disconnected from all relays (removed verbose logging)
     }
 
     // MARK: - Event Creation and Signing
@@ -558,11 +573,18 @@ class NostrClient {
             content
         ]
 
-        // Serialize to JSON for hashing
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: eventForSigning),
+        // Serialize to JSON for hashing with specific options
+        // NIP-01 requires compact JSON with no whitespace and specific formatting
+        guard let jsonData = try? JSONSerialization.data(
+            withJSONObject: eventForSigning,
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        ),
               let jsonString = String(data: jsonData, encoding: .utf8) else {
             throw NostrEventError.serializationFailed
         }
+
+        // Debug: print the JSON being hashed
+        print("🔍 JSON for hashing: \(jsonString)")
 
         // Hash the serialized event
         let eventHash = jsonString.data(using: .utf8)!.sha256()
@@ -580,7 +602,7 @@ class NostrClient {
         event.content = content
         event.sig = signatureHex
 
-        print("✍️ Created and signed event: kind=\(kind), id=\(eventId.prefix(8))...")
+        // Created and signed event (removed verbose logging)
 
         return event
     }
@@ -609,10 +631,16 @@ class NostrClient {
 
         let message: [Any] = ["EVENT", eventDict]
 
+        // Debug: Show the event being published
+        if let debugData = try? JSONSerialization.data(withJSONObject: eventDict, options: .prettyPrinted),
+           let debugString = String(data: debugData, encoding: .utf8) {
+            print("📤 Publishing event object:\n\(debugString)")
+        }
+
         // Send to all connected relays
         for (url, task) in webSocketTasks {
-            sendJSON(message, on: task)
-            print("📤 Published event to \(url)")
+            sendJSON(message, on: task, relayURL: url)
+            // Publishing event (removed verbose logging)
         }
     }
 

@@ -13,17 +13,20 @@ struct VideoPlayerView: UIViewControllerRepresentable {
     let player: AVPlayer
     let lightningAddress: String?
     let stream: Stream?
+    let nostrClient: NostrClient
 
-    init(player: AVPlayer, lightningAddress: String? = nil, stream: Stream? = nil) {
+    init(player: AVPlayer, lightningAddress: String? = nil, stream: Stream? = nil, nostrClient: NostrClient) {
         self.player = player
         self.lightningAddress = lightningAddress
         self.stream = stream
+        self.nostrClient = nostrClient
     }
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = CustomAVPlayerViewController()
         controller.player = player
         controller.stream = stream  // Pass stream to controller for activity tracking
+        controller.nostrClient = nostrClient  // Pass NostrClient for publishing events
 
         if let address = lightningAddress, let qrImage = generateQRCode(from: address) {
             let qrImageView = UIImageView(image: qrImage)
@@ -92,18 +95,24 @@ class CustomAVPlayerViewController: AVPlayerViewController {
     private var presenceTimer: Timer?  // Timer for periodic presence updates
     private var gestureRecognizers: [UIGestureRecognizer] = []
     var stream: Stream?  // Stream being watched
-    private let liveActivityManager = LiveActivityManager.shared
+    var nostrClient: NostrClient?  // NostrClient for publishing events
+    private var liveActivityManager: LiveActivityManager?
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         UIApplication.shared.isIdleTimerDisabled = true
 
+        // Initialize LiveActivityManager with the shared NostrClient
+        if let nostrClient = nostrClient {
+            liveActivityManager = LiveActivityManager(nostrClient: nostrClient)
+        }
+
         // Announce joining the stream
-        if let stream = stream {
+        if let stream = stream, let activityManager = liveActivityManager {
             Task {
                 do {
-                    try await liveActivityManager.joinStreamWithConnection(stream)
-                    print("✅ Successfully announced joining stream: \(stream.title)")
+                    try await activityManager.joinStreamWithConnection(stream)
+                    // Successfully announced joining stream
 
                     // Start periodic presence updates (every 30 seconds)
                     startPresenceUpdates()
@@ -125,11 +134,11 @@ class CustomAVPlayerViewController: AVPlayerViewController {
         presenceTimer = nil
 
         // Announce leaving the stream
-        if let stream = stream {
+        if let stream = stream, let activityManager = liveActivityManager {
             Task {
                 do {
-                    try await liveActivityManager.leaveStream(stream)
-                    print("✅ Successfully announced leaving stream: \(stream.title)")
+                    try await activityManager.leaveStream(stream)
+                    // Successfully announced leaving stream
                 } catch {
                     print("⚠️ Failed to announce leaving stream: \(error.localizedDescription)")
                 }
@@ -138,11 +147,12 @@ class CustomAVPlayerViewController: AVPlayerViewController {
     }
 
     private func startPresenceUpdates() {
-        // Update presence every 30 seconds to show continued viewing
-        presenceTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+        // Update presence every 60 seconds to show continued viewing
+        presenceTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
+            guard let self = self, let activityManager = self.liveActivityManager else { return }
             Task {
                 do {
-                    try await self?.liveActivityManager.updatePresence()
+                    try await activityManager.updatePresence()
                 } catch {
                     print("⚠️ Failed to update presence: \(error.localizedDescription)")
                 }
