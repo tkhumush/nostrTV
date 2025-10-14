@@ -14,12 +14,14 @@ struct VideoPlayerView: UIViewControllerRepresentable {
     let lightningAddress: String?
     let stream: Stream?
     let nostrClient: NostrClient
+    let zapManager: ZapManager?
 
-    init(player: AVPlayer, lightningAddress: String? = nil, stream: Stream? = nil, nostrClient: NostrClient) {
+    init(player: AVPlayer, lightningAddress: String? = nil, stream: Stream? = nil, nostrClient: NostrClient, zapManager: ZapManager? = nil) {
         self.player = player
         self.lightningAddress = lightningAddress
         self.stream = stream
         self.nostrClient = nostrClient
+        self.zapManager = zapManager
     }
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
@@ -27,6 +29,7 @@ struct VideoPlayerView: UIViewControllerRepresentable {
         controller.player = player
         controller.stream = stream  // Pass stream to controller for activity tracking
         controller.nostrClient = nostrClient  // Pass NostrClient for publishing events
+        controller.zapManager = zapManager  // Pass ZapManager for zap comments
 
         if let address = lightningAddress, let qrImage = generateQRCode(from: address) {
             let qrImageView = UIImageView(image: qrImage)
@@ -96,7 +99,9 @@ class CustomAVPlayerViewController: AVPlayerViewController {
     private var gestureRecognizers: [UIGestureRecognizer] = []
     var stream: Stream?  // Stream being watched
     var nostrClient: NostrClient?  // NostrClient for publishing events
+    var zapManager: ZapManager?  // ZapManager for zap comments
     private var liveActivityManager: LiveActivityManager?
+    private var chyronHostingController: UIHostingController<ZapChyronWrapper>?
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
@@ -108,6 +113,21 @@ class CustomAVPlayerViewController: AVPlayerViewController {
 
             print("🔌 LiveActivityManager initialized with NostrClient")
             print("   WebSocket connections available: \(nostrClient)")
+        }
+
+        // Set up zap chyron if we have a stream and zapManager
+        if let stream = stream, let zapManager = zapManager {
+            setupZapChyron(for: stream, with: zapManager)
+            // Fetch zaps for this stream using the actual event ID
+            if let eventID = stream.eventID {
+                print("🎬 Fetching zaps for stream:")
+                print("   Event ID: \(eventID)")
+                print("   Stream ID (d-tag): \(stream.streamID)")
+                print("   Pubkey: \(stream.pubkey ?? "nil")")
+                zapManager.fetchZapsForStream(eventID, pubkey: stream.pubkey, dTag: stream.streamID)
+            } else {
+                print("⚠️ Stream has no event ID, cannot fetch zaps")
+            }
         }
 
         // Announce joining the stream
@@ -135,6 +155,12 @@ class CustomAVPlayerViewController: AVPlayerViewController {
         // Stop presence updates
         presenceTimer?.invalidate()
         presenceTimer = nil
+
+        // Close zap subscriptions
+        if let stream = stream, let eventID = stream.eventID, let zapManager = zapManager {
+            print("📪 Closing zap subscriptions for stream")
+            zapManager.clearZapsForStream(eventID)
+        }
 
         // Announce leaving the stream
         if let stream = stream, let activityManager = liveActivityManager {
@@ -229,5 +255,41 @@ class CustomAVPlayerViewController: AVPlayerViewController {
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         super.pressesEnded(presses, with: event)
         userInteracted()
+    }
+
+    private func setupZapChyron(for stream: Stream, with zapManager: ZapManager) {
+        // Create SwiftUI wrapper for the chyron
+        // Use eventID if available, otherwise fall back to streamID
+        let zapStreamId = stream.eventID ?? stream.streamID
+        let chyronWrapper = ZapChyronWrapper(zapManager: zapManager, streamId: zapStreamId)
+        let hostingController = UIHostingController(rootView: chyronWrapper)
+
+        // Make the hosting controller's view transparent
+        hostingController.view.backgroundColor = .clear
+
+        // Add to the content overlay
+        if let overlayView = contentOverlayView {
+            hostingController.view.translatesAutoresizingMaskIntoConstraints = false
+            overlayView.addSubview(hostingController.view)
+
+            NSLayoutConstraint.activate([
+                hostingController.view.leadingAnchor.constraint(equalTo: overlayView.leadingAnchor),
+                hostingController.view.trailingAnchor.constraint(equalTo: overlayView.trailingAnchor),
+                hostingController.view.bottomAnchor.constraint(equalTo: overlayView.safeAreaLayoutGuide.bottomAnchor, constant: -10),
+                hostingController.view.heightAnchor.constraint(equalToConstant: 80)
+            ])
+
+            chyronHostingController = hostingController
+        }
+    }
+}
+
+// Wrapper view to observe zapManager and pass zap comments to the chyron
+struct ZapChyronWrapper: View {
+    @ObservedObject var zapManager: ZapManager
+    let streamId: String
+
+    var body: some View {
+        ZapChyronView(zapComments: zapManager.getZapsForStream(streamId))
     }
 }

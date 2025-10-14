@@ -164,7 +164,8 @@ struct StreamRowView: View {
 }
 
 struct ContentView: View {
-    @StateObject var viewModel = StreamViewModel()
+    @StateObject private var viewModel: StreamViewModel
+    @StateObject private var zapManager: ZapManager
     @EnvironmentObject var authManager: NostrAuthManager
     @State private var selectedStreamURL: URL?
     @State private var showPlayer = false
@@ -172,6 +173,12 @@ struct ContentView: View {
     @State private var selectedLightningAddress: String?
     @State private var selectedStream: Stream?  // Track selected stream for live activity
     @State private var showProfilePage = false
+
+    init() {
+        let vm = StreamViewModel()
+        _viewModel = StateObject(wrappedValue: vm)
+        _zapManager = StateObject(wrappedValue: ZapManager(nostrClient: vm.client))
+    }
 
     var body: some View {
         NavigationView {
@@ -211,7 +218,7 @@ struct ContentView: View {
         .ignoresSafeArea()
         .fullScreenCover(isPresented: $showPlayer) {
             if let player = player {
-                VideoPlayerView(player: player, lightningAddress: selectedLightningAddress, stream: selectedStream, nostrClient: viewModel.client)
+                VideoPlayerView(player: player, lightningAddress: selectedLightningAddress, stream: selectedStream, nostrClient: viewModel.client, zapManager: zapManager)
                     .ignoresSafeArea()
             }
         }

@@ -8,7 +8,8 @@
 import Foundation
 
 struct Stream: Identifiable, Codable, Equatable {
-    let streamID: String
+    let streamID: String  // The "d" tag identifier
+    let eventID: String?  // The actual Nostr event ID (for zap references)
     let title: String
     let streaming_url: String
     let imageURL: String?

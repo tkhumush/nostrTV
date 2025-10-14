@@ -44,7 +44,8 @@ class NostrClient {
     var onProfileReceived: ((Profile) -> Void)?
     var onFollowListReceived: (([String]) -> Void)?
     var onUserRelaysReceived: (([String]) -> Void)?
-    
+    var onZapReceived: ((ZapComment) -> Void)?
+
     func getProfile(for pubkey: String) -> Profile? {
         guard !pubkey.isEmpty else {
             return nil
@@ -189,6 +190,10 @@ class NostrClient {
             handleProfileEvent(eventDict)
         case 3:
             handleFollowListEvent(eventDict)
+        case 1311:
+            handleLiveChatEvent(eventDict)
+        case 9735:
+            handleZapReceiptEvent(eventDict)
         case 10002:
             handleRelayListEvent(eventDict)
         case 30311:
@@ -202,6 +207,9 @@ class NostrClient {
         guard let tagsAny = eventDict["tags"] as? [[Any]] else {
             return
         }
+
+        // Extract the actual event ID (for zap references)
+        let eventID = eventDict["id"] as? String
 
         let title = extractTagValue("title", from: tagsAny)
         let summary = extractTagValue("summary", from: tagsAny)
@@ -251,6 +259,7 @@ class NostrClient {
         // Create stream with all information
         let stream = Stream(
             streamID: streamID,
+            eventID: eventID,
             title: combinedTitle,
             streaming_url: finalStreamURL,
             imageURL: imageURL,
@@ -401,6 +410,192 @@ class NostrClient {
             }
         }
     }
+
+    private func handleLiveChatEvent(_ eventDict: [String: Any]) {
+        print("💬 Received kind 1311 (live chat) event")
+
+        guard let tagsAny = eventDict["tags"] as? [[Any]],
+              let chatEventId = eventDict["id"] as? String,
+              let senderPubkey = eventDict["pubkey"] as? String,
+              let createdAt = eventDict["created_at"] as? TimeInterval,
+              let content = eventDict["content"] as? String else {
+            print("   ❌ Missing required fields")
+            return
+        }
+
+        print("   Event ID: \(chatEventId.prefix(8))...")
+        print("   Sender: \(senderPubkey.prefix(8))...")
+        print("   Message: \(content)")
+
+        // Extract the "a" tag which references the stream
+        // Format: ["a", "30311:<pubkey>:<d-tag>"]
+        let aTag = extractTagValue("a", from: tagsAny)
+        print("   A-tag: \(aTag ?? "nil")")
+
+        // Get sender's profile name if available
+        let senderName = profiles[senderPubkey]?.displayName ?? profiles[senderPubkey]?.name
+        print("   Sender name: \(senderName ?? "not cached")")
+
+        // Create a ZapComment object (with amount = 0 for regular chat)
+        let chatComment = ZapComment(
+            id: chatEventId,
+            amount: 0,  // No zap amount for regular chat
+            senderPubkey: senderPubkey,
+            senderName: senderName,
+            comment: content,
+            timestamp: Date(timeIntervalSince1970: createdAt),
+            streamEventId: aTag  // Use the a-tag as the stream identifier
+        )
+
+        print("   ✓ Created chat comment object, notifying callback")
+
+        // Notify callback
+        DispatchQueue.main.async {
+            self.onZapReceived?(chatComment)
+        }
+
+        // Request sender profile if we don't have it
+        if profiles[senderPubkey] == nil {
+            requestProfile(for: senderPubkey)
+        }
+    }
+
+    private func handleZapReceiptEvent(_ eventDict: [String: Any]) {
+        print("📥 Received kind 9735 (zap receipt) event")
+
+        guard let tagsAny = eventDict["tags"] as? [[Any]],
+              let zapReceiptId = eventDict["id"] as? String,
+              let createdAt = eventDict["created_at"] as? TimeInterval else {
+            print("   ❌ Missing required fields (tags, id, or created_at)")
+            return
+        }
+
+        print("   Event ID: \(zapReceiptId.prefix(8))...")
+
+        // Extract bolt11 invoice to get the amount
+        guard let bolt11 = extractTagValue("bolt11", from: tagsAny) else {
+            print("   ❌ No bolt11 tag found")
+            return
+        }
+
+        print("   Found bolt11 invoice")
+
+        // Extract the zap request from the description tag
+        guard let descriptionJSON = extractTagValue("description", from: tagsAny),
+              let descriptionData = descriptionJSON.data(using: .utf8),
+              let zapRequest = try? JSONSerialization.jsonObject(with: descriptionData) as? [String: Any] else {
+            print("   ❌ Failed to parse description tag as zap request")
+            return
+        }
+
+        print("   Parsed zap request from description")
+
+        // Extract sender pubkey from the zap request
+        guard let senderPubkey = zapRequest["pubkey"] as? String else {
+            print("   ❌ No sender pubkey in zap request")
+            return
+        }
+
+        print("   Sender pubkey: \(senderPubkey.prefix(8))...")
+
+        // Extract comment from zap request content
+        let comment = zapRequest["content"] as? String ?? ""
+        print("   Comment: \(comment.isEmpty ? "(empty)" : comment)")
+
+        // Extract stream reference from zap request tags
+        // Try "a" tag first (for stream coordinate), then fall back to "e" tag (for event ID)
+        let zapRequestTags = zapRequest["tags"] as? [[Any]] ?? []
+        let aTag = extractTagValue("a", from: zapRequestTags)
+        let eTag = extractTagValue("e", from: zapRequestTags)
+        let streamEventId = aTag ?? eTag
+        print("   Stream reference (a-tag): \(aTag ?? "nil")")
+        print("   Stream reference (e-tag): \(eTag?.prefix(8) ?? "nil")...")
+
+        // Parse amount from bolt11 invoice
+        // Lightning invoices encode the amount in the invoice string
+        // Format: lnbc<amount><multiplier>...
+        let amount = parseAmountFromBolt11(bolt11)
+        print("   Amount: \(amount / 1000) sats")
+
+        // Get sender's profile name if available
+        let senderName = profiles[senderPubkey]?.displayName ?? profiles[senderPubkey]?.name
+        print("   Sender name: \(senderName ?? "not cached")")
+
+        // Create ZapComment object
+        let zapComment = ZapComment(
+            id: zapReceiptId,
+            amount: amount,
+            senderPubkey: senderPubkey,
+            senderName: senderName,
+            comment: comment,
+            timestamp: Date(timeIntervalSince1970: createdAt),
+            streamEventId: streamEventId
+        )
+
+        print("   ✓ Created ZapComment object, notifying callback")
+
+        // Notify callback
+        DispatchQueue.main.async {
+            self.onZapReceived?(zapComment)
+        }
+
+        // Request sender profile if we don't have it
+        if profiles[senderPubkey] == nil {
+            requestProfile(for: senderPubkey)
+        }
+    }
+
+    private func parseAmountFromBolt11(_ invoice: String) -> Int {
+        // Lightning invoice format: lnbc<amount><multiplier>1...
+        // Multipliers: m (milli) = 0.001, u (micro) = 0.000001, n (nano) = 0.000000001, p (pico) = 0.000000000001
+        // Amount is in BTC, we need to return millisats
+
+        // Remove "lnbc" prefix if present (or "lntb" for testnet)
+        var invoice = invoice.lowercased()
+        if invoice.hasPrefix("lnbc") {
+            invoice = String(invoice.dropFirst(4))
+        } else if invoice.hasPrefix("lntb") {
+            invoice = String(invoice.dropFirst(4))
+        } else {
+            return 0
+        }
+
+        // Find the multiplier character (m, u, n, p) or digit 1 which marks the end of amount
+        var amountString = ""
+        var multiplier = 1.0
+
+        for char in invoice {
+            if char.isNumber {
+                amountString.append(char)
+            } else if char == "m" {
+                multiplier = 0.001 // milli-bitcoin
+                break
+            } else if char == "u" {
+                multiplier = 0.000001 // micro-bitcoin
+                break
+            } else if char == "n" {
+                multiplier = 0.000000001 // nano-bitcoin
+                break
+            } else if char == "p" {
+                multiplier = 0.000000000001 // pico-bitcoin
+                break
+            } else {
+                // If we hit a non-numeric, non-multiplier character, stop
+                break
+            }
+        }
+
+        guard let amountValue = Double(amountString) else {
+            return 0
+        }
+
+        // Convert to millisats
+        // 1 BTC = 100,000,000 sats = 100,000,000,000 millisats
+        let btcAmount = amountValue * multiplier
+        let millisats = Int(btcAmount * 100_000_000_000)
+
+        return millisats
+    }
     
     private func requestProfile(for pubkey: String) {
         // Send a request for this specific profile
@@ -536,6 +731,18 @@ class NostrClient {
         }
         webSocketTasks.removeAll()
         // Disconnected from all relays (removed verbose logging)
+    }
+
+    /// Send a raw request to all connected relays
+    /// - Parameter request: Array representing the Nostr request (e.g., ["REQ", "sub-id", {...}])
+    func sendRawRequest(_ request: [Any]) throws {
+        // Validate that we can serialize the request
+        _ = try JSONSerialization.data(withJSONObject: request)
+
+        // Send to all connected relays
+        for (url, task) in webSocketTasks {
+            sendJSON(request, on: task, relayURL: url)
+        }
     }
 
     // MARK: - Event Creation and Signing
