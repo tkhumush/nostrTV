@@ -19,10 +19,10 @@ struct ZapChyronView: View {
 
     var body: some View {
         ZStack {
-            // Semi-transparent background
+            // Solid black background
             Rectangle()
-                .fill(Color.black.opacity(0.7))
-                .frame(height: 80)
+                .fill(Color.black)
+                .frame(height: 120)
 
             // Display current zap or placeholder
             if !zapComments.isEmpty {
@@ -42,7 +42,7 @@ struct ZapChyronView: View {
                     .foregroundColor(.gray)
             }
         }
-        .frame(height: 80)
+        .frame(height: 120)
         .onAppear {
             startTimer()
         }
@@ -125,7 +125,6 @@ private struct ZapDisplayView: View {
             Spacer()
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 10)
     }
 }
 
