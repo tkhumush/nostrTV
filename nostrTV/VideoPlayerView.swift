@@ -50,7 +50,7 @@ struct VideoPlayerView: View {
                                         .font(.system(size: 60))
                                 )
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(SquareCardButtonStyle())
                         .frame(width: 120, height: 120)
                     }
 
@@ -236,5 +236,18 @@ struct ZapChyronWrapper: View {
 
     var body: some View {
         ZapChyronView(zapComments: zapManager.getZapsForStream(streamId))
+    }
+}
+
+/// Custom button style that mimics .card but with sharp corners
+private struct SquareCardButtonStyle: ButtonStyle {
+    @Environment(\.isFocused) var isFocused: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(isFocused ? 1.1 : 1.0) // Lift effect when focused
+            .shadow(color: .black.opacity(0.3), radius: isFocused ? 10 : 0, x: 0, y: isFocused ? 5 : 0)
+            .animation(.easeInOut(duration: 0.2), value: isFocused)
+            .clipShape(Rectangle()) // Force sharp corners
     }
 }

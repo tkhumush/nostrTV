@@ -107,25 +107,71 @@ struct ZapMenuOptionsView: View {
     var body: some View {
         HStack(spacing: 0) {
             ForEach(ZapOption.presets) { option in
-                Button(action: {
+                ZapMenuOptionButton(option: option) {
                     onZapSelected(option)
-                }) {
-                    VStack(spacing: 4) {
-                        // Emoji
-                        Text(option.emoji)
-                            .font(.system(size: 40))
-
-                        // Amount
-                        Text("\(option.displayAmount)")
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(.white)
-                    }
-                    .frame(width: 120, height: 120)
-                    .background(Color.white.opacity(0.15))
                 }
-                .buttonStyle(.card)
             }
         }
+    }
+}
+
+/// Individual inline zap option button with custom focus effect
+private struct ZapMenuOptionButton: View {
+    let option: ZapOption
+    let onTap: () -> Void
+
+    @Environment(\.isFocused) var isFocused: Bool
+
+    var body: some View {
+        ZStack {
+            // Background glow indicator when focused
+            if isFocused {
+                Rectangle()
+                    .fill(Color.white.opacity(0.3))
+                    .frame(width: 140, height: 140)
+                    .blur(radius: 20)
+            }
+
+            // Focus indicator - 5% larger square with yellow border
+            if isFocused {
+                Rectangle()
+                    .strokeBorder(Color.yellow, lineWidth: 6)
+                    .frame(width: 126, height: 126) // 120 * 1.05 = 126
+            }
+
+            // Button
+            Button(action: onTap) {
+                Rectangle()
+                    .fill(Color.gray)
+                    .frame(width: 120, height: 120)
+                    .overlay(
+                        VStack(spacing: 4) {
+                            // Emoji
+                            Text(option.emoji)
+                                .font(.system(size: 40))
+
+                            // Amount
+                            Text("\(option.displayAmount)")
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                    )
+            }
+            .buttonStyle(SquareCardButtonStyle())
+        }
+    }
+}
+
+/// Custom button style that mimics .card but with sharp corners
+private struct SquareCardButtonStyle: ButtonStyle {
+    @Environment(\.isFocused) var isFocused: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(isFocused ? 1.1 : 1.0) // Lift effect when focused
+            .shadow(color: .black.opacity(0.3), radius: isFocused ? 10 : 0, x: 0, y: isFocused ? 5 : 0)
+            .animation(.easeInOut(duration: 0.2), value: isFocused)
+            .clipShape(Rectangle()) // Force sharp corners
     }
 }
 
