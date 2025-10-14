@@ -218,7 +218,7 @@ struct ContentView: View {
         .ignoresSafeArea()
         .fullScreenCover(isPresented: $showPlayer) {
             if let player = player {
-                VideoPlayerView(player: player, lightningAddress: selectedLightningAddress, stream: selectedStream, nostrClient: viewModel.client, zapManager: zapManager)
+                VideoPlayerView(player: player, lightningAddress: selectedLightningAddress, stream: selectedStream, nostrClient: viewModel.client, zapManager: zapManager, authManager: authManager)
                     .ignoresSafeArea()
             }
         }

@@ -39,6 +39,7 @@ class NostrClient {
     private var followListEvents: [String: (timestamp: Int, follows: [String])] = [:] // pubkey -> (created_at, follows)
     private var userRelays: [String] = [] // User's relay list from NIP-65 (kind 10002) or kind 3
     private var session: URLSession!
+    private let profileQueue = DispatchQueue(label: "com.nostrtv.profiles", attributes: .concurrent)
 
     var onStreamReceived: ((Stream) -> Void)?
     var onProfileReceived: ((Profile) -> Void)?
@@ -50,7 +51,9 @@ class NostrClient {
         guard !pubkey.isEmpty else {
             return nil
         }
-        return profiles[pubkey]
+        return profileQueue.sync {
+            return profiles[pubkey]
+        }
     }
 
     func connect() {
@@ -275,8 +278,13 @@ class NostrClient {
         }
 
         // If we have a pubkey, request the profile if we don't have it
-        if let pubkey = pubkey, self.profiles[pubkey] == nil {
-            requestProfile(for: pubkey)
+        if let pubkey = pubkey {
+            let hasProfile = profileQueue.sync {
+                return self.profiles[pubkey] != nil
+            }
+            if !hasProfile {
+                requestProfile(for: pubkey)
+            }
         }
     }
     
@@ -303,8 +311,10 @@ class NostrClient {
             lud16: profileData["lud16"] as? String
         )
 
-        // Store profile
-        self.profiles[pubkey] = profile
+        // Store profile (thread-safe)
+        profileQueue.async(flags: .barrier) {
+            self.profiles[pubkey] = profile
+        }
         // Profile updated (removed verbose logging)
 
         // Notify callback if set
@@ -432,8 +442,10 @@ class NostrClient {
         let aTag = extractTagValue("a", from: tagsAny)
         print("   A-tag: \(aTag ?? "nil")")
 
-        // Get sender's profile name if available
-        let senderName = profiles[senderPubkey]?.displayName ?? profiles[senderPubkey]?.name
+        // Get sender's profile name if available (thread-safe)
+        let senderName = profileQueue.sync {
+            return profiles[senderPubkey]?.displayName ?? profiles[senderPubkey]?.name
+        }
         print("   Sender name: \(senderName ?? "not cached")")
 
         // Create a ZapComment object (with amount = 0 for regular chat)
@@ -455,7 +467,10 @@ class NostrClient {
         }
 
         // Request sender profile if we don't have it
-        if profiles[senderPubkey] == nil {
+        let hasProfile = profileQueue.sync {
+            return profiles[senderPubkey] != nil
+        }
+        if !hasProfile {
             requestProfile(for: senderPubkey)
         }
     }
@@ -517,8 +532,10 @@ class NostrClient {
         let amount = parseAmountFromBolt11(bolt11)
         print("   Amount: \(amount / 1000) sats")
 
-        // Get sender's profile name if available
-        let senderName = profiles[senderPubkey]?.displayName ?? profiles[senderPubkey]?.name
+        // Get sender's profile name if available (thread-safe)
+        let senderName = profileQueue.sync {
+            return profiles[senderPubkey]?.displayName ?? profiles[senderPubkey]?.name
+        }
         print("   Sender name: \(senderName ?? "not cached")")
 
         // Create ZapComment object
@@ -540,7 +557,10 @@ class NostrClient {
         }
 
         // Request sender profile if we don't have it
-        if profiles[senderPubkey] == nil {
+        let hasProfile = profileQueue.sync {
+            return profiles[senderPubkey] != nil
+        }
+        if !hasProfile {
             requestProfile(for: senderPubkey)
         }
     }
