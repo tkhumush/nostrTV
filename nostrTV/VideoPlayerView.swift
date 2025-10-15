@@ -22,6 +22,8 @@ struct VideoPlayerView: View {
     @State private var showZapQR = false
     @State private var selectedZapOption: ZapOption?
     @State private var invoiceURI: String?
+    @State private var zapRefreshTimer: Timer?
+    @State private var lastZapRequestPubkey: String?
 
     var body: some View {
         ZStack {
@@ -68,8 +70,7 @@ struct VideoPlayerView: View {
 
                     // Zap chyron - stretches across remaining space
                     if let stream = stream, let zapManager = zapManager {
-                        let zapStreamId = stream.eventID ?? stream.streamID
-                        ZapChyronWrapper(zapManager: zapManager, streamId: zapStreamId)
+                        ZapChyronWrapper(zapManager: zapManager, stream: stream)
                             .frame(height: 120)
                     } else {
                         Spacer()
@@ -95,15 +96,27 @@ struct VideoPlayerView: View {
         .ignoresSafeArea()
         .onAppear {
             // Fetch zaps for this stream when view appears
-            if let stream = stream, let eventID = stream.eventID, let zapManager = zapManager {
+            if let stream = stream, let eventID = stream.eventID, let zapManager = zapManager, let pubkey = stream.pubkey {
                 print("🎬 Fetching zaps for stream:")
                 print("   Event ID: \(eventID)")
                 print("   Stream ID (d-tag): \(stream.streamID)")
-                print("   Pubkey: \(stream.pubkey ?? "nil")")
-                zapManager.fetchZapsForStream(eventID, pubkey: stream.pubkey, dTag: stream.streamID)
+                print("   Pubkey: \(pubkey)")
+
+                // Fetch sample kind 9734 events for comparison (specific to this stream)
+                zapManager.fetchSampleZapRequests(streamPubkey: pubkey, streamEventId: eventID, streamDTag: stream.streamID)
+
+                // Fetch zap receipts (kind 9735)
+                zapManager.fetchZapsForStream(eventID, pubkey: pubkey, dTag: stream.streamID)
+
+                // Start periodic refresh every 30 seconds
+                startZapRefreshTimer()
             }
         }
         .onDisappear {
+            // Stop refresh timer
+            zapRefreshTimer?.invalidate()
+            zapRefreshTimer = nil
+
             // Clear zap subscriptions when view disappears
             if let stream = stream, let eventID = stream.eventID, let zapManager = zapManager {
                 print("📪 Closing zap subscriptions for stream")
@@ -126,6 +139,8 @@ struct VideoPlayerView: View {
         Task {
             do {
                 let keyPair = try NostrKeyPair.generate()
+                let zapSenderPubkey = keyPair.publicKeyHex
+
                 let generator = ZapRequestGenerator(nostrClient: nostrClient)
                 let uri = try await generator.generateZapRequest(
                     stream: stream,
@@ -138,9 +153,66 @@ struct VideoPlayerView: View {
                 await MainActor.run {
                     invoiceURI = uri
                     showZapQR = true
+                    lastZapRequestPubkey = zapSenderPubkey
+                }
+
+                // Wait 30 seconds and query for our zap receipt
+                print("⏱️ Waiting 30 seconds to check for zap receipt...")
+                try await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds
+
+                await MainActor.run {
+                    queryForOurZapReceipt(zapSenderPubkey: zapSenderPubkey)
                 }
             } catch {
                 print("❌ Failed to generate zap request: \(error)")
+            }
+        }
+    }
+
+    private func queryForOurZapReceipt(zapSenderPubkey: String) {
+        guard let stream = stream, let zapManager = zapManager else { return }
+
+        print("🔍 Querying for our zap receipt...")
+        print("   Our zap sender pubkey: \(zapSenderPubkey.prefix(8))...")
+        print("   Stream pubkey: \(stream.pubkey?.prefix(8) ?? "nil")...")
+
+        // Refresh the zap request for this stream
+        if let eventID = stream.eventID {
+            zapManager.fetchZapsForStream(eventID, pubkey: stream.pubkey, dTag: stream.streamID)
+
+            // Wait a bit for the zaps to come in, then check if ours is there
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                let zaps = zapManager.getZapsForStream(eventID)
+                let ourZap = zaps.first(where: { $0.senderPubkey == zapSenderPubkey })
+
+                if let ourZap = ourZap {
+                    print("✅ FOUND OUR ZAP!")
+                    print("   Receipt ID: \(ourZap.id.prefix(8))...")
+                    print("   Amount: \(ourZap.amountInSats) sats")
+                    print("   Message: \(ourZap.comment)")
+                    print("   Stream ID: \(ourZap.streamEventId ?? "nil")")
+                    print("   👉 Our zap is showing up correctly!")
+                } else {
+                    print("❌ Our zap not found yet")
+                    print("   Looking for pubkey: \(zapSenderPubkey)")
+                    print("   Total zaps received: \(zaps.count)")
+                    if !zaps.isEmpty {
+                        print("   Latest 3 zap senders:")
+                        for (index, zap) in zaps.prefix(3).enumerated() {
+                            print("      \(index + 1). \(zap.senderPubkey) - \(zap.amountInSats) sats")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func startZapRefreshTimer() {
+        // Refresh zaps every 30 seconds
+        zapRefreshTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [self] _ in
+            if let stream = stream, let eventID = stream.eventID, let zapManager = zapManager {
+                print("🔄 Refreshing zaps for stream...")
+                zapManager.fetchZapsForStream(eventID, pubkey: stream.pubkey, dTag: stream.streamID)
             }
         }
     }
@@ -232,10 +304,20 @@ class CustomAVPlayerViewController: AVPlayerViewController {
 // Wrapper view to observe zapManager and pass zap comments to the chyron
 struct ZapChyronWrapper: View {
     @ObservedObject var zapManager: ZapManager
-    let streamId: String
+    let stream: Stream
 
     var body: some View {
-        ZapChyronView(zapComments: zapManager.getZapsForStream(streamId))
+        // Try both eventID and a-tag format for lookup
+        let eventId = stream.eventID ?? stream.streamID
+        var zaps = zapManager.getZapsForStream(eventId)
+
+        // If no zaps found with eventID, try a-tag format
+        if zaps.isEmpty, let pubkey = stream.pubkey {
+            let aTag = "30311:\(pubkey.lowercased()):\(stream.streamID)"
+            zaps = zapManager.getZapsForStream(aTag)
+        }
+
+        return ZapChyronView(zapComments: zaps)
     }
 }
 

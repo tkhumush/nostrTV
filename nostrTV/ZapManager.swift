@@ -26,6 +26,40 @@ class ZapManager: ObservableObject {
         }
     }
 
+    /// Fetch sample kind 9734 zap request events for comparison
+    func fetchSampleZapRequests(streamPubkey: String, streamEventId: String, streamDTag: String) {
+        print("\n🔍 FETCHING SAMPLE KIND 9734 ZAP REQUESTS FOR THIS STREAM")
+        print(String(repeating: "=", count: 60))
+        print("Stream Event ID: \(streamEventId)")
+        print("Stream Pubkey: \(streamPubkey)")
+        print("Stream D-tag: \(streamDTag)")
+        print("Stream A-tag: 30311:\(streamPubkey):\(streamDTag)")
+        print(String(repeating: "=", count: 60))
+
+        let subscriptionId = "sample-zap-requests-\(streamEventId.prefix(8))"
+
+        // Request 5 recent kind 9734 events that reference this stream
+        // Kind 9734 events should have either an "e" tag or "a" tag pointing to the stream
+        var filter: [String: Any] = [
+            "kinds": [9734],
+            "limit": 5
+        ]
+
+        // Try filtering by the stream's recipient pubkey (p tag)
+        filter["#p"] = [streamPubkey.lowercased()]
+
+        let zapReq: [Any] = ["REQ", subscriptionId, filter]
+
+        do {
+            try nostrClient.sendRawRequest(zapReq)
+            print("✓ Requested 5 sample kind 9734 events for this stream")
+            print("  Filtering by p-tag (recipient): \(streamPubkey.lowercased())")
+            print("  (These will be printed when received)\n")
+        } catch {
+            print("❌ Failed to fetch sample zap requests: \(error)")
+        }
+    }
+
     /// Fetch zap comments for a specific stream
     /// - Parameters:
     ///   - streamEventId: The event ID of the stream
@@ -97,18 +131,8 @@ class ZapManager: ObservableObject {
 
     /// Handle a received chat comment or zap
     private func handleZapReceived(_ zapComment: ZapComment) {
-        print("💬 Received comment:")
-        print("   ID: \(zapComment.id.prefix(8))...")
-        if zapComment.amount > 0 {
-            print("   Amount: \(zapComment.amountInSats) sats (zap)")
-        }
-        print("   Sender: \(zapComment.senderName ?? "Anonymous")")
-        print("   Message: \(zapComment.comment.isEmpty ? "(empty)" : zapComment.comment)")
-        print("   Stream ID: \(zapComment.streamEventId ?? "nil")")
-
         // Validate we have a stream identifier
         guard let streamIdentifier = zapComment.streamEventId else {
-            print("   ⚠️ Skipping comment - no stream identifier")
             return
         }
 
@@ -116,18 +140,15 @@ class ZapManager: ObservableObject {
         // Use currentStreamATag if we have it, otherwise use the identifier from the comment
         let storageKey = currentStreamATag ?? streamIdentifier
         var comments = zapComments[storageKey] ?? []
-        print("   Current comments for this stream: \(comments.count)")
 
         // Add new comment if not already present
         if !comments.contains(where: { $0.id == zapComment.id }) {
             comments.append(zapComment)
-            print("   ✓ Added comment (total: \(comments.count))")
 
             // Sort by timestamp (newest first) and keep only the latest 50
             comments.sort { $0.timestamp > $1.timestamp }
             if comments.count > 50 {
                 comments = Array(comments.prefix(50))
-                print("   Trimmed to 50 comments")
             }
 
             zapComments[storageKey] = comments
@@ -135,10 +156,7 @@ class ZapManager: ObservableObject {
             // Also store under the comment's identifier if different
             if storageKey != streamIdentifier {
                 zapComments[streamIdentifier] = comments
-                print("   ✓ Also stored under comment's stream ID")
             }
-        } else {
-            print("   ⚠️ Comment already exists, skipping")
         }
     }
 

@@ -16,12 +16,12 @@ struct ZapOption: Identifiable {
 
     /// Predefined zap options
     static let presets: [ZapOption] = [
-        ZapOption(emoji: "👍", amount: 21, message: "Great Stream!"),
-        ZapOption(emoji: "🚀", amount: 420, message: "Let's GO!"),
-        ZapOption(emoji: "☕️", amount: 1_000, message: "Coffee on me today!"),
-        ZapOption(emoji: "🍺", amount: 5_000, message: "Cheers!"),
-        ZapOption(emoji: "🍷", amount: 10_000, message: "Respect!"),
-        ZapOption(emoji: "👑", amount: 100_000, message: "G.O.A.T!")
+        ZapOption(emoji: "👍", amount: 21, message: "Great Stream! - sent from nostrTV"),
+        ZapOption(emoji: "🚀", amount: 420, message: "Let's GO! - sent from nostrTV"),
+        ZapOption(emoji: "☕️", amount: 1_000, message: "Coffee on me today! - sent from nostrTV"),
+        ZapOption(emoji: "🍺", amount: 5_000, message: "Cheers! - sent from nostrTV"),
+        ZapOption(emoji: "🍷", amount: 10_000, message: "Respect! - sent from nostrTV"),
+        ZapOption(emoji: "👑", amount: 100_000, message: "G.O.A.T! - sent from nostrTV")
     ]
 
     /// Format amount with K suffix for thousands

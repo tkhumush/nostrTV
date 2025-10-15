@@ -188,6 +188,17 @@ class NostrClient {
             return
         }
 
+        // Print raw kind 9734 events for comparison
+        if kind == 9734 {
+            print("\n📋 SAMPLE KIND 9734 ZAP REQUEST EVENT:")
+            print(String(repeating: "-", count: 60))
+            if let jsonData = try? JSONSerialization.data(withJSONObject: eventDict, options: .prettyPrinted),
+               let jsonString = String(data: jsonData, encoding: .utf8) {
+                print(jsonString)
+            }
+            print(String(repeating: "-", count: 60))
+        }
+
         switch kind {
         case 0:
             handleProfileEvent(eventDict)
@@ -476,46 +487,31 @@ class NostrClient {
     }
 
     private func handleZapReceiptEvent(_ eventDict: [String: Any]) {
-        print("📥 Received kind 9735 (zap receipt) event")
-
         guard let tagsAny = eventDict["tags"] as? [[Any]],
               let zapReceiptId = eventDict["id"] as? String,
               let createdAt = eventDict["created_at"] as? TimeInterval else {
-            print("   ❌ Missing required fields (tags, id, or created_at)")
             return
         }
-
-        print("   Event ID: \(zapReceiptId.prefix(8))...")
 
         // Extract bolt11 invoice to get the amount
         guard let bolt11 = extractTagValue("bolt11", from: tagsAny) else {
-            print("   ❌ No bolt11 tag found")
             return
         }
-
-        print("   Found bolt11 invoice")
 
         // Extract the zap request from the description tag
         guard let descriptionJSON = extractTagValue("description", from: tagsAny),
               let descriptionData = descriptionJSON.data(using: .utf8),
               let zapRequest = try? JSONSerialization.jsonObject(with: descriptionData) as? [String: Any] else {
-            print("   ❌ Failed to parse description tag as zap request")
             return
         }
-
-        print("   Parsed zap request from description")
 
         // Extract sender pubkey from the zap request
         guard let senderPubkey = zapRequest["pubkey"] as? String else {
-            print("   ❌ No sender pubkey in zap request")
             return
         }
 
-        print("   Sender pubkey: \(senderPubkey.prefix(8))...")
-
         // Extract comment from zap request content
         let comment = zapRequest["content"] as? String ?? ""
-        print("   Comment: \(comment.isEmpty ? "(empty)" : comment)")
 
         // Extract stream reference from zap request tags
         // Try "a" tag first (for stream coordinate), then fall back to "e" tag (for event ID)
@@ -523,20 +519,14 @@ class NostrClient {
         let aTag = extractTagValue("a", from: zapRequestTags)
         let eTag = extractTagValue("e", from: zapRequestTags)
         let streamEventId = aTag ?? eTag
-        print("   Stream reference (a-tag): \(aTag ?? "nil")")
-        print("   Stream reference (e-tag): \(eTag?.prefix(8) ?? "nil")...")
 
         // Parse amount from bolt11 invoice
-        // Lightning invoices encode the amount in the invoice string
-        // Format: lnbc<amount><multiplier>...
         let amount = parseAmountFromBolt11(bolt11)
-        print("   Amount: \(amount / 1000) sats")
 
         // Get sender's profile name if available (thread-safe)
         let senderName = profileQueue.sync {
             return profiles[senderPubkey]?.displayName ?? profiles[senderPubkey]?.name
         }
-        print("   Sender name: \(senderName ?? "not cached")")
 
         // Create ZapComment object
         let zapComment = ZapComment(
@@ -548,8 +538,6 @@ class NostrClient {
             timestamp: Date(timeIntervalSince1970: createdAt),
             streamEventId: streamEventId
         )
-
-        print("   ✓ Created ZapComment object, notifying callback")
 
         // Notify callback
         DispatchQueue.main.async {

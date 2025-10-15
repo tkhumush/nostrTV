@@ -48,18 +48,17 @@ class ZapRequestGenerator {
             tags.append(["p", recipientPubkey])
         }
 
-        // Add stream coordinate (a tag)
-        if let pubkey = stream.pubkey {
-            let aTag = "30311:\(pubkey):\(stream.streamID)"
-            tags.append(["a", aTag])
-        }
-
         // Add amount in millisats
         let amountMillisats = amount * 1000
         tags.append(["amount", String(amountMillisats)])
 
-        // Add relays (use the relays we're connected to)
-        tags.append(["relays", "wss://relay.damus.io", "wss://relay.snort.social"])
+        // Add relays (use ALL the relays we're connected to)
+        tags.append(["relays",
+                     "wss://relay.snort.social",
+                     "wss://relay.tunestr.io",
+                     "wss://relay.damus.io",
+                     "wss://relay.primal.net",
+                     "wss://purplepag.es"])
 
         print("   Tags: \(tags)")
 
@@ -72,6 +71,24 @@ class ZapRequestGenerator {
         )
 
         print("   ✓ Created zap request event: \(zapRequestEvent.id?.prefix(8) ?? "unknown")")
+
+        // Print our zap request in the same format as the samples for comparison
+        print("\n📤 OUR KIND 9734 ZAP REQUEST EVENT:")
+        print(String(repeating: "=", count: 60))
+        let ourEventDict: [String: Any] = [
+            "id": zapRequestEvent.id ?? "",
+            "pubkey": zapRequestEvent.pubkey ?? "",
+            "created_at": zapRequestEvent.created_at ?? 0,
+            "kind": zapRequestEvent.kind,
+            "tags": zapRequestEvent.tags,
+            "content": zapRequestEvent.content ?? "",
+            "sig": zapRequestEvent.sig ?? ""
+        ]
+        if let jsonData = try? JSONSerialization.data(withJSONObject: ourEventDict, options: .prettyPrinted),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            print(jsonString)
+        }
+        print(String(repeating: "=", count: 60))
 
         // Encode the zap request as JSON
         guard let zapRequestJSON = try? encodeZapRequest(zapRequestEvent) else {
@@ -166,12 +183,49 @@ class ZapRequestGenerator {
 
     private func fetchLightningInvoice(url: URL) async throws -> String {
         print("   Fetching invoice from: \(url.absoluteString.prefix(100))...")
-        let (data, _) = try await URLSession.shared.data(from: url)
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let (data, response) = try await URLSession.shared.data(from: url)
 
-        guard let pr = json?["pr"] as? String else {
+        // Check HTTP status code
+        if let httpResponse = response as? HTTPURLResponse {
+            print("   HTTP Status: \(httpResponse.statusCode)")
+
+            // Handle HTTP errors
+            if httpResponse.statusCode >= 400 {
+                if let responseString = String(data: data, encoding: .utf8) {
+                    // Check if it's HTML (server error page)
+                    if responseString.contains("<!DOCTYPE html>") || responseString.contains("<html") {
+                        print("   ❌ Server returned HTML error page (status \(httpResponse.statusCode))")
+                        throw ZapRequestError.serverError("Lightning service is temporarily unavailable (HTTP \(httpResponse.statusCode))")
+                    }
+                    print("   Raw response: \(responseString.prefix(200))")
+                }
+                throw ZapRequestError.serverError("HTTP error \(httpResponse.statusCode)")
+            }
+        }
+
+        // Try to parse as JSON
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            // If parsing fails, log and throw appropriate error
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("   Raw response: \(responseString.prefix(200))")
+                print("   ❌ Invalid JSON response from server")
+
+                // Check if it's HTML
+                if responseString.contains("<!DOCTYPE html>") || responseString.contains("<html") {
+                    throw ZapRequestError.serverError("Lightning service returned an error page instead of an invoice")
+                }
+            }
+            throw ZapRequestError.invalidResponse("Unable to parse server response as JSON")
+        }
+
+        guard let pr = json["pr"] as? String else {
             // Check for error
-            if let reason = json?["reason"] as? String {
+            if let reason = json["reason"] as? String {
+                print("   ❌ Error from server: \(reason)")
+                throw ZapRequestError.serverError(reason)
+            }
+            if let status = json["status"] as? String, status == "ERROR" {
+                let reason = json["reason"] as? String ?? "Unknown error"
                 print("   ❌ Error from server: \(reason)")
                 throw ZapRequestError.serverError(reason)
             }
@@ -189,6 +243,7 @@ enum ZapRequestError: Error, LocalizedError {
     case missingCallback
     case missingInvoice
     case serverError(String)
+    case invalidResponse(String)
 
     var errorDescription: String? {
         switch self {
@@ -204,6 +259,8 @@ enum ZapRequestError: Error, LocalizedError {
             return "Lightning service did not return an invoice"
         case .serverError(let reason):
             return "Server error: \(reason)"
+        case .invalidResponse(let response):
+            return "Invalid response from server: \(response)"
         }
     }
 }
