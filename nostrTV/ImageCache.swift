@@ -92,7 +92,12 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         .onAppear {
             loadImageIfNeeded()
         }
-        .onChange(of: url) { _, newURL in
+        .onChange(of: url) { oldURL, newURL in
+            // Clear the old image when URL changes
+            if oldURL != newURL {
+                image = nil
+                isLoading = false
+            }
             loadImageIfNeeded()
         }
     }

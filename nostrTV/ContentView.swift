@@ -9,6 +9,156 @@ import SwiftUI
 import AVKit
 import CoreImage.CIFilterBuiltins
 
+struct FeaturedStreamCardView: View {
+    let stream: Stream
+    let viewModel: StreamViewModel
+    let onStreamSelected: (URL, String?, Stream) -> Void
+
+    var body: some View {
+        Button(action: {
+            if let url = URL(string: stream.streaming_url) {
+                let lightningAddress: String? = {
+                    if let pubkey = stream.pubkey, let profile = viewModel.getProfile(for: pubkey) {
+                        return profile.lud16
+                    }
+                    return nil
+                }()
+                onStreamSelected(url, lightningAddress, stream)
+            }
+        }) {
+            VStack(alignment: .leading, spacing: 12) {
+                // Large thumbnail with live indicator overlay
+                ZStack(alignment: .topLeading) {
+                    // Thumbnail
+                    if let imageURL = stream.imageURL, let url = URL(string: imageURL) {
+                        CachedAsyncImage(url: url) { image in
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(height: 400)
+                                .clipped()
+                                .cornerRadius(12)
+                        } placeholder: {
+                            Color.gray.frame(height: 400)
+                                .cornerRadius(12)
+                        }
+                    } else if let pubkey = stream.pubkey,
+                              let profile = viewModel.getProfile(for: pubkey),
+                              let pictureURL = profile.picture,
+                              let url = URL(string: pictureURL) {
+                        CachedAsyncImage(url: url) { image in
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(height: 400)
+                                .clipped()
+                                .cornerRadius(12)
+                        } placeholder: {
+                            Color.gray.frame(height: 400)
+                                .cornerRadius(12)
+                        }
+                    } else {
+                        Color.gray.frame(height: 400)
+                            .cornerRadius(12)
+                    }
+
+                    // Live indicator badge (top left with padding)
+                    if stream.isLive {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 8, height: 8)
+                            Text("LIVE")
+                                .font(.caption)
+                                .fontWeight(.bold)
+                                .foregroundColor(.white)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.7))
+                        .cornerRadius(6)
+                        .padding(16)
+                    }
+                }
+
+                // Stream info
+                VStack(alignment: .leading, spacing: 8) {
+                    // Stream title
+                    Text(stream.title)
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .lineLimit(2)
+
+                    // Streamer info
+                    HStack(spacing: 8) {
+                        // Profile picture
+                        if let pubkey = stream.pubkey,
+                           let profile = viewModel.getProfile(for: pubkey),
+                           let pictureURL = profile.picture,
+                           let url = URL(string: pictureURL) {
+                            CachedAsyncImage(url: url) { image in
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(width: 32, height: 32)
+                                    .clipShape(Circle())
+                            } placeholder: {
+                                Circle()
+                                    .fill(Color.gray)
+                                    .frame(width: 32, height: 32)
+                            }
+                        } else {
+                            Circle()
+                                .fill(Color.blue)
+                                .frame(width: 32, height: 32)
+                                .overlay(
+                                    Image(systemName: "person.fill")
+                                        .foregroundColor(.white)
+                                        .font(.system(size: 16))
+                                )
+                        }
+
+                        // Username
+                        Text({
+                            if let pubkey = stream.pubkey,
+                               let profile = viewModel.getProfile(for: pubkey) {
+                                return profile.displayNameOrName
+                            }
+                            return "Unknown"
+                        }())
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                    }
+
+                    // Category and viewer count
+                    HStack(spacing: 12) {
+                        Text(stream.category)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.gray.opacity(0.2))
+                            .cornerRadius(6)
+
+                        if stream.viewerCount > 0 {
+                            HStack(spacing: 4) {
+                                Image(systemName: "eye.fill")
+                                    .font(.caption)
+                                Text("\(stream.viewerCount)")
+                                    .font(.subheadline)
+                            }
+                            .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct CategoryHeaderView: View {
     let categoryName: String
     let streamCount: Int
@@ -183,15 +333,34 @@ struct ContentView: View {
     var body: some View {
         NavigationView {
             List {
+                // Featured stream section (stream with most viewers)
+                if let featured = viewModel.featuredStream {
+                    Section {
+                        FeaturedStreamCardView(stream: featured, viewModel: viewModel) { url, lightningAddress, selectedStream in
+                            let player = AVPlayer(url: url)
+                            self.player = player
+                            self.selectedLightningAddress = lightningAddress
+                            self.selectedStream = selectedStream
+                            self.showPlayer = true
+                        }
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                    }
+                }
+
+                // Regular categorized streams
                 ForEach(viewModel.categorizedStreams, id: \.name) { category in
                     Section(header: CategoryHeaderView(categoryName: category.name, streamCount: category.streams.count)) {
                         ForEach(category.streams) { stream in
-                            StreamRowView(stream: stream, viewModel: viewModel) { url, lightningAddress, selectedStream in
-                                let player = AVPlayer(url: url)
-                                self.player = player
-                                self.selectedLightningAddress = lightningAddress
-                                self.selectedStream = selectedStream
-                                self.showPlayer = true
+                            // Don't show the featured stream again in the regular list
+                            if stream.id != viewModel.featuredStream?.id {
+                                StreamRowView(stream: stream, viewModel: viewModel) { url, lightningAddress, selectedStream in
+                                    let player = AVPlayer(url: url)
+                                    self.player = player
+                                    self.selectedLightningAddress = lightningAddress
+                                    self.selectedStream = selectedStream
+                                    self.showPlayer = true
+                                }
                             }
                         }
                     }

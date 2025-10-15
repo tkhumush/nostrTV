@@ -18,6 +18,7 @@ struct Stream: Identifiable, Codable, Equatable {
     let status: String
     let tags: [String]
     let createdAt: Date?
+    let viewerCount: Int  // Current viewer/participant count
 
     var id: String { streamID }
 

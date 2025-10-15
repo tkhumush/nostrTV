@@ -231,7 +231,17 @@ class NostrClient {
         let streamID = extractTagValue("d", from: tagsAny)
         let status = extractTagValue("status", from: tagsAny) ?? "unknown"
         let imageURL = extractTagValue("image", from: tagsAny)
+        // The "p" tag in kind 30311 is the stream host pubkey (preferred), fallback to event author
         let pubkey = extractTagValue("p", from: tagsAny) ?? eventDict["pubkey"] as? String
+
+        // Extract viewer count from current_participants tag
+        let viewerCount: Int = {
+            if let countString = extractTagValue("current_participants", from: tagsAny),
+               let count = Int(countString) {
+                return count
+            }
+            return 0
+        }()
 
         // Extract hashtags and other tags for categorization
         let hashtags = extractTagValues("t", from: tagsAny)
@@ -281,7 +291,8 @@ class NostrClient {
             profile: nil,
             status: status,
             tags: allTags,
-            createdAt: createdAt
+            createdAt: createdAt,
+            viewerCount: viewerCount
         )
 
         DispatchQueue.main.async {

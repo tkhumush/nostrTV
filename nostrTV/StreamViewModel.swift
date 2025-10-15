@@ -19,6 +19,23 @@ class StreamViewModel: ObservableObject {
         return nostrClient
     }
 
+    /// Get the featured stream (live stream with most viewers)
+    var featuredStream: Stream? {
+        let liveStreams = streams.filter { $0.isLive }
+        // If following specific users, prioritize their streams
+        if !followList.isEmpty {
+            let followedLiveStreams = liveStreams.filter { stream in
+                guard let pubkey = stream.pubkey else { return false }
+                return followList.contains(pubkey)
+            }
+            if !followedLiveStreams.isEmpty {
+                return followedLiveStreams.max(by: { $0.viewerCount < $1.viewerCount })
+            }
+        }
+        // Otherwise return the stream with most viewers overall
+        return liveStreams.max(by: { $0.viewerCount < $1.viewerCount })
+    }
+
     init() {
         nostrClient.onStreamReceived = { [weak self] stream in
             DispatchQueue.main.async {
