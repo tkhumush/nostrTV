@@ -313,6 +313,42 @@ struct StreamRowView: View {
     }
 }
 
+struct StreamListView: View {
+    @ObservedObject var viewModel: StreamViewModel
+    let categorizedStreams: [StreamCategory]
+    let featuredStream: Stream?
+    let onStreamSelected: (URL, String?, Stream) -> Void
+
+    var body: some View {
+        List {
+            // Featured stream section (stream with most viewers)
+            if let featured = featuredStream {
+                Section {
+                    FeaturedStreamCardView(stream: featured, viewModel: viewModel) { url, lightningAddress, selectedStream in
+                        onStreamSelected(url, lightningAddress, selectedStream)
+                    }
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                }
+            }
+
+            // Regular categorized streams
+            ForEach(categorizedStreams, id: \.name) { category in
+                Section(header: CategoryHeaderView(categoryName: category.name, streamCount: category.streams.count)) {
+                    ForEach(category.streams) { stream in
+                        // Don't show the featured stream again in the regular list
+                        if stream.id != featuredStream?.id {
+                            StreamRowView(stream: stream, viewModel: viewModel) { url, lightningAddress, selectedStream in
+                                onStreamSelected(url, lightningAddress, selectedStream)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 struct ContentView: View {
     @StateObject private var viewModel: StreamViewModel
     @StateObject private var zapManager: ZapManager
@@ -331,58 +367,61 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationView {
-            List {
-                // Featured stream section (stream with most viewers)
-                if let featured = viewModel.featuredStream {
-                    Section {
-                        FeaturedStreamCardView(stream: featured, viewModel: viewModel) { url, lightningAddress, selectedStream in
-                            let player = AVPlayer(url: url)
-                            self.player = player
-                            self.selectedLightningAddress = lightningAddress
-                            self.selectedStream = selectedStream
-                            self.showPlayer = true
-                        }
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
+        ZStack(alignment: .topTrailing) {
+            TabView {
+                // Following tab
+                NavigationView {
+                    StreamListView(
+                        viewModel: viewModel,
+                        categorizedStreams: viewModel.categorizedStreams,
+                        featuredStream: viewModel.featuredStream
+                    ) { url, lightningAddress, selectedStream in
+                        let player = AVPlayer(url: url)
+                        self.player = player
+                        self.selectedLightningAddress = lightningAddress
+                        self.selectedStream = selectedStream
+                        self.showPlayer = true
                     }
+                    .navigationTitle("Following")
+                }
+                .tabItem {
+                    Label("Following", systemImage: "person.2.fill")
                 }
 
-                // Regular categorized streams
-                ForEach(viewModel.categorizedStreams, id: \.name) { category in
-                    Section(header: CategoryHeaderView(categoryName: category.name, streamCount: category.streams.count)) {
-                        ForEach(category.streams) { stream in
-                            // Don't show the featured stream again in the regular list
-                            if stream.id != viewModel.featuredStream?.id {
-                                StreamRowView(stream: stream, viewModel: viewModel) { url, lightningAddress, selectedStream in
-                                    let player = AVPlayer(url: url)
-                                    self.player = player
-                                    self.selectedLightningAddress = lightningAddress
-                                    self.selectedStream = selectedStream
-                                    self.showPlayer = true
-                                }
-                            }
-                        }
+                // Discover tab (all streams)
+                NavigationView {
+                    StreamListView(
+                        viewModel: viewModel,
+                        categorizedStreams: viewModel.allCategorizedStreams,
+                        featuredStream: viewModel.streams.filter { $0.isLive }.max(by: { $0.viewerCount < $1.viewerCount })
+                    ) { url, lightningAddress, selectedStream in
+                        let player = AVPlayer(url: url)
+                        self.player = player
+                        self.selectedLightningAddress = lightningAddress
+                        self.selectedStream = selectedStream
+                        self.showPlayer = true
                     }
+                    .navigationTitle("Discover")
+                }
+                .tabItem {
+                    Label("Discover", systemImage: "globe")
                 }
             }
-            .navigationTitle("Live Streams")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        showProfilePage = true
-                    }) {
-                        HStack(spacing: 8) {
-                            // Standard user profile icon
-                            Image(systemName: "person.circle.fill")
-                                .font(.system(size: 32))
-                            Image(systemName: "gear")
-                                .font(.system(size: 20))
-                        }
-                    }
-                    .buttonStyle(.plain)
+
+            // Profile button overlayed on top right
+            Button(action: {
+                showProfilePage = true
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "person.circle.fill")
+                        .font(.system(size: 32))
+                    Image(systemName: "gear")
+                        .font(.system(size: 20))
                 }
             }
+            .buttonStyle(.plain)
+            .padding(.top, 60)
+            .padding(.trailing, 40)
         }
         .ignoresSafeArea()
         .fullScreenCover(isPresented: $showPlayer) {

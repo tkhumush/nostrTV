@@ -9,6 +9,7 @@ struct StreamCategory {
 class StreamViewModel: ObservableObject {
     @Published var streams: [Stream] = []
     @Published var categorizedStreams: [StreamCategory] = []
+    @Published var allCategorizedStreams: [StreamCategory] = []  // Unfiltered streams
     private var nostrClient = NostrClient()
     private var refreshTimer: Timer?
     private var followList: [String] = []
@@ -102,6 +103,9 @@ class StreamViewModel: ObservableObject {
     }
 
     private func updateCategorizedStreams() {
+        // Update all streams (unfiltered)
+        self.allCategorizedStreams = categorizeStreams(streams)
+
         // Filter streams by follow list if not empty
         let filteredStreams: [Stream]
         if !followList.isEmpty {
@@ -114,9 +118,14 @@ class StreamViewModel: ObservableObject {
             filteredStreams = streams
         }
 
+        // Update filtered streams
+        self.categorizedStreams = categorizeStreams(filteredStreams)
+    }
+
+    private func categorizeStreams(_ streamList: [Stream]) -> [StreamCategory] {
         // Separate live and ended streams
-        let liveStreams = filteredStreams.filter { $0.isLive }
-        let endedStreams = filteredStreams.filter { !$0.isLive }
+        let liveStreams = streamList.filter { $0.isLive }
+        let endedStreams = streamList.filter { !$0.isLive }
 
         // Group live streams by category
         let liveStreamsByCategory = Dictionary(grouping: liveStreams) { $0.category }
@@ -147,7 +156,7 @@ class StreamViewModel: ObservableObject {
             categories.append(StreamCategory(name: "Past Streams", streams: sortedEndedStreams))
         }
 
-        self.categorizedStreams = categories
+        return categories
     }
 
     private func validateStreamURL(_ stream: Stream) {
