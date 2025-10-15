@@ -35,22 +35,8 @@ class ZapRequestGenerator {
         print("   Comment: \(comment)")
         print("   LUD16: \(lud16)")
 
-        // Build tags for the zap request
+        // Build tags for the zap request following NIP-57 specification
         var tags: [[String]] = []
-
-        // Add event reference (e tag) if we have an event ID
-        if let eventID = stream.eventID {
-            tags.append(["e", eventID])
-        }
-
-        // Add recipient pubkey (p tag)
-        if let recipientPubkey = stream.pubkey {
-            tags.append(["p", recipientPubkey])
-        }
-
-        // Add amount in millisats
-        let amountMillisats = amount * 1000
-        tags.append(["amount", String(amountMillisats)])
 
         // Add relays (use ALL the relays we're connected to)
         tags.append(["relays",
@@ -59,6 +45,27 @@ class ZapRequestGenerator {
                      "wss://relay.damus.io",
                      "wss://relay.primal.net",
                      "wss://purplepag.es"])
+
+        // Add amount in millisats
+        let amountMillisats = amount * 1000
+        tags.append(["amount", String(amountMillisats)])
+
+        // Add lnurl tag
+        tags.append(["lnurl", lud16])
+
+        // Add recipient pubkey (p tag)
+        if let recipientPubkey = stream.pubkey {
+            tags.append(["p", recipientPubkey])
+        }
+
+        // Add event coordinate (a tag) for kind 30311 live streaming events
+        // Format: 30311:<author-pubkey>:<d-tag>
+        if let recipientPubkey = stream.pubkey {
+            tags.append(["a", "30311:\(recipientPubkey):\(stream.streamID)"])
+        }
+
+        // Add kind tag (k tag) to reference the kind of event being zapped
+        tags.append(["k", "30311"])
 
         print("   Tags: \(tags)")
 
