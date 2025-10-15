@@ -24,6 +24,9 @@ struct VideoPlayerView: View {
     @State private var invoiceURI: String?
     @State private var zapRefreshTimer: Timer?
     @State private var lastZapRequestPubkey: String?
+    @State private var chatMessage: String = ""
+    @State private var showChatInput: Bool = false
+    @State private var liveActivityManager: LiveActivityManager?
 
     var body: some View {
         ZStack {
@@ -36,12 +39,13 @@ struct VideoPlayerView: View {
                     nostrClient: nostrClient
                 )
 
-                // Bottom bar with zap button, menu options, and chyron
+                // Bottom bar with zap button, chat button, menu options, and chyron
                 HStack(spacing: 0) {
                     // Zap button - square in bottom left corner
                     if lightningAddress != nil {
                         Button(action: {
                             showZapMenu.toggle()
+                            showChatInput = false  // Hide chat input when showing zap menu
                         }) {
                             Rectangle()
                                 .fill(Color.yellow)
@@ -56,7 +60,25 @@ struct VideoPlayerView: View {
                         .frame(width: 120, height: 120)
                     }
 
-                    // Zap menu options - shown inline next to button
+                    // Chat button - square next to zap button
+                    Button(action: {
+                        showChatInput.toggle()
+                        showZapMenu = false  // Hide zap menu when showing chat input
+                    }) {
+                        Rectangle()
+                            .fill(Color.blue)
+                            .frame(width: 120, height: 120)
+                            .cornerRadius(0)
+                            .overlay(
+                                Image(systemName: "message.fill")
+                                    .font(.system(size: 50))
+                                    .foregroundColor(.white)
+                            )
+                    }
+                    .buttonStyle(SquareCardButtonStyle())
+                    .frame(width: 120, height: 120)
+
+                    // Zap menu options - shown inline next to buttons
                     if showZapMenu {
                         ZapMenuOptionsView(
                             onZapSelected: { option in
@@ -64,6 +86,20 @@ struct VideoPlayerView: View {
                             },
                             onDismiss: {
                                 showZapMenu = false
+                            }
+                        )
+                    }
+
+                    // Chat input - shown inline when chat button is pressed
+                    if showChatInput {
+                        ChatInputView(
+                            message: $chatMessage,
+                            onSend: {
+                                sendChatMessage()
+                            },
+                            onDismiss: {
+                                showChatInput = false
+                                chatMessage = ""
                             }
                         )
                     }
@@ -95,6 +131,20 @@ struct VideoPlayerView: View {
         }
         .ignoresSafeArea()
         .onAppear {
+            // Initialize LiveActivityManager
+            liveActivityManager = LiveActivityManager(nostrClient: nostrClient)
+
+            // Join the stream
+            if let stream = stream, let activityManager = liveActivityManager {
+                Task {
+                    do {
+                        try await activityManager.joinStreamWithConnection(stream)
+                    } catch {
+                        print("❌ Error joining stream: \(error)")
+                    }
+                }
+            }
+
             // Fetch zaps for this stream when view appears
             if let stream = stream, let eventID = stream.eventID, let zapManager = zapManager, let pubkey = stream.pubkey {
                 print("🎬 Fetching zaps for stream:")
@@ -113,6 +163,17 @@ struct VideoPlayerView: View {
             }
         }
         .onDisappear {
+            // Leave the stream
+            if let activityManager = liveActivityManager {
+                Task {
+                    do {
+                        try await activityManager.leaveCurrentStream()
+                    } catch {
+                        print("❌ Error leaving stream: \(error)")
+                    }
+                }
+            }
+
             // Stop refresh timer
             zapRefreshTimer?.invalidate()
             zapRefreshTimer = nil
@@ -213,6 +274,30 @@ struct VideoPlayerView: View {
             if let stream = stream, let eventID = stream.eventID, let zapManager = zapManager {
                 print("🔄 Refreshing zaps for stream...")
                 zapManager.fetchZapsForStream(eventID, pubkey: stream.pubkey, dTag: stream.streamID)
+            }
+        }
+    }
+
+    private func sendChatMessage() {
+        guard !chatMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+
+        guard let activityManager = liveActivityManager else {
+            print("❌ LiveActivityManager not initialized")
+            return
+        }
+
+        Task {
+            do {
+                try await activityManager.sendChatMessage(chatMessage)
+                await MainActor.run {
+                    chatMessage = ""
+                    showChatInput = false
+                }
+                print("✅ Chat message sent successfully")
+            } catch {
+                print("❌ Failed to send chat message: \(error)")
             }
         }
     }
@@ -331,5 +416,58 @@ private struct SquareCardButtonStyle: ButtonStyle {
             .shadow(color: .black.opacity(0.3), radius: isFocused ? 10 : 0, x: 0, y: isFocused ? 5 : 0)
             .animation(.easeInOut(duration: 0.2), value: isFocused)
             .clipShape(Rectangle()) // Force sharp corners
+    }
+}
+
+/// Chat input view for sending messages
+struct ChatInputView: View {
+    @Binding var message: String
+    let onSend: () -> Void
+    let onDismiss: () -> Void
+    @FocusState private var isTextFieldFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Text field for message input
+            TextField("Type your message...", text: $message)
+                .padding(12)
+                .background(Color.white)
+                .foregroundColor(.black)
+                .cornerRadius(8)
+                .focused($isTextFieldFocused)
+                .frame(width: 400)
+                .onSubmit {
+                    onSend()
+                }
+
+            // Send button
+            Button(action: onSend) {
+                Text("Send")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
+                    .background(Color.blue)
+                    .cornerRadius(8)
+            }
+            .buttonStyle(.plain)
+
+            // Cancel button
+            Button(action: onDismiss) {
+                Text("Cancel")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
+                    .background(Color.gray)
+                    .cornerRadius(8)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(16)
+        .background(Color.black.opacity(0.8))
+        .onAppear {
+            isTextFieldFocused = true
+        }
     }
 }
