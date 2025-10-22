@@ -15,17 +15,13 @@ struct LiveChatView: View {
     let nostrClient: NostrClient
 
     @State private var shouldAutoScroll = true
+    @State private var uniqueMessages: [ChatMessage] = []
 
     var body: some View {
         let streamId = stream.eventID ?? stream.streamID
         let aTag = stream.pubkey.map { "30311:\($0.lowercased()):\(stream.streamID)" }
         let messages = chatManager.getMessagesForStream(streamId)
             + chatManager.getMessagesForStream(aTag ?? "")
-
-        // Remove duplicates and sort by timestamp
-        let uniqueMessages = Dictionary(grouping: messages, by: { $0.id })
-            .compactMap { $0.value.first }
-            .sorted { $0.timestamp < $1.timestamp }
 
         // Use profileUpdateTrigger to force view refresh when profiles change
         let _ = chatManager.profileUpdateTrigger
@@ -99,6 +95,18 @@ struct LiveChatView: View {
                     }
                 }
             }
+        }
+        .onChange(of: messages.count) { _, newCount in
+            // Update cached deduplicated messages only when count changes
+            uniqueMessages = Dictionary(grouping: messages, by: { $0.id })
+                .compactMap { $0.value.first }
+                .sorted { $0.timestamp < $1.timestamp }
+        }
+        .onAppear {
+            // Initial deduplication on appear
+            uniqueMessages = Dictionary(grouping: messages, by: { $0.id })
+                .compactMap { $0.value.first }
+                .sorted { $0.timestamp < $1.timestamp }
         }
     }
 }
