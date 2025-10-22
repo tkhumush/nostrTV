@@ -185,9 +185,6 @@ struct VideoPlayerView: View {
                 print("   Stream ID (d-tag): \(stream.streamID)")
                 print("   Pubkey: \(pubkey)")
 
-                // Fetch sample kind 9734 events for comparison (specific to this stream)
-                zapManager.fetchSampleZapRequests(streamPubkey: pubkey, streamEventId: eventID, streamDTag: stream.streamID)
-
                 // Fetch zap receipts (kind 9735)
                 zapManager.fetchZapsForStream(eventID, pubkey: pubkey, dTag: stream.streamID)
 

@@ -35,40 +35,6 @@ class ZapManager: ObservableObject {
         }
     }
 
-    /// Fetch sample kind 9734 zap request events for comparison
-    func fetchSampleZapRequests(streamPubkey: String, streamEventId: String, streamDTag: String) {
-        print("\n🔍 FETCHING SAMPLE KIND 9734 ZAP REQUESTS FOR THIS STREAM")
-        print(String(repeating: "=", count: 60))
-        print("Stream Event ID: \(streamEventId)")
-        print("Stream Pubkey: \(streamPubkey)")
-        print("Stream D-tag: \(streamDTag)")
-        print("Stream A-tag: 30311:\(streamPubkey):\(streamDTag)")
-        print(String(repeating: "=", count: 60))
-
-        let subscriptionId = "sample-zap-requests-\(streamEventId.prefix(8))"
-
-        // Request 5 recent kind 9734 events that reference this stream
-        // Kind 9734 events should have either an "e" tag or "a" tag pointing to the stream
-        var filter: [String: Any] = [
-            "kinds": [9734],
-            "limit": 5
-        ]
-
-        // Try filtering by the stream's recipient pubkey (p tag)
-        filter["#p"] = [streamPubkey.lowercased()]
-
-        let zapReq: [Any] = ["REQ", subscriptionId, filter]
-
-        do {
-            try nostrClient.sendRawRequest(zapReq)
-            print("✓ Requested 5 sample kind 9734 events for this stream")
-            print("  Filtering by p-tag (recipient): \(streamPubkey.lowercased())")
-            print("  (These will be printed when received)\n")
-        } catch {
-            print("❌ Failed to fetch sample zap requests: \(error)")
-        }
-    }
-
     /// Fetch zap comments for a specific stream
     /// - Parameters:
     ///   - streamEventId: The event ID of the stream

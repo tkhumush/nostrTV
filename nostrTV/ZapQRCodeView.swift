@@ -14,6 +14,9 @@ struct ZapQRCodeView: View {
     let zapOption: ZapOption
     let onDismiss: () -> Void
 
+    @State private var qrImage: UIImage? = nil
+    @State private var isGenerating = true
+
     var body: some View {
         ZStack {
             // Semi-transparent background - don't dismiss on tap, use Done button
@@ -46,7 +49,7 @@ struct ZapQRCodeView: View {
                 }
 
                 // QR Code
-                if let qrImage = generateQRCode(from: invoiceURI) {
+                if let qrImage = qrImage {
                     Image(uiImage: qrImage)
                         .interpolation(.none)
                         .resizable()
@@ -55,6 +58,17 @@ struct ZapQRCodeView: View {
                         .background(Color.white)
                         .cornerRadius(20)
                         .shadow(color: .yellow.opacity(0.3), radius: 20)
+                } else if isGenerating {
+                    // Loading indicator while generating
+                    ZStack {
+                        Rectangle()
+                            .fill(Color.white)
+                            .frame(width: 500, height: 500)
+                            .cornerRadius(20)
+                        ProgressView()
+                            .scaleEffect(2.0)
+                            .tint(.gray)
+                    }
                 } else {
                     Rectangle()
                         .fill(Color.gray.opacity(0.3))
@@ -87,9 +101,19 @@ struct ZapQRCodeView: View {
             }
             .padding(60)
         }
+        .onAppear {
+            // Generate QR code on background thread to avoid blocking UI
+            Task.detached(priority: .userInitiated) {
+                let image = await generateQRCodeAsync(from: invoiceURI)
+                await MainActor.run {
+                    qrImage = image
+                    isGenerating = false
+                }
+            }
+        }
     }
 
-    private func generateQRCode(from string: String) -> UIImage? {
+    private func generateQRCodeAsync(from string: String) async -> UIImage? {
         let context = CIContext()
         let filter = CIFilter.qrCodeGenerator()
         let data = Data(string.utf8)
