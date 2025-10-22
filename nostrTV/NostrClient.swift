@@ -33,13 +33,24 @@ struct NostrProfile: Codable {
     let lud16: String?
 }
 
+// MARK: - Profile Cache Entry
+private struct ProfileCacheEntry {
+    let profile: Profile
+    let timestamp: Date
+    var lastAccessed: Date
+}
+
 class NostrClient {
     private var webSocketTasks: [URL: URLSessionWebSocketTask] = [:]
-    private var profiles: [String: Profile] = [:] // pubkey -> Profile
+    private var profileCache: [String: ProfileCacheEntry] = [:] // pubkey -> ProfileCacheEntry
     private var followListEvents: [String: (timestamp: Int, follows: [String])] = [:] // pubkey -> (created_at, follows)
     private var userRelays: [String] = [] // User's relay list from NIP-65 (kind 10002) or kind 3
     private var session: URLSession!
     private let profileQueue = DispatchQueue(label: "com.nostrtv.profiles", attributes: .concurrent)
+
+    // Profile cache configuration
+    private let maxProfileCacheSize = 500
+    private let profileCacheTTL: TimeInterval = 24 * 60 * 60 // 24 hours
 
     var onStreamReceived: ((Stream) -> Void)?
     var onProfileReceived: ((Profile) -> Void)?
@@ -53,16 +64,64 @@ class NostrClient {
             return nil
         }
         return profileQueue.sync {
-            return profiles[pubkey]
+            // Check if profile exists and is not expired
+            guard var entry = profileCache[pubkey] else {
+                return nil
+            }
+
+            // Check if profile has expired
+            let now = Date()
+            if now.timeIntervalSince(entry.timestamp) > profileCacheTTL {
+                // Profile expired, remove it
+                profileCache.removeValue(forKey: pubkey)
+                return nil
+            }
+
+            // Update last accessed time (using barrier to modify)
+            profileQueue.async(flags: .barrier) { [weak self] in
+                self?.profileCache[pubkey]?.lastAccessed = now
+            }
+
+            return entry.profile
         }
     }
 
     /// Manually cache a profile (useful for caching our own profile immediately after publishing)
     func cacheProfile(_ profile: Profile, for pubkey: String) {
-        profileQueue.async(flags: .barrier) {
-            self.profiles[pubkey] = profile
+        profileQueue.async(flags: .barrier) { [weak self] in
+            guard let self = self else { return }
+
+            let now = Date()
+            let entry = ProfileCacheEntry(profile: profile, timestamp: now, lastAccessed: now)
+
+            // Evict old entries if cache is full
+            self.evictOldProfilesIfNeeded()
+
+            self.profileCache[pubkey] = entry
         }
         print("✅ Cached profile for \(pubkey.prefix(8))... - \(profile.displayName ?? profile.name ?? "Unknown")")
+    }
+
+    /// Evict expired and least recently used profiles when cache is full
+    private func evictOldProfilesIfNeeded() {
+        // This should be called within a barrier block (write lock)
+        let now = Date()
+
+        // First, remove expired profiles
+        profileCache = profileCache.filter { _, entry in
+            now.timeIntervalSince(entry.timestamp) <= profileCacheTTL
+        }
+
+        // If still over limit, remove least recently used
+        if profileCache.count >= maxProfileCacheSize {
+            // Sort by last accessed time and remove oldest 20%
+            let entriesToRemove = Int(Double(maxProfileCacheSize) * 0.2)
+            let sortedByAccess = profileCache.sorted { $0.value.lastAccessed < $1.value.lastAccessed }
+
+            for i in 0..<min(entriesToRemove, sortedByAccess.count) {
+                profileCache.removeValue(forKey: sortedByAccess[i].key)
+            }
+        }
     }
 
     func connect() {
@@ -311,7 +370,7 @@ class NostrClient {
         // If we have a pubkey, request the profile if we don't have it
         if let pubkey = pubkey {
             let hasProfile = profileQueue.sync {
-                return self.profiles[pubkey] != nil
+                return self.profileCache[pubkey] != nil
             }
             if !hasProfile {
                 requestProfile(for: pubkey)
@@ -342,9 +401,17 @@ class NostrClient {
             lud16: profileData["lud16"] as? String
         )
 
-        // Store profile (thread-safe)
-        profileQueue.async(flags: .barrier) {
-            self.profiles[pubkey] = profile
+        // Store profile (thread-safe) with LRU eviction
+        profileQueue.async(flags: .barrier) { [weak self] in
+            guard let self = self else { return }
+
+            let now = Date()
+            let entry = ProfileCacheEntry(profile: profile, timestamp: now, lastAccessed: now)
+
+            // Evict old entries if cache is full
+            self.evictOldProfilesIfNeeded()
+
+            self.profileCache[pubkey] = entry
         }
         // Profile updated (removed verbose logging)
 
@@ -475,7 +542,7 @@ class NostrClient {
 
         // Get sender's profile name if available (thread-safe)
         let senderName = profileQueue.sync {
-            return profiles[senderPubkey]?.displayName ?? profiles[senderPubkey]?.name
+            return profileCache[senderPubkey]?.profile.displayName ?? profileCache[senderPubkey]?.profile.name
         }
         print("   Sender name: \(senderName ?? "not cached")")
 
@@ -499,7 +566,7 @@ class NostrClient {
 
         // Request sender profile if we don't have it
         let hasProfile = profileQueue.sync {
-            return profiles[senderPubkey] != nil
+            return profileCache[senderPubkey] != nil
         }
         if !hasProfile {
             requestProfile(for: senderPubkey)
@@ -545,7 +612,7 @@ class NostrClient {
 
         // Get sender's profile name if available (thread-safe)
         let senderName = profileQueue.sync {
-            return profiles[senderPubkey]?.displayName ?? profiles[senderPubkey]?.name
+            return profileCache[senderPubkey]?.profile.displayName ?? profileCache[senderPubkey]?.profile.name
         }
 
         // Create ZapComment object
@@ -566,7 +633,7 @@ class NostrClient {
 
         // Request sender profile if we don't have it
         let hasProfile = profileQueue.sync {
-            return profiles[senderPubkey] != nil
+            return profileCache[senderPubkey] != nil
         }
         if !hasProfile {
             requestProfile(for: senderPubkey)

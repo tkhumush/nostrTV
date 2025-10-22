@@ -15,6 +15,9 @@ class StreamViewModel: ObservableObject {
     private var followList: [String] = []
     private var validationTasks: Set<String> = [] // Track ongoing validations
 
+    // Stream collection size limit to prevent unbounded memory growth
+    private let maxStreamCount = 200
+
     /// Expose the NostrClient for use by other components
     var client: NostrClient {
         return nostrClient
@@ -56,6 +59,10 @@ class StreamViewModel: ObservableObject {
                 }
 
                 self.streams.append(stream)
+
+                // Evict old streams if we exceed the limit
+                self.evictOldStreamsIfNeeded()
+
                 self.updateCategorizedStreams()
 
                 // Validate stream URL in background
@@ -96,6 +103,56 @@ class StreamViewModel: ObservableObject {
         // Don't clear existing streams immediately - let new data come in and replace
         nostrClient.disconnect()
         nostrClient.connect()
+    }
+
+    /// Evict oldest ended streams when collection exceeds size limit
+    private func evictOldStreamsIfNeeded() {
+        guard streams.count > maxStreamCount else { return }
+
+        // Calculate how many streams to remove (remove 20% to avoid frequent evictions)
+        let excessCount = streams.count - maxStreamCount
+        let removalCount = max(excessCount, Int(Double(maxStreamCount) * 0.2))
+
+        // Separate live and ended streams
+        let liveStreams = streams.filter { $0.isLive }
+        let endedStreams = streams.filter { !$0.isLive }
+
+        // If we have enough ended streams, remove oldest ones
+        if endedStreams.count >= removalCount {
+            // Sort ended streams by creation date (oldest first)
+            let sortedEndedStreams = endedStreams.sorted { stream1, stream2 in
+                guard let date1 = stream1.createdAt, let date2 = stream2.createdAt else {
+                    return false
+                }
+                return date1 < date2
+            }
+
+            // Get IDs of streams to remove
+            let streamsToRemove = Set(sortedEndedStreams.prefix(removalCount).map { $0.streamID })
+
+            // Remove them from the collection
+            streams.removeAll { streamsToRemove.contains($0.streamID) }
+        } else {
+            // If not enough ended streams, remove all ended streams and some oldest live streams
+            let streamsToRemoveFromLive = removalCount - endedStreams.count
+
+            // Keep all ended stream IDs for removal
+            var streamsToRemove = Set(endedStreams.map { $0.streamID })
+
+            // Sort live streams by creation date (oldest first)
+            let sortedLiveStreams = liveStreams.sorted { stream1, stream2 in
+                guard let date1 = stream1.createdAt, let date2 = stream2.createdAt else {
+                    return false
+                }
+                return date1 < date2
+            }
+
+            // Add oldest live streams to removal set
+            streamsToRemove.formUnion(sortedLiveStreams.prefix(streamsToRemoveFromLive).map { $0.streamID })
+
+            // Remove them from the collection
+            streams.removeAll { streamsToRemove.contains($0.streamID) }
+        }
     }
 
     func getProfile(for pubkey: String) -> Profile? {
