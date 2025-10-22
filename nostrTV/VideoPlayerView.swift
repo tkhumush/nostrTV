@@ -427,47 +427,75 @@ struct ChatInputView: View {
     @FocusState private var isTextFieldFocused: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
-            // Text field for message input
-            TextField("Type your message...", text: $message)
-                .padding(12)
-                .background(Color.white)
-                .foregroundColor(.black)
-                .cornerRadius(8)
-                .focused($isTextFieldFocused)
-                .frame(width: 400)
-                .onSubmit {
-                    onSend()
-                }
+        HStack(spacing: 0) {
+            // Text field container - square style
+            ZStack {
+                Rectangle()
+                    .fill(Color.gray)
+                    .frame(width: 400, height: 120)
 
-            // Send button
-            Button(action: onSend) {
-                Text("Send")
-                    .font(.headline)
+                TextField("Type your message...", text: $message)
+                    .padding(16)
                     .foregroundColor(.white)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 12)
-                    .background(Color.blue)
-                    .cornerRadius(8)
+                    .focused($isTextFieldFocused)
+                    .frame(width: 380)
             }
-            .buttonStyle(.plain)
+            .frame(width: 400, height: 120)
 
-            // Cancel button
-            Button(action: onDismiss) {
-                Text("Cancel")
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 12)
-                    .background(Color.gray)
-                    .cornerRadius(8)
-            }
-            .buttonStyle(.plain)
+            // Send button - square style matching zap menu
+            ChatActionButton(
+                label: "Send",
+                color: .green,
+                action: onSend
+            )
+
+            // Cancel button - square style matching zap menu
+            ChatActionButton(
+                label: "Cancel",
+                color: .gray,
+                action: onDismiss
+            )
         }
-        .padding(16)
-        .background(Color.black.opacity(0.8))
-        .onAppear {
-            isTextFieldFocused = true
+    }
+}
+
+/// Individual chat action button matching the square zap menu style
+private struct ChatActionButton: View {
+    let label: String
+    let color: Color
+    let action: () -> Void
+
+    @Environment(\.isFocused) var isFocused: Bool
+
+    var body: some View {
+        ZStack {
+            // Background glow indicator when focused
+            if isFocused {
+                Rectangle()
+                    .fill(Color.white.opacity(0.3))
+                    .frame(width: 140, height: 140)
+                    .blur(radius: 20)
+            }
+
+            // Focus indicator - 5% larger square with yellow border
+            if isFocused {
+                Rectangle()
+                    .strokeBorder(Color.yellow, lineWidth: 6)
+                    .frame(width: 126, height: 126) // 120 * 1.05 = 126
+            }
+
+            // Button
+            Button(action: action) {
+                Rectangle()
+                    .fill(color)
+                    .frame(width: 120, height: 120)
+                    .overlay(
+                        Text(label)
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(.white)
+                    )
+            }
+            .buttonStyle(SquareCardButtonStyle())
         }
     }
 }
