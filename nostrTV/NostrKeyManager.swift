@@ -159,19 +159,16 @@ class NostrKeyManager: ObservableObject {
             throw NostrKeyError.invalidPrivateKey
         }
 
-        // Generate a random bot-like name
-        let adjectives = ["Swift", "Quick", "Bright", "Silent", "Bold", "Calm", "Noble", "Wise", "Free"]
-        let nouns = ["Watcher", "Viewer", "Observer", "Guest", "Visitor", "Traveler", "Wanderer"]
-        let randomAdjective = adjectives.randomElement()!
-        let randomNoun = nouns.randomElement()!
-        let randomNumber = Int.random(in: 100...999)
-        let displayName = "\(randomAdjective) \(randomNoun) \(randomNumber)"
+        // Generate a random 4-letter suffix for the username
+        let letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        let randomSuffix = String((0..<4).map { _ in letters.randomElement()! })
+        let username = "nostrTVviewer\(randomSuffix)"
 
         // Create profile metadata JSON
         let profileMetadata: [String: Any] = [
-            "name": "nostrtv_\(randomNumber)",
-            "display_name": displayName,
-            "about": "Ephemeral nostrTV viewer",
+            "name": username,
+            "display_name": username,
+            "about": "nostrTV viewer",
             "picture": "https://api.dicebear.com/7.x/bottts/svg?seed=\(keyPair.publicKeyHex)"
         ]
 
@@ -195,12 +192,35 @@ class NostrKeyManager: ObservableObject {
         userDefaults.set(true, forKey: profilePublishedKey)
         hasPublishedProfile = true
 
+        // Immediately cache our own profile locally so it shows in chat
+        // This ensures our username appears instead of "Anonymous"
+        let ownProfile = Profile(
+            pubkey: keyPair.publicKeyHex,
+            name: username,
+            displayName: username,
+            about: "nostrTV viewer",
+            picture: "https://api.dicebear.com/7.x/bottts/svg?seed=\(keyPair.publicKeyHex)",
+            nip05: nil,
+            lud16: nil
+        )
+        nostrClient.cacheProfile(ownProfile, for: keyPair.publicKeyHex)
+
+        // Also request our profile back from relays as backup
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            let profileReq: [Any] = [
+                "REQ",
+                "own-profile-\(keyPair.publicKeyHex.prefix(8))",
+                ["kinds": [0], "authors": [keyPair.publicKeyHex], "limit": 1]
+            ]
+            try? nostrClient.sendRawRequest(profileReq)
+            print("🔄 Requested own profile back from relays for verification")
+        }
+
         print("\n" + String(repeating: "=", count: 80))
         print("📝 EPHEMERAL PROFILE PUBLISHED")
         print(String(repeating: "=", count: 80))
-        print("Display Name: \(displayName)")
-        print("Username:     nostrtv_\(randomNumber)")
-        print("About:        Ephemeral nostrTV viewer")
+        print("Username:     \(username)")
+        print("About:        nostrTV viewer")
         print("npub:         \(keyPair.npub)")
         print("Pubkey (hex): \(keyPair.publicKeyHex)")
         print("Profile JSON:")
