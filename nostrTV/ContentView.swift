@@ -393,7 +393,7 @@ struct ContentView: View {
                     StreamListView(
                         viewModel: viewModel,
                         categorizedStreams: viewModel.allCategorizedStreams,
-                        featuredStream: viewModel.streams.filter { $0.isLive }.max(by: { $0.viewerCount < $1.viewerCount })
+                        featuredStream: viewModel.discoverFeaturedStream
                     ) { url, lightningAddress, selectedStream in
                         let player = AVPlayer(url: url)
                         self.player = player

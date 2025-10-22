@@ -40,6 +40,11 @@ class StreamViewModel: ObservableObject {
         return liveStreams.max(by: { $0.viewerCount < $1.viewerCount })
     }
 
+    /// Get the featured stream for Discover tab (all live streams, most viewers)
+    var discoverFeaturedStream: Stream? {
+        return streams.filter { $0.isLive }.max(by: { $0.viewerCount < $1.viewerCount })
+    }
+
     init() {
         nostrClient.onStreamReceived = { [weak self] stream in
             DispatchQueue.main.async {
@@ -180,17 +185,25 @@ class StreamViewModel: ObservableObject {
     }
 
     private func categorizeStreams(_ streamList: [Stream]) -> [StreamCategory] {
-        // Separate live and ended streams
-        let liveStreams = streamList.filter { $0.isLive }
-        let endedStreams = streamList.filter { !$0.isLive }
+        // Single pass to separate live and ended streams, and group live by category
+        var liveStreamsByCategory: [String: [Stream]] = [:]
+        var endedStreams: [Stream] = []
 
-        // Group live streams by category
-        let liveStreamsByCategory = Dictionary(grouping: liveStreams) { $0.category }
+        for stream in streamList {
+            if stream.isLive {
+                liveStreamsByCategory[stream.category, default: []].append(stream)
+            } else {
+                endedStreams.append(stream)
+            }
+        }
 
         // Create categories for live streams, sorted alphabetically
         var categories: [StreamCategory] = []
 
-        for (categoryName, categoryStreams) in liveStreamsByCategory.sorted(by: { $0.key < $1.key }) {
+        // Sort category keys once, then sort streams within each category
+        for categoryName in liveStreamsByCategory.keys.sorted() {
+            guard let categoryStreams = liveStreamsByCategory[categoryName] else { continue }
+
             let sortedStreams = categoryStreams.sorted { stream1, stream2 in
                 // Sort by creation date (newest first), then by title
                 if let date1 = stream1.createdAt, let date2 = stream2.createdAt {
