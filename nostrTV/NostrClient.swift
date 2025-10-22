@@ -65,27 +65,34 @@ class NostrClient {
         guard !pubkey.isEmpty else {
             return nil
         }
-        return profileQueue.sync {
-            // Check if profile exists and is not expired
-            guard var entry = profileCache[pubkey] else {
-                return nil
+
+        // Read the profile entry
+        let result = profileQueue.sync { () -> (profile: Profile?, shouldUpdate: Bool, shouldRemove: Bool) in
+            guard let entry = profileCache[pubkey] else {
+                return (nil, false, false)
             }
 
             // Check if profile has expired
             let now = Date()
             if now.timeIntervalSince(entry.timestamp) > profileCacheTTL {
-                // Profile expired, remove it
-                profileCache.removeValue(forKey: pubkey)
-                return nil
+                return (nil, false, true) // Profile expired, should remove
             }
 
-            // Update last accessed time (using barrier to modify)
-            profileQueue.async(flags: .barrier) { [weak self] in
-                self?.profileCache[pubkey]?.lastAccessed = now
-            }
-
-            return entry.profile
+            return (entry.profile, true, false) // Valid profile, should update access time
         }
+
+        // Handle updates outside of sync block
+        if result.shouldUpdate {
+            profileQueue.async(flags: .barrier) { [weak self] in
+                self?.profileCache[pubkey]?.lastAccessed = Date()
+            }
+        } else if result.shouldRemove {
+            profileQueue.async(flags: .barrier) { [weak self] in
+                self?.profileCache.removeValue(forKey: pubkey)
+            }
+        }
+
+        return result.profile
     }
 
     /// Manually cache a profile (useful for caching our own profile immediately after publishing)
