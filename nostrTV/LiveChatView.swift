@@ -16,6 +16,7 @@ struct LiveChatView: View {
 
     @State private var shouldAutoScroll = true
     @State private var uniqueMessages: [ChatMessage] = []
+    @State private var lastUpdateTime: Date = Date()
 
     var body: some View {
         let streamId = stream.eventID ?? stream.streamID
@@ -23,8 +24,9 @@ struct LiveChatView: View {
         let messages = chatManager.getMessagesForStream(streamId)
             + chatManager.getMessagesForStream(aTag ?? "")
 
-        // Use profileUpdateTrigger to force view refresh when profiles change
+        // Force view refresh when profiles change OR messages change
         let _ = chatManager.profileUpdateTrigger
+        let _ = chatManager.messageUpdateTrigger
 
         ZStack {
             // Black background
@@ -96,14 +98,28 @@ struct LiveChatView: View {
                 }
             }
         }
-        .onChange(of: messages.count) { _, newCount in
-            // Update cached deduplicated messages only when count changes
+        .onChange(of: chatManager.messageUpdateTrigger) { _, _ in
+            // Update cached deduplicated messages when chatManager's messages change
+            let streamId = stream.eventID ?? stream.streamID
+            let aTag = stream.pubkey.map { "30311:\($0.lowercased()):\(stream.streamID)" }
+            let messages = chatManager.getMessagesForStream(streamId)
+                + chatManager.getMessagesForStream(aTag ?? "")
+
             uniqueMessages = Dictionary(grouping: messages, by: { $0.id })
                 .compactMap { $0.value.first }
                 .sorted { $0.timestamp < $1.timestamp }
         }
+        .onChange(of: chatManager.profileUpdateTrigger) { _, _ in
+            // Force re-render when profiles update (for display names)
+            lastUpdateTime = Date()
+        }
         .onAppear {
             // Initial deduplication on appear
+            let streamId = stream.eventID ?? stream.streamID
+            let aTag = stream.pubkey.map { "30311:\($0.lowercased()):\(stream.streamID)" }
+            let messages = chatManager.getMessagesForStream(streamId)
+                + chatManager.getMessagesForStream(aTag ?? "")
+
             uniqueMessages = Dictionary(grouping: messages, by: { $0.id })
                 .compactMap { $0.value.first }
                 .sorted { $0.timestamp < $1.timestamp }

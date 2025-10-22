@@ -14,6 +14,7 @@ import Combine
 class ChatManager: ObservableObject {
     @Published private(set) var messagesByStream: [String: [ChatMessage]] = [:]
     @Published var profileUpdateTrigger: Int = 0  // Triggers UI updates when profiles change
+    @Published var messageUpdateTrigger: Int = 0  // Triggers UI updates when messages change
 
     private let nostrClient: NostrClient
     private var subscriptionIDs: [String: String] = [:]  // streamID -> subscriptionID
@@ -100,6 +101,9 @@ class ChatManager: ObservableObject {
             if messagesByStream[streamId]!.count > 15 {
                 messagesByStream[streamId]!.removeFirst()
             }
+
+            // Trigger UI update
+            messageUpdateTrigger += 1
 
             print("💬 Added chat message from \(chatMessage.senderPubkey.prefix(8))...")
             print("   Total messages for stream: \(messagesByStream[streamId]!.count)")
