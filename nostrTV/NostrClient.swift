@@ -46,6 +46,7 @@ class NostrClient {
     var onFollowListReceived: (([String]) -> Void)?
     var onUserRelaysReceived: (([String]) -> Void)?
     var onZapReceived: ((ZapComment) -> Void)?
+    var onChatReceived: ((ZapComment) -> Void)?  // Separate callback for chat messages (kind 1311)
 
     func getProfile(for pubkey: String) -> Profile? {
         guard !pubkey.isEmpty else {
@@ -491,9 +492,9 @@ class NostrClient {
 
         print("   ✓ Created chat comment object, notifying callback")
 
-        // Notify callback
+        // Notify chat callback (kind 1311 messages)
         DispatchQueue.main.async {
-            self.onZapReceived?(chatComment)
+            self.onChatReceived?(chatComment)
         }
 
         // Request sender profile if we don't have it

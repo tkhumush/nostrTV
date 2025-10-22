@@ -11,6 +11,7 @@ import Foundation
 /// Fetches and stores the latest zap receipts for each stream
 class ZapManager: ObservableObject {
     @Published var zapComments: [String: [ZapComment]] = [:] // streamEventId -> [ZapComment]
+    @Published var profileUpdateTrigger: Int = 0  // Triggers UI updates when profiles change
 
     private let nostrClient: NostrClient
     private var subscriptionIds: Set<String> = []
@@ -23,6 +24,14 @@ class ZapManager: ObservableObject {
         // Set up callback to receive zap receipts
         nostrClient.onZapReceived = { [weak self] zapComment in
             self?.handleZapReceived(zapComment)
+        }
+
+        // Set up callback to detect profile updates
+        nostrClient.onProfileReceived = { [weak self] profile in
+            DispatchQueue.main.async {
+                // Increment trigger to force UI refresh when any profile is received
+                self?.profileUpdateTrigger += 1
+            }
         }
     }
 
@@ -129,7 +138,7 @@ class ZapManager: ObservableObject {
         }
     }
 
-    /// Handle a received chat comment or zap
+    /// Handle a received zap (kind 9735)
     private func handleZapReceived(_ zapComment: ZapComment) {
         // Validate we have a stream identifier
         guard let streamIdentifier = zapComment.streamEventId else {

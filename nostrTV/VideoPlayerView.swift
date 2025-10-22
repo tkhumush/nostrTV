@@ -119,7 +119,7 @@ struct VideoPlayerView: View {
 
                     // Zap chyron - stretches across remaining space
                     if let stream = stream, let zapManager = zapManager {
-                        ZapChyronWrapper(zapManager: zapManager, stream: stream)
+                        ZapChyronWrapper(zapManager: zapManager, stream: stream, nostrClient: nostrClient)
                             .frame(height: 120)
                     } else {
                         Spacer()
@@ -131,7 +131,7 @@ struct VideoPlayerView: View {
 
                 // Right side: Live chat
                 if let stream = stream {
-                    LiveChatView(chatManager: chatManager, stream: stream)
+                    LiveChatView(chatManager: chatManager, stream: stream, nostrClient: nostrClient)
                         .frame(width: 310) // 344 * 0.90 = 309.6
                 }
             }
@@ -422,6 +422,7 @@ class CustomAVPlayerViewController: AVPlayerViewController {
 struct ZapChyronWrapper: View {
     @ObservedObject var zapManager: ZapManager
     let stream: Stream
+    let nostrClient: NostrClient
 
     var body: some View {
         // Try both eventID and a-tag format for lookup
@@ -434,7 +435,7 @@ struct ZapChyronWrapper: View {
             zaps = zapManager.getZapsForStream(aTag)
         }
 
-        return ZapChyronView(zapComments: zaps)
+        return ZapChyronView(zapComments: zaps, nostrClient: nostrClient, zapManager: zapManager)
     }
 }
 

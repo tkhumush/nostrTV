@@ -13,6 +13,7 @@ import Combine
 @MainActor
 class ChatManager: ObservableObject {
     @Published private(set) var messagesByStream: [String: [ChatMessage]] = [:]
+    @Published var profileUpdateTrigger: Int = 0  // Triggers UI updates when profiles change
 
     private let nostrClient: NostrClient
     private var subscriptionIDs: [String: String] = [:]  // streamID -> subscriptionID
@@ -20,17 +21,18 @@ class ChatManager: ObservableObject {
     init(nostrClient: NostrClient) {
         self.nostrClient = nostrClient
 
-        // Preserve existing callback and chain our handler
-        let existingCallback = nostrClient.onZapReceived
-        nostrClient.onZapReceived = { [weak self] zapComment in
-            // Call existing callback first (for ZapManager)
-            existingCallback?(zapComment)
-
-            // Then handle chat messages (amount == 0)
+        // Set up callback to receive chat messages (kind 1311)
+        nostrClient.onChatReceived = { [weak self] chatComment in
             Task { @MainActor in
-                if zapComment.amount == 0 {
-                    self?.handleChatMessage(zapComment)
-                }
+                self?.handleChatMessage(chatComment)
+            }
+        }
+
+        // Set up callback to detect profile updates
+        nostrClient.onProfileReceived = { [weak self] profile in
+            Task { @MainActor in
+                // Increment trigger to force UI refresh when any profile is received
+                self?.profileUpdateTrigger += 1
             }
         }
     }
@@ -74,11 +76,10 @@ class ChatManager: ObservableObject {
             return
         }
 
-        // Convert ZapComment to ChatMessage
+        // Convert ZapComment to ChatMessage (don't store senderName, fetch it dynamically)
         let chatMessage = ChatMessage(
             id: zapComment.id,
             senderPubkey: zapComment.senderPubkey,
-            senderName: zapComment.senderName,
             message: zapComment.comment,
             timestamp: zapComment.timestamp
         )
@@ -100,7 +101,7 @@ class ChatManager: ObservableObject {
                 messagesByStream[streamId]!.removeFirst()
             }
 
-            print("💬 Added chat message from \(chatMessage.senderName ?? "Anonymous")")
+            print("💬 Added chat message from \(chatMessage.senderPubkey.prefix(8))...")
             print("   Total messages for stream: \(messagesByStream[streamId]!.count)")
         }
     }
@@ -132,11 +133,6 @@ class ChatManager: ObservableObject {
 struct ChatMessage: Identifiable {
     let id: String
     let senderPubkey: String
-    let senderName: String?
     let message: String
     let timestamp: Date
-
-    var displayName: String {
-        senderName ?? "Anonymous"
-    }
 }

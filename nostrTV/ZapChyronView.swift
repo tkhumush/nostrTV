@@ -11,6 +11,9 @@ import SwiftUI
 /// Rotates through the latest 10 zaps with a 7-second timer per zap
 struct ZapChyronView: View {
     let zapComments: [ZapComment]
+    let nostrClient: NostrClient
+    @ObservedObject var zapManager: ZapManager
+
     @State private var currentIndex: Int = 0
     @State private var timer: Timer?
 
@@ -18,6 +21,13 @@ struct ZapChyronView: View {
     private let maxZapsToShow: Int = 10
 
     var body: some View {
+        // Use profileUpdateTrigger to force view refresh when profiles change
+        let _ = zapManager.profileUpdateTrigger
+
+        return content
+    }
+
+    private var content: some View {
         ZStack {
             // Solid black background
             Rectangle()
@@ -28,7 +38,7 @@ struct ZapChyronView: View {
             if !zapComments.isEmpty {
                 let displayZaps = Array(zapComments.prefix(maxZapsToShow))
                 if !displayZaps.isEmpty {
-                    ZapDisplayView(zap: displayZaps[currentIndex])
+                    ZapDisplayView(zap: displayZaps[currentIndex], nostrClient: nostrClient)
                         .id(displayZaps[currentIndex].id) // Force view update on change
                         .transition(.asymmetric(
                             insertion: .opacity.combined(with: .scale(scale: 0.95)),
@@ -83,8 +93,13 @@ struct ZapChyronView: View {
 /// View that displays a single zap with formatted text
 private struct ZapDisplayView: View {
     let zap: ZapComment
+    let nostrClient: NostrClient
 
     var body: some View {
+        // Dynamically fetch profile name from NostrClient
+        let profile = nostrClient.getProfile(for: zap.senderPubkey)
+        let displayName = profile?.displayName ?? profile?.name ?? "Anonymous"
+
         HStack(spacing: 12) {
             // Zap emoji
             Text("⚡️")
@@ -94,7 +109,7 @@ private struct ZapDisplayView: View {
             VStack(alignment: .leading, spacing: 4) {
                 // First line: Name + amount
                 HStack(spacing: 6) {
-                    Text(zap.senderName ?? "Anonymous")
+                    Text(displayName)
                         .font(.system(size: 22, weight: .bold))
                         .foregroundColor(.white)
 
@@ -129,11 +144,15 @@ private struct ZapDisplayView: View {
 }
 
 #Preview {
+    let nostrClient = NostrClient()
+    let zapManager = ZapManager(nostrClient: nostrClient)
+
     ZStack {
         Color.blue
         VStack {
             Spacer()
-            ZapChyronView(zapComments: [
+            ZapChyronView(
+                zapComments: [
                 ZapComment(
                     id: "1",
                     amount: 1000000,
@@ -161,7 +180,10 @@ private struct ZapDisplayView: View {
                     timestamp: Date(),
                     streamEventId: "stream1"
                 )
-            ])
+            ],
+                nostrClient: nostrClient,
+                zapManager: zapManager
+            )
             .padding(.bottom, 40)
         }
     }

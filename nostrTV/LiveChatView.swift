@@ -12,6 +12,7 @@ import SwiftUI
 struct LiveChatView: View {
     @ObservedObject var chatManager: ChatManager
     let stream: Stream
+    let nostrClient: NostrClient
 
     @State private var shouldAutoScroll = true
 
@@ -25,6 +26,9 @@ struct LiveChatView: View {
         let uniqueMessages = Dictionary(grouping: messages, by: { $0.id })
             .compactMap { $0.value.first }
             .sorted { $0.timestamp < $1.timestamp }
+
+        // Use profileUpdateTrigger to force view refresh when profiles change
+        let _ = chatManager.profileUpdateTrigger
 
         ZStack {
             // Black background
@@ -71,7 +75,7 @@ struct LiveChatView: View {
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 8) {
                                 ForEach(uniqueMessages) { message in
-                                    ChatMessageRow(message: message)
+                                    ChatMessageRow(message: message, nostrClient: nostrClient)
                                         .id(message.id)
                                 }
                             }
@@ -102,12 +106,17 @@ struct LiveChatView: View {
 /// Individual chat message row
 private struct ChatMessageRow: View {
     let message: ChatMessage
+    let nostrClient: NostrClient
 
     var body: some View {
+        // Dynamically fetch profile name from NostrClient
+        let profile = nostrClient.getProfile(for: message.senderPubkey)
+        let displayName = profile?.displayName ?? profile?.name ?? "Anonymous"
+
         VStack(alignment: .leading, spacing: 4) {
             // Username and timestamp
             HStack(spacing: 8) {
-                Text(message.displayName)
+                Text(displayName)
                     .font(.system(size: 16, weight: .bold))
                     .foregroundColor(.yellow)
 
@@ -154,6 +163,6 @@ private struct ChatMessageRow: View {
         viewerCount: 42
     )
 
-    LiveChatView(chatManager: chatManager, stream: stream)
+    LiveChatView(chatManager: chatManager, stream: stream, nostrClient: nostrClient)
         .frame(width: 400)
 }
