@@ -12,7 +12,7 @@ class StreamViewModel: ObservableObject {
     @Published var allCategorizedStreams: [StreamCategory] = []  // Unfiltered streams
     private var nostrClient = NostrClient()
     private var refreshTimer: Timer?
-    private var followList: [String] = []
+    private var followList: Set<String> = [] // Use Set for O(1) lookups
     private var validationTasks: Set<String> = [] // Track ongoing validations
 
     // Stream collection size limit to prevent unbounded memory growth
@@ -74,7 +74,7 @@ class StreamViewModel: ObservableObject {
     }
 
     func updateFollowList(_ newFollowList: [String]) {
-        followList = newFollowList
+        followList = Set(newFollowList) // Convert to Set for O(1) lookups
         // Re-categorize streams with new follow filter
         updateCategorizedStreams()
     }

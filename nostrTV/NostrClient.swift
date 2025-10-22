@@ -47,6 +47,8 @@ class NostrClient {
     private var userRelays: [String] = [] // User's relay list from NIP-65 (kind 10002) or kind 3
     private var session: URLSession!
     private let profileQueue = DispatchQueue(label: "com.nostrtv.profiles", attributes: .concurrent)
+    private var pendingProfileRequests: Set<String> = [] // Track in-flight profile requests
+    private let pendingRequestsQueue = DispatchQueue(label: "com.nostrtv.pendingRequests")
 
     // Profile cache configuration
     private let maxProfileCacheSize = 500
@@ -415,6 +417,11 @@ class NostrClient {
         }
         // Profile updated (removed verbose logging)
 
+        // Remove from pending requests since we got the profile
+        pendingRequestsQueue.async { [weak self] in
+            self?.pendingProfileRequests.remove(pubkey)
+        }
+
         // Notify callback if set
         DispatchQueue.main.async {
             self.onProfileReceived?(profile)
@@ -693,6 +700,19 @@ class NostrClient {
     }
     
     private func requestProfile(for pubkey: String) {
+        // Check if we already have a pending request for this pubkey
+        var shouldRequest = false
+        pendingRequestsQueue.sync {
+            if !pendingProfileRequests.contains(pubkey) {
+                pendingProfileRequests.insert(pubkey)
+                shouldRequest = true
+            }
+        }
+
+        guard shouldRequest else {
+            return // Already requesting this profile
+        }
+
         // Send a request for this specific profile
         let profileReq: [Any] = [
             "REQ",
@@ -700,9 +720,17 @@ class NostrClient {
             ["kinds": [0], "authors": [pubkey], "limit": 1]
         ]
 
-        // Send to all connected relays
-        for (url, task) in webSocketTasks {
-            sendJSON(profileReq, on: task, relayURL: url)
+        // Only send to the first connected relay to reduce bandwidth
+        // Most profiles exist on all major relays, so one request is sufficient
+        if let firstRelay = webSocketTasks.first {
+            sendJSON(profileReq, on: firstRelay.value, relayURL: firstRelay.key)
+        }
+
+        // Remove from pending set after a timeout (30 seconds) to allow retry if needed
+        DispatchQueue.global().asyncAfter(deadline: .now() + 30) { [weak self] in
+            self?.pendingRequestsQueue.async {
+                self?.pendingProfileRequests.remove(pubkey)
+            }
         }
     }
     
