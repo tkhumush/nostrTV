@@ -56,6 +56,14 @@ class NostrClient {
         }
     }
 
+    /// Manually cache a profile (useful for caching our own profile immediately after publishing)
+    func cacheProfile(_ profile: Profile, for pubkey: String) {
+        profileQueue.async(flags: .barrier) {
+            self.profiles[pubkey] = profile
+        }
+        print("✅ Cached profile for \(pubkey.prefix(8))... - \(profile.displayName ?? profile.name ?? "Unknown")")
+    }
+
     func connect() {
         session = URLSession(configuration: .default)
         let relayURLs = [

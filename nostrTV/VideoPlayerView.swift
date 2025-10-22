@@ -132,7 +132,7 @@ struct VideoPlayerView: View {
                 // Right side: Live chat
                 if let stream = stream {
                     LiveChatView(chatManager: chatManager, stream: stream)
-                        .frame(width: 344) // 382 * 0.90 = 343.8
+                        .frame(width: 310) // 344 * 0.90 = 309.6
                 }
             }
 

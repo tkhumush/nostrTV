@@ -32,6 +32,26 @@ struct LiveChatView: View {
                 .fill(Color.black)
 
             VStack(spacing: 0) {
+                // Viewer count ribbon at top
+                HStack(spacing: 5) {
+                    Spacer()
+
+                    Image(systemName: "eye.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(.white)
+
+                    Text("\(stream.viewerCount)")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.white)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10) // 9 * 1.1 = 9.9, rounded to 10
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .background(Color.white.opacity(0.1))
+
+                Divider()
+                    .background(Color.gray.opacity(0.3))
+
                 // Messages
                 if uniqueMessages.isEmpty {
                     // Empty state
@@ -131,7 +151,7 @@ private struct ChatMessageRow: View {
         status: "live",
         tags: [],
         createdAt: Date(),
-        viewerCount: 0
+        viewerCount: 42
     )
 
     LiveChatView(chatManager: chatManager, stream: stream)
