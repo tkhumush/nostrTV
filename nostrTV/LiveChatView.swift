@@ -51,7 +51,7 @@ struct LiveChatView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10) // 9 * 1.1 = 9.9, rounded to 10
                 .frame(maxWidth: .infinity, alignment: .trailing)
-                .background(Color.white.opacity(0.1))
+                .background(Color.gray)
 
                 Divider()
                     .background(Color.gray.opacity(0.3))

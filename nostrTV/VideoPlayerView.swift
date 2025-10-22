@@ -45,6 +45,19 @@ struct VideoPlayerView: View {
             HStack(spacing: 0) {
                 // Left side: Video player and controls
                 VStack(spacing: 0) {
+                    // nostrTV ribbon at top
+                    HStack(spacing: 5) {
+                        Text("nostrTV")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.white)
+
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.gray)
+
                     // Video player takes most of the screen
                     VideoPlayerContainer(
                         player: player,
