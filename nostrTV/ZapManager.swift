@@ -27,7 +27,7 @@ class ZapManager: ObservableObject {
         }
 
         // Set up callback to detect profile updates
-        nostrClient.onProfileReceived = { [weak self] profile in
+        nostrClient.addProfileReceivedCallback { [weak self] profile in
             DispatchQueue.main.async {
                 // Increment trigger to force UI refresh when any profile is received
                 self?.profileUpdateTrigger += 1

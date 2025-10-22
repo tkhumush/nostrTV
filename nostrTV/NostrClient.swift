@@ -55,11 +55,16 @@ class NostrClient {
     private let profileCacheTTL: TimeInterval = 24 * 60 * 60 // 24 hours
 
     var onStreamReceived: ((Stream) -> Void)?
-    var onProfileReceived: ((Profile) -> Void)?
+    private var profileReceivedCallbacks: [((Profile) -> Void)] = []
     var onFollowListReceived: (([String]) -> Void)?
     var onUserRelaysReceived: (([String]) -> Void)?
     var onZapReceived: ((ZapComment) -> Void)?
     var onChatReceived: ((ZapComment) -> Void)?  // Separate callback for chat messages (kind 1311)
+
+    // Add a profile received callback (supports multiple observers)
+    func addProfileReceivedCallback(_ callback: @escaping (Profile) -> Void) {
+        profileReceivedCallbacks.append(callback)
+    }
 
     func getProfile(for pubkey: String) -> Profile? {
         guard !pubkey.isEmpty else {
@@ -429,9 +434,12 @@ class NostrClient {
             self?.pendingProfileRequests.remove(pubkey)
         }
 
-        // Notify callback if set
-        DispatchQueue.main.async {
-            self.onProfileReceived?(profile)
+        // Notify all profile callbacks
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            for callback in self.profileReceivedCallbacks {
+                callback(profile)
+            }
         }
     }
 

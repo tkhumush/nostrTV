@@ -164,7 +164,7 @@ class NostrAuthManager: ObservableObject {
         errorMessage = nil
 
         // Setup callback for profile
-        nostrClient.onProfileReceived = { [weak self] profile in
+        nostrClient.addProfileReceivedCallback { [weak self] profile in
             DispatchQueue.main.async {
                 self?.currentProfile = profile
                 self?.isLoadingProfile = false
