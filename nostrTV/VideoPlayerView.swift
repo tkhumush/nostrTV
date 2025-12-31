@@ -28,6 +28,7 @@ struct VideoPlayerView: View {
     @State private var showChatInput: Bool = false
     @State private var liveActivityManager: LiveActivityManager?
     @StateObject private var chatManager: ChatManager
+    @Environment(\.dismiss) private var dismiss
 
     init(player: AVPlayer, lightningAddress: String?, stream: Stream?, nostrClient: NostrClient, zapManager: ZapManager?, authManager: NostrAuthManager) {
         self.player = player
@@ -62,7 +63,8 @@ struct VideoPlayerView: View {
                     VideoPlayerContainer(
                         player: player,
                         stream: stream,
-                        nostrClient: nostrClient
+                        nostrClient: nostrClient,
+                        onDismiss: { dismiss() }
                     )
 
                 // Bottom bar with zap button, chat button, menu options, and chyron
@@ -350,12 +352,14 @@ struct VideoPlayerContainer: UIViewControllerRepresentable {
     let player: AVPlayer
     let stream: Stream?
     let nostrClient: NostrClient
+    let onDismiss: () -> Void
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = CustomAVPlayerViewController()
         controller.player = player
         controller.stream = stream
         controller.nostrClient = nostrClient
+        controller.onDismiss = onDismiss
         controller.player?.play()
         return controller
     }
@@ -369,6 +373,7 @@ class CustomAVPlayerViewController: AVPlayerViewController {
     var stream: Stream?  // Stream being watched
     var nostrClient: NostrClient?  // NostrClient for publishing events
     private var liveActivityManager: LiveActivityManager?
+    var onDismiss: (() -> Void)?  // Closure to dismiss the view
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
@@ -411,6 +416,17 @@ class CustomAVPlayerViewController: AVPlayerViewController {
                 }
             }
         }
+    }
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        // Handle Menu button press to dismiss the player
+        for press in presses {
+            if press.type == .menu {
+                onDismiss?()
+                return
+            }
+        }
+        super.pressesBegan(presses, with: event)
     }
 
     private func startPresenceUpdates() {
