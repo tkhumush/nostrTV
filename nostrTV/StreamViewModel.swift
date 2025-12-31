@@ -10,6 +10,7 @@ class StreamViewModel: ObservableObject {
     @Published var streams: [Stream] = []
     @Published var categorizedStreams: [StreamCategory] = []
     @Published var allCategorizedStreams: [StreamCategory] = []  // Discover streams (filtered by admin follow list)
+    @Published var isLoadingAdminFollowList: Bool = true // Track if we're loading the admin follow list
     private var nostrClient = NostrClient()
     private var refreshTimer: Timer?
     private var followList: Set<String> = [] // User follow list - Use Set for O(1) lookups
@@ -88,7 +89,14 @@ class StreamViewModel: ObservableObject {
             }
         }
 
-        // Fetch admin follow list on startup
+        print("🔧 StreamViewModel init - isLoadingAdminFollowList: \(isLoadingAdminFollowList)")
+
+        // Load cached admin follow list immediately
+        loadCachedAdminFollowList()
+
+        print("🔧 After loadCachedAdminFollowList - isLoadingAdminFollowList: \(isLoadingAdminFollowList)")
+
+        // Fetch fresh admin follow list in background
         fetchAdminFollowList()
 
         startAutoRefresh()
@@ -320,12 +328,52 @@ class StreamViewModel: ObservableObject {
         updateCategorizedStreams()
     }
 
+    private func loadCachedAdminFollowList() {
+        // Load cached admin follow list from UserDefaults
+        if let cachedData = UserDefaults.standard.data(forKey: "adminFollowList") {
+            do {
+                let decoder = JSONDecoder()
+                let cachedList = try decoder.decode([String].self, from: cachedData)
+                adminFollowList = Set(cachedList)
+                isLoadingAdminFollowList = false // Cache loaded, no longer loading
+                print("✅ Loaded cached admin follow list with \(cachedList.count) users")
+            } catch {
+                print("❌ Failed to decode cached admin follow list")
+            }
+        }
+    }
+
+    private func saveAdminFollowListToCache(_ follows: [String]) {
+        do {
+            let encoder = JSONEncoder()
+            let data = try encoder.encode(follows)
+            UserDefaults.standard.set(data, forKey: "adminFollowList")
+            print("✅ Saved admin follow list to cache (\(follows.count) users)")
+        } catch {
+            print("❌ Failed to encode admin follow list for caching")
+        }
+    }
+
     private func fetchAdminFollowList() {
+        print("🔧 Fetching admin follow list for pubkey: \(adminPubkey.prefix(16))...")
+
         // Setup callback for admin follow list
         nostrClient.onFollowListReceived = { [weak self] follows in
+            print("🔧 Admin follow list received! Count: \(follows.count)")
             DispatchQueue.main.async {
                 self?.adminFollowList = Set(follows)
+                self?.isLoadingAdminFollowList = false // Follow list loaded
+                self?.saveAdminFollowListToCache(follows)
                 self?.updateCategorizedStreams()
+            }
+        }
+
+        // Set a timeout to stop loading after 30 seconds if fetch fails
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30.0) { [weak self] in
+            guard let self = self else { return }
+            if self.isLoadingAdminFollowList {
+                print("⚠️ Admin follow list fetch timeout - stopping loading state")
+                self.isLoadingAdminFollowList = false
             }
         }
 

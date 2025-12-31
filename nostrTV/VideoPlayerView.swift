@@ -24,10 +24,7 @@ struct VideoPlayerView: View {
     @State private var invoiceURI: String?
     @State private var zapRefreshTimer: Timer?
     @State private var lastZapRequestPubkey: String?
-    @State private var chatMessage: String = ""
-    @State private var showChatInput: Bool = false
     @State private var liveActivityManager: LiveActivityManager?
-    @StateObject private var chatManager: ChatManager
     @Environment(\.dismiss) private var dismiss
 
     init(player: AVPlayer, lightningAddress: String?, stream: Stream?, nostrClient: NostrClient, zapManager: ZapManager?, authManager: NostrAuthManager) {
@@ -37,118 +34,45 @@ struct VideoPlayerView: View {
         self.nostrClient = nostrClient
         self.zapManager = zapManager
         self.authManager = authManager
-        self._chatManager = StateObject(wrappedValue: ChatManager(nostrClient: nostrClient))
     }
 
     var body: some View {
         ZStack {
             // Main layout
-            HStack(spacing: 0) {
-                // Left side: Video player and controls
-                VStack(spacing: 0) {
-                    // nostrTV ribbon at top
-                    HStack(spacing: 5) {
-                        Text("nostrTV")
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(.white)
+            VStack(spacing: 0) {
+                // nostrTV ribbon at top
+                HStack(spacing: 5) {
+                    Text("nostrTV")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.white)
 
-                        Spacer()
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.gray)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.gray)
 
-                    // Video player takes most of the screen
-                    VideoPlayerContainer(
-                        player: player,
-                        stream: stream,
-                        nostrClient: nostrClient,
-                        onDismiss: { dismiss() }
-                    )
+                // Video player takes most of the screen
+                VideoPlayerContainer(
+                    player: player,
+                    stream: stream,
+                    nostrClient: nostrClient,
+                    onDismiss: { dismiss() }
+                )
 
-                // Bottom bar with zap button, chat button, menu options, and chyron
+                // Bottom bar with zap chyron
                 HStack(spacing: 0) {
-                    // Zap button - square in bottom left corner
-                    if lightningAddress != nil {
-                        Button(action: {
-                            showZapMenu.toggle()
-                            showChatInput = false  // Hide chat input when showing zap menu
-                        }) {
-                            Rectangle()
-                                .fill(Color.yellow)
-                                .frame(width: 120, height: 120)
-                                .cornerRadius(0)
-                                .overlay(
-                                    Text("⚡️")
-                                        .font(.system(size: 60))
-                                )
-                        }
-                        .buttonStyle(SquareCardButtonStyle())
-                        .frame(width: 120, height: 120)
-                    }
-
-                    // Chat button - square next to zap button
-                    Button(action: {
-                        showChatInput.toggle()
-                        showZapMenu = false  // Hide zap menu when showing chat input
-                    }) {
-                        Rectangle()
-                            .fill(Color.blue)
-                            .frame(width: 120, height: 120)
-                            .cornerRadius(0)
-                            .overlay(
-                                Image(systemName: "message.fill")
-                                    .font(.system(size: 50))
-                                    .foregroundColor(.white)
-                            )
-                    }
-                    .buttonStyle(SquareCardButtonStyle())
-                    .frame(width: 120, height: 120)
-
-                    // Zap menu options - shown inline next to buttons
-                    if showZapMenu {
-                        ZapMenuOptionsView(
-                            onZapSelected: { option in
-                                handleZapSelection(option)
-                            },
-                            onDismiss: {
-                                showZapMenu = false
-                            }
-                        )
-                    }
-
-                    // Chat input - shown inline when chat button is pressed
-                    if showChatInput {
-                        ChatInputView(
-                            message: $chatMessage,
-                            onSend: {
-                                sendChatMessage()
-                            },
-                            onDismiss: {
-                                showChatInput = false
-                                chatMessage = ""
-                            }
-                        )
-                    }
-
-                    // Zap chyron - stretches across remaining space
+                    // Zap chyron - stretches across full width
                     if let stream = stream, let zapManager = zapManager {
                         ZapChyronWrapper(zapManager: zapManager, stream: stream, nostrClient: nostrClient)
-                            .frame(height: 120)
+                            .frame(height: 102)
                     } else {
                         Spacer()
-                            .frame(height: 120)
+                            .frame(height: 102)
                     }
                 }
                 .background(Color.black.opacity(0.3))
-                }
-
-                // Right side: Live chat
-                if let stream = stream {
-                    LiveChatView(chatManager: chatManager, stream: stream, nostrClient: nostrClient)
-                        .frame(width: 310) // 344 * 0.90 = 309.6
-                }
             }
 
             // QR code overlay (only shown when payment is being made)
@@ -193,12 +117,6 @@ struct VideoPlayerView: View {
                 // Start periodic refresh every 30 seconds
                 startZapRefreshTimer()
             }
-
-            // Fetch chat messages for this stream
-            if let stream = stream, let eventID = stream.eventID, let pubkey = stream.pubkey {
-                print("💬 Fetching chat messages for stream")
-                chatManager.fetchChatMessagesForStream(eventID, pubkey: pubkey, dTag: stream.streamID)
-            }
         }
         .onDisappear {
             // Leave the stream
@@ -220,12 +138,6 @@ struct VideoPlayerView: View {
             if let stream = stream, let eventID = stream.eventID, let zapManager = zapManager {
                 print("📪 Closing zap subscriptions for stream")
                 zapManager.clearZapsForStream(eventID)
-            }
-
-            // Clear chat messages when view disappears
-            if let stream = stream, let eventID = stream.eventID {
-                print("📪 Closing chat subscriptions for stream")
-                chatManager.clearMessagesForStream(eventID)
             }
         }
     }
@@ -318,30 +230,6 @@ struct VideoPlayerView: View {
             if let stream = stream, let eventID = stream.eventID, let zapManager = zapManager {
                 print("🔄 Refreshing zaps for stream...")
                 zapManager.fetchZapsForStream(eventID, pubkey: stream.pubkey, dTag: stream.streamID)
-            }
-        }
-    }
-
-    private func sendChatMessage() {
-        guard !chatMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return
-        }
-
-        guard let activityManager = liveActivityManager else {
-            print("❌ LiveActivityManager not initialized")
-            return
-        }
-
-        Task {
-            do {
-                try await activityManager.sendChatMessage(chatMessage)
-                await MainActor.run {
-                    chatMessage = ""
-                    showChatInput = false
-                }
-                print("✅ Chat message sent successfully")
-            } catch {
-                print("❌ Failed to send chat message: \(error)")
             }
         }
     }

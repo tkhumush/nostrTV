@@ -9,6 +9,30 @@ import SwiftUI
 import AVKit
 import CoreImage.CIFilterBuiltins
 
+/// Loading view for Curated tab when admin follow list is being fetched
+struct CuratedLoadingView: View {
+    var body: some View {
+        VStack(spacing: 30) {
+            Spacer()
+
+            ProgressView()
+                .scaleEffect(2)
+                .tint(.white)
+
+            Text("Curating...")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text("This will take a few seconds")
+                .font(.body)
+                .foregroundColor(.secondary)
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
 /// Empty state view for Following tab when user is not logged in
 struct FollowingEmptyStateView: View {
     let onLoginTap: () -> Void
@@ -411,18 +435,21 @@ struct ContentView: View {
             TabView {
                 // Curated tab (filtered by admin follow list)
                 NavigationView {
-                    StreamListView(
-                        viewModel: viewModel,
-                        categorizedStreams: viewModel.allCategorizedStreams,
-                        featuredStream: viewModel.discoverFeaturedStream
-                    ) { url, lightningAddress, selectedStream in
-                        let player = AVPlayer(url: url)
-                        self.player = player
-                        self.selectedLightningAddress = lightningAddress
-                        self.selectedStream = selectedStream
-                        self.showPlayer = true
+                    if viewModel.isLoadingAdminFollowList {
+                        CuratedLoadingView()
+                    } else {
+                        StreamListView(
+                            viewModel: viewModel,
+                            categorizedStreams: viewModel.allCategorizedStreams,
+                            featuredStream: viewModel.discoverFeaturedStream
+                        ) { url, lightningAddress, selectedStream in
+                            let player = AVPlayer(url: url)
+                            self.player = player
+                            self.selectedLightningAddress = lightningAddress
+                            self.selectedStream = selectedStream
+                            self.showPlayer = true
+                        }
                     }
-                    .navigationTitle("Curated")
                 }
                 .tabItem {
                     Label("Curated", systemImage: "star.fill")
@@ -442,12 +469,10 @@ struct ContentView: View {
                             self.selectedStream = selectedStream
                             self.showPlayer = true
                         }
-                        .navigationTitle("Following")
                     } else {
                         FollowingEmptyStateView(onLoginTap: {
                             showLoginSheet = true
                         })
-                        .navigationTitle("Following")
                     }
                 }
                 .tabItem {
