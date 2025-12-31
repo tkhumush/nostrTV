@@ -9,6 +9,45 @@ import SwiftUI
 import AVKit
 import CoreImage.CIFilterBuiltins
 
+/// Empty state view for Following tab when user is not logged in
+struct FollowingEmptyStateView: View {
+    let onLoginTap: () -> Void
+
+    var body: some View {
+        VStack(spacing: 30) {
+            Spacer()
+
+            Image(systemName: "person.2.fill")
+                .font(.system(size: 100))
+                .foregroundColor(.secondary)
+
+            Text("Log in to see your Following")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text("Connect your Nostr account to view streams from people you follow")
+                .font(.body)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+
+            Button(action: onLoginTap) {
+                Text("Log In")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 40)
+                    .padding(.vertical, 15)
+                    .background(Color.blue)
+                    .cornerRadius(10)
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
 struct FeaturedStreamCardView: View {
     let stream: Stream
     let viewModel: StreamViewModel
@@ -359,6 +398,7 @@ struct ContentView: View {
     @State private var selectedLightningAddress: String?
     @State private var selectedStream: Stream?  // Track selected stream for live activity
     @State private var showProfilePage = false
+    @State private var showLoginSheet = false
 
     init() {
         let vm = StreamViewModel()
@@ -369,26 +409,7 @@ struct ContentView: View {
     var body: some View {
         ZStack(alignment: .topTrailing) {
             TabView {
-                // Following tab
-                NavigationView {
-                    StreamListView(
-                        viewModel: viewModel,
-                        categorizedStreams: viewModel.categorizedStreams,
-                        featuredStream: viewModel.featuredStream
-                    ) { url, lightningAddress, selectedStream in
-                        let player = AVPlayer(url: url)
-                        self.player = player
-                        self.selectedLightningAddress = lightningAddress
-                        self.selectedStream = selectedStream
-                        self.showPlayer = true
-                    }
-                    .navigationTitle("Following")
-                }
-                .tabItem {
-                    Label("Following", systemImage: "person.2.fill")
-                }
-
-                // Discover tab (all streams)
+                // Curated tab (filtered by admin follow list)
                 NavigationView {
                     StreamListView(
                         viewModel: viewModel,
@@ -401,10 +422,36 @@ struct ContentView: View {
                         self.selectedStream = selectedStream
                         self.showPlayer = true
                     }
-                    .navigationTitle("Discover")
+                    .navigationTitle("Curated")
                 }
                 .tabItem {
-                    Label("Discover", systemImage: "globe")
+                    Label("Curated", systemImage: "star.fill")
+                }
+
+                // Following tab
+                NavigationView {
+                    if authManager.isAuthenticated {
+                        StreamListView(
+                            viewModel: viewModel,
+                            categorizedStreams: viewModel.categorizedStreams,
+                            featuredStream: viewModel.featuredStream
+                        ) { url, lightningAddress, selectedStream in
+                            let player = AVPlayer(url: url)
+                            self.player = player
+                            self.selectedLightningAddress = lightningAddress
+                            self.selectedStream = selectedStream
+                            self.showPlayer = true
+                        }
+                        .navigationTitle("Following")
+                    } else {
+                        FollowingEmptyStateView(onLoginTap: {
+                            showLoginSheet = true
+                        })
+                        .navigationTitle("Following")
+                    }
+                }
+                .tabItem {
+                    Label("Following", systemImage: "person.2.fill")
                 }
             }
 
@@ -433,6 +480,9 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $showProfilePage) {
             ProfileSettingsView(authManager: authManager, isPresented: $showProfilePage)
         }
+        .fullScreenCover(isPresented: $showLoginSheet) {
+            LoginFlowView(authManager: authManager)
+        }
         .onAppear {
             // Update follow list when view appears
             viewModel.updateFollowList(authManager.followList)
@@ -440,6 +490,12 @@ struct ContentView: View {
         .onChange(of: authManager.followList) { oldValue, newValue in
             // Update filter when follow list changes
             viewModel.updateFollowList(newValue)
+        }
+        .onChange(of: authManager.isAuthenticated) { oldValue, newValue in
+            // Close login sheet when user successfully authenticates
+            if newValue == true {
+                showLoginSheet = false
+            }
         }
         .onChange(of: showPlayer) { oldValue, newValue in
             if oldValue == true && newValue == false {

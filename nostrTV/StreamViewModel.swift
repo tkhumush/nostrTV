@@ -9,14 +9,18 @@ struct StreamCategory {
 class StreamViewModel: ObservableObject {
     @Published var streams: [Stream] = []
     @Published var categorizedStreams: [StreamCategory] = []
-    @Published var allCategorizedStreams: [StreamCategory] = []  // Unfiltered streams
+    @Published var allCategorizedStreams: [StreamCategory] = []  // Discover streams (filtered by admin follow list)
     private var nostrClient = NostrClient()
     private var refreshTimer: Timer?
-    private var followList: Set<String> = [] // Use Set for O(1) lookups
+    private var followList: Set<String> = [] // User follow list - Use Set for O(1) lookups
+    private var adminFollowList: Set<String> = [] // Admin follow list for Discover tab
     private var validationTasks: Set<String> = [] // Track ongoing validations
 
     // Stream collection size limit to prevent unbounded memory growth
     private let maxStreamCount = 200
+
+    // Hardcoded admin pubkey for curated Discover feed
+    private let adminPubkey = "9cb3545c36940d9a2ef86d50d5c7a8fab90310cc898c4344bcfc4c822ff47bca"
 
     /// Expose the NostrClient for use by other components
     var client: NostrClient {
@@ -40,9 +44,18 @@ class StreamViewModel: ObservableObject {
         return liveStreams.max(by: { $0.viewerCount < $1.viewerCount })
     }
 
-    /// Get the featured stream for Discover tab (all live streams, most viewers)
+    /// Get the featured stream for Discover tab (filtered by admin follow list, most viewers)
     var discoverFeaturedStream: Stream? {
-        return streams.filter { $0.isLive }.max(by: { $0.viewerCount < $1.viewerCount })
+        let filteredStreams: [Stream]
+        if !adminFollowList.isEmpty {
+            filteredStreams = streams.filter { stream in
+                guard let pubkey = stream.pubkey else { return false }
+                return adminFollowList.contains(pubkey) && stream.isLive
+            }
+        } else {
+            filteredStreams = streams.filter { $0.isLive }
+        }
+        return filteredStreams.max(by: { $0.viewerCount < $1.viewerCount })
     }
 
     init() {
@@ -74,6 +87,9 @@ class StreamViewModel: ObservableObject {
                 self.validateStreamURL(stream)
             }
         }
+
+        // Fetch admin follow list on startup
+        fetchAdminFollowList()
 
         startAutoRefresh()
     }
@@ -165,10 +181,20 @@ class StreamViewModel: ObservableObject {
     }
 
     private func updateCategorizedStreams() {
-        // Update all streams (unfiltered)
-        self.allCategorizedStreams = categorizeStreams(streams)
+        // Update Discover streams (filtered by admin follow list)
+        let discoverStreams: [Stream]
+        if !adminFollowList.isEmpty {
+            discoverStreams = streams.filter { stream in
+                guard let pubkey = stream.pubkey else { return false }
+                return adminFollowList.contains(pubkey)
+            }
+        } else {
+            // If admin follow list is empty, show nothing (prevents showing all streams)
+            discoverStreams = []
+        }
+        self.allCategorizedStreams = categorizeStreams(discoverStreams)
 
-        // Filter streams by follow list if not empty
+        // Update Following streams (filtered by user follow list)
         let filteredStreams: [Stream]
         if !followList.isEmpty {
             filteredStreams = streams.filter { stream in
@@ -176,8 +202,8 @@ class StreamViewModel: ObservableObject {
                 return followList.contains(pubkey)
             }
         } else {
-            // If follow list is empty, show all streams
-            filteredStreams = streams
+            // If follow list is empty, show nothing
+            filteredStreams = []
         }
 
         // Update filtered streams
@@ -292,5 +318,18 @@ class StreamViewModel: ObservableObject {
     private func removeInvalidStream(_ stream: Stream) {
         streams.removeAll { $0.streamID == stream.streamID }
         updateCategorizedStreams()
+    }
+
+    private func fetchAdminFollowList() {
+        // Setup callback for admin follow list
+        nostrClient.onFollowListReceived = { [weak self] follows in
+            DispatchQueue.main.async {
+                self?.adminFollowList = Set(follows)
+                self?.updateCategorizedStreams()
+            }
+        }
+
+        // Fetch the admin follow list
+        nostrClient.connectAndFetchUserData(pubkey: adminPubkey)
     }
 }
