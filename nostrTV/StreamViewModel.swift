@@ -11,6 +11,7 @@ class StreamViewModel: ObservableObject {
     @Published var categorizedStreams: [StreamCategory] = []
     @Published var allCategorizedStreams: [StreamCategory] = []  // Discover streams (filtered by admin follow list)
     @Published var isLoadingAdminFollowList: Bool = true // Track if we're loading the admin follow list
+    @Published var isInitialLoad: Bool = true // Track if this is the initial load (no streams received yet)
     private var nostrClient = NostrClient()
     private var refreshTimer: Timer?
     private var followList: Set<String> = [] // User follow list - Use Set for O(1) lookups
@@ -64,6 +65,12 @@ class StreamViewModel: ObservableObject {
             DispatchQueue.main.async {
                 guard let self = self else { return }
 
+                // Mark that we've received at least one stream
+                if self.isInitialLoad {
+                    self.isInitialLoad = false
+                    print("✅ First stream received, ending initial load state")
+                }
+
                 // Always remove exact duplicates by streamID first
                 self.streams.removeAll { existingStream in
                     existingStream.streamID == stream.streamID
@@ -96,8 +103,14 @@ class StreamViewModel: ObservableObject {
 
         print("🔧 After loadCachedAdminFollowList - isLoadingAdminFollowList: \(isLoadingAdminFollowList)")
 
-        // Fetch fresh admin follow list in background
-        fetchAdminFollowList()
+        // Only fetch fresh admin follow list if cache is missing or old
+        let shouldFetchFresh = adminFollowList.isEmpty || shouldRefreshAdminCache()
+        if shouldFetchFresh {
+            print("🔧 Fetching fresh admin follow list...")
+            fetchAdminFollowList()
+        } else {
+            print("✅ Using cached admin follow list, skipping network fetch")
+        }
 
         startAutoRefresh()
     }
@@ -328,15 +341,34 @@ class StreamViewModel: ObservableObject {
         updateCategorizedStreams()
     }
 
+    private func shouldRefreshAdminCache() -> Bool {
+        guard let cacheDate = UserDefaults.standard.object(forKey: "adminFollowListCacheDate") as? Date else {
+            return true // No cache date, should fetch
+        }
+        let cacheAge = Date().timeIntervalSince(cacheDate)
+        return cacheAge >= (24 * 60 * 60) // Refresh if older than 24 hours
+    }
+
     private func loadCachedAdminFollowList() {
-        // Load cached admin follow list from UserDefaults
-        if let cachedData = UserDefaults.standard.data(forKey: "adminFollowList") {
+        // Check if cache exists and when it was last updated
+        if let cachedData = UserDefaults.standard.data(forKey: "adminFollowList"),
+           let cacheDate = UserDefaults.standard.object(forKey: "adminFollowListCacheDate") as? Date {
+
+            // Cache is valid for 24 hours
+            let cacheAge = Date().timeIntervalSince(cacheDate)
+            let cacheIsValid = cacheAge < (24 * 60 * 60) // 24 hours in seconds
+
             do {
                 let decoder = JSONDecoder()
                 let cachedList = try decoder.decode([String].self, from: cachedData)
                 adminFollowList = Set(cachedList)
                 isLoadingAdminFollowList = false // Cache loaded, no longer loading
-                print("✅ Loaded cached admin follow list with \(cachedList.count) users")
+                print("✅ Loaded cached admin follow list with \(cachedList.count) users (age: \(Int(cacheAge/60)) minutes)")
+
+                // Only fetch fresh data if cache is old
+                if !cacheIsValid {
+                    print("⚠️ Cache is older than 24 hours, will refresh in background")
+                }
             } catch {
                 print("❌ Failed to decode cached admin follow list")
             }
@@ -348,6 +380,7 @@ class StreamViewModel: ObservableObject {
             let encoder = JSONEncoder()
             let data = try encoder.encode(follows)
             UserDefaults.standard.set(data, forKey: "adminFollowList")
+            UserDefaults.standard.set(Date(), forKey: "adminFollowListCacheDate")
             print("✅ Saved admin follow list to cache (\(follows.count) users)")
         } catch {
             print("❌ Failed to encode admin follow list for caching")

@@ -435,7 +435,7 @@ struct ContentView: View {
             TabView {
                 // Curated tab (filtered by admin follow list)
                 NavigationView {
-                    if viewModel.isLoadingAdminFollowList {
+                    if viewModel.isInitialLoad {
                         CuratedLoadingView()
                     } else {
                         StreamListView(
