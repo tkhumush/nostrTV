@@ -17,12 +17,16 @@ class StreamViewModel: ObservableObject {
     private var followList: Set<String> = [] // User follow list - Use Set for O(1) lookups
     private var adminFollowList: Set<String> = [] // Admin follow list for Discover tab
     private var validationTasks: Set<String> = [] // Track ongoing validations
+    private var adminFollowFetchState = (combined: Set<String>(), count: 0) // Track admin follow list fetching
 
     // Stream collection size limit to prevent unbounded memory growth
     private let maxStreamCount = 200
 
-    // Hardcoded admin pubkey for curated Discover feed
-    private let adminPubkey = "9cb3545c36940d9a2ef86d50d5c7a8fab90310cc898c4344bcfc4c822ff47bca"
+    // Hardcoded admin pubkeys for curated Discover feed (primary + backup)
+    private let adminPubkeys = [
+        "f67a7093fdd829fae5796250cf0932482b1d7f40900110d0d932b5a7fb37755d", // nostrTVadmin (primary)
+        "9cb3545c36940d9a2ef86d50d5c7a8fab90310cc898c4344bcfc4c822ff47bca"  // tkay@bitcoindistrict.org (backup)
+    ]
 
     /// Expose the NostrClient for use by other components
     var client: NostrClient {
@@ -388,16 +392,30 @@ class StreamViewModel: ObservableObject {
     }
 
     private func fetchAdminFollowList() {
-        print("🔧 Fetching admin follow list for pubkey: \(adminPubkey.prefix(16))...")
+        print("🔧 Fetching admin follow lists from \(adminPubkeys.count) admin accounts...")
+
+        // Reset fetch state
+        adminFollowFetchState = (Set<String>(), 0)
 
         // Setup callback for admin follow list
         nostrClient.onFollowListReceived = { [weak self] follows in
             print("🔧 Admin follow list received! Count: \(follows.count)")
             DispatchQueue.main.async {
-                self?.adminFollowList = Set(follows)
-                self?.isLoadingAdminFollowList = false // Follow list loaded
-                self?.saveAdminFollowListToCache(follows)
-                self?.updateCategorizedStreams()
+                guard let self = self else { return }
+
+                // Combine follows from all admin accounts
+                self.adminFollowFetchState.combined.formUnion(follows)
+                self.adminFollowFetchState.count += 1
+
+                // If we've received all follow lists, save and update
+                if self.adminFollowFetchState.count >= self.adminPubkeys.count {
+                    let allFollows = Array(self.adminFollowFetchState.combined)
+                    self.adminFollowList = self.adminFollowFetchState.combined
+                    self.isLoadingAdminFollowList = false
+                    self.saveAdminFollowListToCache(allFollows)
+                    self.updateCategorizedStreams()
+                    print("✅ Combined \(allFollows.count) unique follows from \(self.adminPubkeys.count) admin accounts")
+                }
             }
         }
 
@@ -410,7 +428,10 @@ class StreamViewModel: ObservableObject {
             }
         }
 
-        // Fetch the admin follow list
-        nostrClient.connectAndFetchUserData(pubkey: adminPubkey)
+        // Fetch the admin follow lists from all pubkeys
+        for pubkey in adminPubkeys {
+            print("🔧 Fetching from admin: \(pubkey.prefix(16))...")
+            nostrClient.connectAndFetchUserData(pubkey: pubkey)
+        }
     }
 }

@@ -102,7 +102,11 @@ struct FeaturedStreamCardView: View {
                                 .clipped()
                                 .cornerRadius(12)
                         } placeholder: {
-                            Color.gray.frame(height: 400)
+                            Image("Top Shelf Image")
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(height: 400)
+                                .clipped()
                                 .cornerRadius(12)
                         }
                     } else if let pubkey = stream.pubkey,
@@ -117,11 +121,19 @@ struct FeaturedStreamCardView: View {
                                 .clipped()
                                 .cornerRadius(12)
                         } placeholder: {
-                            Color.gray.frame(height: 400)
+                            Image("Top Shelf Image")
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(height: 400)
+                                .clipped()
                                 .cornerRadius(12)
                         }
                     } else {
-                        Color.gray.frame(height: 400)
+                        Image("Top Shelf Image")
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(height: 400)
+                            .clipped()
                             .cornerRadius(12)
                     }
 
@@ -272,7 +284,11 @@ struct StreamRowView: View {
                             .clipped()
                             .cornerRadius(8)
                     } placeholder: {
-                        Color.gray.frame(width: 200, height: 120)
+                        Image("Top Shelf Image")
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 200, height: 120)
+                            .clipped()
                             .cornerRadius(8)
                     }
                 } else if let pubkey = stream.pubkey,
@@ -288,11 +304,19 @@ struct StreamRowView: View {
                             .clipped()
                             .cornerRadius(8)
                     } placeholder: {
-                        Color.gray.frame(width: 200, height: 120)
+                        Image("Top Shelf Image")
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 200, height: 120)
+                            .clipped()
                             .cornerRadius(8)
                     }
                 } else {
-                    Color.gray.frame(width: 200, height: 120)
+                    Image("Top Shelf Image")
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 200, height: 120)
+                        .clipped()
                         .cornerRadius(8)
                 }
 
