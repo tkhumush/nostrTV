@@ -1,56 +1,51 @@
 import Foundation
+import NostrSDK
 import secp256k1
 
 /// Represents a Nostr key pair with private and public keys
-/// Implementation based on Damus iOS app
+/// Implementation based on NostrSDK
 struct NostrKeyPair {
-    let privateKey: Data  // 32-byte private key
-    let publicKey: Data   // 32-byte x-only public key
+    let privateKey: PrivateKey  // NostrSDK PrivateKey
+    let publicKey: PublicKey   // NostrSDK PublicKey
 
     /// Generate a new random ephemeral key pair
-    /// Matches Damus: generate_new_keypair() in Keys.swift
     static func generate() throws -> NostrKeyPair {
-        let key = try secp256k1.Signing.PrivateKey()
-        let privkey = key.rawRepresentation
-        let pubkey = Data(key.publicKey.xonly.bytes)
+        guard let keypair = Keypair() else {
+            throw NostrKeyError.keyGenerationFailed
+        }
 
-        return NostrKeyPair(privateKey: privkey, publicKey: pubkey)
+        return NostrKeyPair(privateKey: keypair.privateKey, publicKey: keypair.publicKey)
     }
 
     /// Initialize from existing private key (hex format)
     init(privateKeyHex: String) throws {
-        guard let privateKeyData = Data(hex: privateKeyHex) else {
-            throw NostrKeyError.invalidHexString
+        guard let privateKey = PrivateKey(hex: privateKeyHex) else {
+            throw NostrKeyError.invalidPrivateKey
         }
 
-        guard privateKeyData.count == 32 else {
-            throw NostrKeyError.invalidKeyLength
+        guard let keypair = Keypair(privateKey: privateKey) else {
+            throw NostrKeyError.publicKeyDerivationFailed
         }
 
-        // Generate public key from private key
-        let key = try secp256k1.Signing.PrivateKey(rawRepresentation: privateKeyData)
-        let pubkey = Data(key.publicKey.xonly.bytes)
-
-        self.privateKey = privateKeyData
-        self.publicKey = pubkey
+        self.privateKey = keypair.privateKey
+        self.publicKey = keypair.publicKey
     }
 
     /// Initialize from nsec (bech32-encoded private key)
     init(nsec: String) throws {
-        let decoded = try Bech32.decode(nsec)
-
-        guard decoded.hrp == "nsec" else {
+        guard let privateKey = PrivateKey(nsec: nsec) else {
             throw NostrKeyError.invalidNsec
         }
 
-        guard decoded.data.count == 32 else {
-            throw NostrKeyError.invalidKeyLength
+        guard let keypair = Keypair(privateKey: privateKey) else {
+            throw NostrKeyError.publicKeyDerivationFailed
         }
 
-        try self.init(privateKeyHex: decoded.data.hexString)
+        self.privateKey = keypair.privateKey
+        self.publicKey = keypair.publicKey
     }
 
-    private init(privateKey: Data, publicKey: Data) {
+    private init(privateKey: PrivateKey, publicKey: PublicKey) {
         self.privateKey = privateKey
         self.publicKey = publicKey
     }
@@ -59,28 +54,28 @@ struct NostrKeyPair {
 
     /// Private key in hex format
     var privateKeyHex: String {
-        return privateKey.hexString
+        return privateKey.hex
     }
 
     /// Public key in hex format
     var publicKeyHex: String {
-        return publicKey.hexString
+        return publicKey.hex
     }
 
     /// Private key in nsec (bech32) format
     var nsec: String {
-        return (try? Bech32.encode(hrp: "nsec", data: privateKey)) ?? ""
+        return privateKey.nsec
     }
 
     /// Public key in npub (bech32) format
     var npub: String {
-        return (try? Bech32.encode(hrp: "npub", data: publicKey)) ?? ""
+        return publicKey.npub
     }
 
     // MARK: - Signing
 
     /// Sign a message hash using Schnorr signature
-    /// Matches Damus: sign_id() in NostrEvent.swift
+    /// Uses NostrSDK's secp256k1 Schnorr signing
     /// - Parameter messageHash: 32-byte hash of the message to sign
     /// - Returns: 64-byte Schnorr signature
     func sign(messageHash: Data) throws -> Data {
@@ -88,16 +83,26 @@ struct NostrKeyPair {
             throw NostrKeyError.invalidMessageHash
         }
 
-        let key = try secp256k1.Signing.PrivateKey(rawRepresentation: privateKey)
+        // Use secp256k1 Schnorr signing (matching NostrSDK pattern)
+        guard let signingKey = try? secp256k1.Schnorr.PrivateKey(
+            dataRepresentation: privateKey.dataRepresentation
+        ) else {
+            throw NostrKeyError.signingFailed
+        }
 
-        // Generate 64 bytes of auxiliary randomness (Damus approach)
+        // Generate 64 bytes of auxiliary randomness per BIP-340
         var auxRand = (0..<64).map { _ in UInt8.random(in: 0...255) }
         var digest = [UInt8](messageHash)
 
         // Sign with Schnorr
-        let signature = try key.schnorr.signature(message: &digest, auxiliaryRand: &auxRand)
+        guard let signature = try? signingKey.signature(
+            message: &digest,
+            auxiliaryRand: &auxRand
+        ) else {
+            throw NostrKeyError.signingFailed
+        }
 
-        return signature.rawRepresentation
+        return signature.dataRepresentation
     }
 
     /// Verify a Schnorr signature
@@ -105,9 +110,8 @@ struct NostrKeyPair {
     ///   - signature: 64-byte Schnorr signature
     ///   - messageHash: 32-byte hash of the message
     /// - Returns: true if signature is valid
-    /// Note: Verification to be implemented if needed
     func verify(signature: Data, messageHash: Data) -> Bool {
-        // TODO: Implement signature verification using jb55 secp256k1 library
+        // TODO: Implement signature verification using NostrSDK
         // For now, we primarily need signing capability
         return false
     }
@@ -130,7 +134,7 @@ enum NostrKeyError: Error {
     case verificationFailed
 }
 
-// MARK: - Data Extensions
+// MARK: - Data Extensions (kept for compatibility)
 
 extension Data {
     /// Convert hex string to Data
@@ -152,7 +156,6 @@ extension Data {
     }
 
     /// Convert Data to hex string
-    /// Matches Damus hex_encode implementation
     var hexString: String {
         return map { String(format: "%02x", $0) }.joined()
     }

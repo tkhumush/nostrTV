@@ -1,6 +1,5 @@
 import Foundation
 import Combine
-import secp256k1
 
 /// Manages live activity tracking for streams using NIP-53
 /// Publishes events when users join or leave streams

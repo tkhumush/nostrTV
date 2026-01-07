@@ -15,21 +15,40 @@ class NostrAuthManager: ObservableObject {
     @Published var followList: [String] = []
     @Published var isLoadingProfile: Bool = false
     @Published var errorMessage: String?
+    @Published var authMethod: AuthMethod? = nil
+    @Published var bunkerClient: NostrBunkerClient?
 
     private let userDefaultsKey = "nostrUserNip05"
     private let nostrClient = NostrClient()
+    private let bunkerSessionManager = BunkerSessionManager()
 
     init() {
-        // Check if user is already logged in
-        if let savedNip05 = UserDefaults.standard.string(forKey: userDefaultsKey),
-           let savedPubkey = UserDefaults.standard.string(forKey: "nostrUserPubkey") {
+        // Check for bunker session first
+        if let bunkerSession = bunkerSessionManager.loadSession(),
+           let userPubkey = bunkerSession.userPubkey {
+            // Restore bunker session
+            authMethod = .bunker(session: bunkerSession)
+            currentUser = UserSession(nip05: "bunker:\(bunkerSession.bunkerPubkey.prefix(8))...", hexPubkey: userPubkey)
+            isAuthenticated = true
+
+            // Load cached profile data
+            loadCachedProfile()
+            isLoadingProfile = false
+
+            // Reconnect bunker client in background
+            Task { @MainActor in
+                await restoreBunkerSession(bunkerSession)
+            }
+        }
+        // Fall back to NIP-05 login
+        else if let savedNip05 = UserDefaults.standard.string(forKey: userDefaultsKey),
+                let savedPubkey = UserDefaults.standard.string(forKey: "nostrUserPubkey") {
+            authMethod = .nip05(nip05: savedNip05, pubkey: savedPubkey)
             currentUser = UserSession(nip05: savedNip05, hexPubkey: savedPubkey)
             isAuthenticated = true
 
             // Load cached profile data
             loadCachedProfile()
-
-            // Ensure loading state is false when using cached data
             isLoadingProfile = false
         }
     }
@@ -197,10 +216,97 @@ class NostrAuthManager: ObservableObject {
         isAuthenticated = true
     }
 
+    // MARK: - Bunker Authentication
+
+    /// Authenticate with a remote bunker
+    @MainActor
+    func authenticateWithBunker(bunkerClient: NostrBunkerClient, userPubkey: String) async {
+        self.bunkerClient = bunkerClient
+
+        guard let bunkerPubkey = bunkerClient.bunkerPubkey,
+              let relay = bunkerClient.bunkerRelay else {
+            errorMessage = "Invalid bunker configuration"
+            return
+        }
+
+        // Create and save session
+        let session = BunkerSession(
+            bunkerPubkey: bunkerPubkey,
+            relay: relay,
+            userPubkey: userPubkey,
+            createdAt: Date(),
+            lastUsed: Date()
+        )
+
+        bunkerSessionManager.saveSession(session)
+        authMethod = .bunker(session: session)
+
+        // Update user session
+        currentUser = UserSession(nip05: "bunker:\(bunkerPubkey.prefix(8))...", hexPubkey: userPubkey)
+
+        // Fetch profile data
+        isLoadingProfile = true
+        fetchUserData(force: true)
+
+        // Mark as authenticated
+        isAuthenticated = true
+    }
+
+    /// Restore a bunker session on app launch
+    @MainActor
+    private func restoreBunkerSession(_ session: BunkerSession) async {
+        do {
+            // Recreate bunker client
+            let client = NostrBunkerClient(nostrClient: nostrClient, keyManager: NostrKeyManager.shared)
+
+            // Attempt to reconnect
+            let uri = BunkerURIComponents(
+                clientPubkey: session.bunkerPubkey,
+                relay: session.relay,
+                secret: nil,
+                metadata: nil
+            ).toURI()
+
+            try await client.connect(bunkerURI: uri)
+
+            // Update session last used
+            bunkerSessionManager.updateLastUsed()
+
+            self.bunkerClient = client
+
+            print("✅ Bunker session restored successfully")
+
+        } catch {
+            print("⚠️ Failed to restore bunker session: \(error.localizedDescription)")
+            // Don't log out automatically - user can still use cached data
+        }
+    }
+
     func logout() {
-        // Clear UserDefaults
-        UserDefaults.standard.removeObject(forKey: userDefaultsKey)
-        UserDefaults.standard.removeObject(forKey: "nostrUserPubkey")
+        // Handle auth-method-specific cleanup
+        switch authMethod {
+        case .nip05:
+            // Clear NIP-05 UserDefaults
+            UserDefaults.standard.removeObject(forKey: userDefaultsKey)
+            UserDefaults.standard.removeObject(forKey: "nostrUserPubkey")
+
+        case .bunker:
+            // Disconnect bunker client
+            if let client = bunkerClient {
+                Task { @MainActor in
+                    client.disconnect()
+                }
+            }
+            bunkerClient = nil
+
+            // Clear bunker session
+            bunkerSessionManager.clearSession()
+
+        case .none:
+            break
+        }
+
+        // Clear common UserDefaults
         UserDefaults.standard.removeObject(forKey: "nostrUserProfile")
         UserDefaults.standard.removeObject(forKey: "nostrUserFollowList")
 
@@ -209,11 +315,19 @@ class NostrAuthManager: ObservableObject {
         currentProfile = nil
         followList = []
         isAuthenticated = false
+        authMethod = nil
         errorMessage = nil
 
         // Disconnect client
         nostrClient.disconnect()
     }
+}
+
+// MARK: - Auth Method Enum
+
+enum AuthMethod {
+    case nip05(nip05: String, pubkey: String)
+    case bunker(session: BunkerSession)
 }
 
 struct UserSession {

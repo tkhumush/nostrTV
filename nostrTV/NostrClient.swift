@@ -60,6 +60,7 @@ class NostrClient {
     var onUserRelaysReceived: (([String]) -> Void)?
     var onZapReceived: ((ZapComment) -> Void)?
     var onChatReceived: ((ZapComment) -> Void)?  // Separate callback for chat messages (kind 1311)
+    var onBunkerMessageReceived: ((NostrEvent) -> Void)?  // Callback for NIP-46 bunker messages (kind 24133)
 
     // Add a profile received callback (supports multiple observers)
     func addProfileReceivedCallback(_ callback: @escaping (Profile) -> Void) {
@@ -292,6 +293,8 @@ class NostrClient {
             handleZapReceiptEvent(eventDict)
         case 10002:
             handleRelayListEvent(eventDict)
+        case 24133:
+            handleBunkerMessage(eventDict)
         case 30311:
             handleStreamEvent(eventDict)
         default:
@@ -713,7 +716,21 @@ class NostrClient {
 
         return millisats
     }
-    
+
+    private func handleBunkerMessage(_ eventDict: [String: Any]) {
+        // Convert event dictionary to NostrEvent and pass to callback
+        guard let eventData = try? JSONSerialization.data(withJSONObject: eventDict),
+              let event = try? JSONDecoder().decode(NostrEvent.self, from: eventData) else {
+            print("❌ Failed to parse kind 24133 bunker message")
+            return
+        }
+
+        // Dispatch to main thread for callback
+        DispatchQueue.main.async { [weak self] in
+            self?.onBunkerMessageReceived?(event)
+        }
+    }
+
     private func requestProfile(for pubkey: String) {
         // Check if we already have a pending request for this pubkey
         var shouldRequest = false
