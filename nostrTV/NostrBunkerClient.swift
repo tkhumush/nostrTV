@@ -404,7 +404,7 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
                 publicKeyB: senderPublicKey
             )
 
-            print("✅ Decrypted message: \(decrypted)")
+            print("✅ Message decrypted successfully")
 
             // Parse response
             guard let data = decrypted.data(using: .utf8) else {
@@ -414,27 +414,20 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
 
             guard let response = try? JSONDecoder().decode(BunkerResponse.self, from: data) else {
                 print("❌ Failed to parse bunker response as BunkerResponse")
-                print("📄 Decrypted content: \(decrypted)")
-
-                // Try to parse as raw JSON to see what we got
-                if let json = try? JSONSerialization.jsonObject(with: data) {
-                    print("📋 Raw JSON: \(json)")
-                }
+                print("📄 Unable to decode response structure")
                 return
             }
 
-            print("✅ Parsed response - ID: \(response.id), Result: \(response.result ?? "nil"), Error: \(response.error ?? "nil")")
+            print("✅ Parsed response - ID: \(response.id)")
 
             // If this is a connect response, validate the secret
             if let secret = expectedSecret {
-                print("🔑 Expecting secret validation...")
-                print("   Expected secret: \(secret)")
-                print("   Response result: \(response.result ?? "nil")")
+                print("🔑 Validating connection secret...")
 
                 if let result = response.result {
                     // The result should be "ack" or the secret
                     if result != "ack" && result != secret {
-                        print("⚠️ Secret mismatch! Expected: \(secret), Got: \(result)")
+                        print("⚠️ Secret validation failed - mismatch detected")
                         connectionState = .error("Secret validation failed")
 
                         // Resume with error if we're waiting for connection
@@ -444,7 +437,7 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
                         }
                         return
                     }
-                    print("✅ Secret validated successfully! Result: \(result)")
+                    print("✅ Secret validated successfully!")
                     expectedSecret = nil  // Clear it after validation
 
                     // Resume the waiting continuation - connection established!
