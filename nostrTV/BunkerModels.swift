@@ -83,7 +83,7 @@ struct BunkerURIComponents {
     let secret: String?
     let metadata: [String: String]?
 
-    /// Generate a bunker URI from components
+    /// Generate a bunker URI from components (for signer->client flow)
     func toURI() -> String {
         var uri = "bunker://\(clientPubkey)?relay=\(relay)"
 
@@ -96,6 +96,29 @@ struct BunkerURIComponents {
            let jsonString = String(data: jsonData, encoding: .utf8),
            let encoded = jsonString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
             uri += "&metadata=\(encoded)"
+        }
+
+        return uri
+    }
+
+    /// Generate a nostrconnect URI from components (for client->signer flow / reverse flow)
+    func toNostrConnectURI() -> String {
+        // URL encode the relay
+        let encodedRelay = relay.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? relay
+
+        var uri = "nostrconnect://\(clientPubkey)?relay=\(encodedRelay)"
+
+        if let secret = secret {
+            uri += "&secret=\(secret)"
+        }
+
+        // Add metadata as individual parameters (name, url, etc.)
+        if let metadata = metadata {
+            for (key, value) in metadata {
+                if let encodedValue = value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+                    uri += "&\(key)=\(encodedValue)"
+                }
+            }
         }
 
         return uri
@@ -198,6 +221,7 @@ enum BunkerError: LocalizedError {
     case encryptionFailed
     case decryptionFailed
     case unsupportedMethod(String)
+    case authenticationFailed
 
     var errorDescription: String? {
         switch self {
@@ -209,6 +233,8 @@ enum BunkerError: LocalizedError {
             return "Request timed out after 30 seconds"
         case .invalidResponse:
             return "Invalid response from bunker"
+        case .authenticationFailed:
+            return "Authentication failed - secret validation error"
         case .remoteError(let msg):
             return "Bunker error: \(msg)"
         case .connectionFailed(let reason):

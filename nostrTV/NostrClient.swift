@@ -900,6 +900,60 @@ class NostrClient {
         }
     }
 
+    /// Connect to a specific relay
+    /// - Parameter relayURL: The relay URL to connect to (e.g., "wss://relay.nsecbunker.com")
+    /// - Returns: True if connection was established or already exists, false otherwise
+    @discardableResult
+    func connectToRelay(_ relayURL: String) -> Bool {
+        guard let url = URL(string: relayURL) else {
+            print("❌ Invalid relay URL: \(relayURL)")
+            return false
+        }
+
+        // Check if already connected
+        if webSocketTasks[url] != nil {
+            print("✅ Already connected to \(relayURL)")
+            return true
+        }
+
+        // Ensure session exists
+        if session == nil {
+            session = URLSession(configuration: .default)
+        }
+
+        // Create and start WebSocket task
+        let task = session.webSocketTask(with: url)
+        webSocketTasks[url] = task
+        task.resume()
+
+        // Start listening for messages
+        listen(on: task, from: url)
+
+        print("✅ Connected to bunker relay: \(relayURL)")
+        return true
+    }
+
+    /// Send a request to a specific relay
+    /// - Parameters:
+    ///   - request: Array representing the Nostr request (e.g., ["REQ", "sub-id", {...}])
+    ///   - relayURL: The relay URL to send to (e.g., "wss://relay.nsecbunker.com")
+    func sendRequest(_ request: [Any], to relayURL: String) throws {
+        guard let url = URL(string: relayURL) else {
+            throw NSError(domain: "NostrClient", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid relay URL: \(relayURL)"])
+        }
+
+        guard let task = webSocketTasks[url] else {
+            throw NSError(domain: "NostrClient", code: 2, userInfo: [NSLocalizedDescriptionKey: "Not connected to relay: \(relayURL)"])
+        }
+
+        // Validate that we can serialize the request
+        _ = try JSONSerialization.data(withJSONObject: request)
+
+        // Send to specific relay
+        sendJSON(request, on: task, relayURL: url)
+        print("📤 Sent request to \(relayURL): \(request.first ?? "unknown")")
+    }
+
     // MARK: - Event Creation and Signing
 
     /// Create a Nostr event with the given parameters
@@ -993,6 +1047,45 @@ class NostrClient {
         if webSocketTasks.isEmpty {
             print("⚠️ WARNING: No WebSocket connections available!")
         }
+    }
+
+    /// Publish a signed event to a specific relay
+    /// - Parameters:
+    ///   - event: The signed event to publish
+    ///   - relayURL: The relay URL to publish to
+    func publishEvent(_ event: NostrEvent, to relayURL: String) throws {
+        guard let eventId = event.id,
+              let pubkey = event.pubkey,
+              let createdAt = event.created_at,
+              let content = event.content,
+              let sig = event.sig else {
+            throw NostrEventError.incompleteEvent
+        }
+
+        guard let url = URL(string: relayURL) else {
+            throw NSError(domain: "NostrClient", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid relay URL: \(relayURL)"])
+        }
+
+        guard let task = webSocketTasks[url] else {
+            throw NSError(domain: "NostrClient", code: 2, userInfo: [NSLocalizedDescriptionKey: "Not connected to relay: \(relayURL)"])
+        }
+
+        // Create EVENT message format: ["EVENT", {event}]
+        let eventDict: [String: Any] = [
+            "id": eventId,
+            "pubkey": pubkey,
+            "created_at": createdAt,
+            "kind": event.kind,
+            "tags": event.tags,
+            "content": content,
+            "sig": sig
+        ]
+
+        let message: [Any] = ["EVENT", eventDict]
+
+        // Send to specific relay
+        sendJSON(message, on: task, relayURL: url)
+        print("📤 Published event (kind \(event.kind)) to \(relayURL)")
     }
 
     /// Create and publish a text note (kind 1)

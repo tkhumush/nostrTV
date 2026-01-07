@@ -234,10 +234,11 @@ struct BunkerLoginView: View {
 
                 isGenerating = false
 
-                // Start bunker connection
-                try await bunkerClient.connect(bunkerURI: bunkerURI)
+                // Start listening for bunker connection (reverse flow)
+                // The signer will initiate by sending connect response after scanning QR
+                try await bunkerClient.waitForSignerConnection(bunkerURI: bunkerURI)
 
-                // Once connected, try to get public key
+                // Once signer connects and secret is validated, get public key
                 let userPubkey = try await bunkerClient.getPublicKey()
 
                 // Authenticate with auth manager
@@ -257,7 +258,7 @@ struct BunkerLoginView: View {
         }
     }
 
-    /// Generate bunker:// URI for QR code
+    /// Generate nostrconnect:// URI for QR code (reverse flow)
     private func generateBunkerURI() async throws -> String {
         // Ensure key manager has a keypair
         if !NostrKeyManager.shared.hasKeyPair {
@@ -268,8 +269,11 @@ struct BunkerLoginView: View {
             throw BunkerError.connectionFailed("Failed to generate client keys")
         }
 
-        // Use a well-known bunker relay (or user could choose)
-        let relay = "wss://relay.nsecbunker.com"
+        // Use a well-known relay for bunker communication
+        let relay = "wss://relay.primal.net"
+
+        // Generate random secret for validation
+        let secret = UUID().uuidString
 
         // Optional metadata about the app
         let metadata: [String: String] = [
@@ -280,11 +284,11 @@ struct BunkerLoginView: View {
         let components = BunkerURIComponents(
             clientPubkey: clientPubkey,
             relay: relay,
-            secret: nil,
+            secret: secret,
             metadata: metadata
         )
 
-        return components.toURI()
+        return components.toNostrConnectURI()
     }
 
     /// Generate QR code image from bunker URI

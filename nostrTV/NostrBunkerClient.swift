@@ -20,6 +20,8 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
     var bunkerPubkey: String?
     var bunkerRelay: String?
     private var clientKeyPair: NostrKeyPair?
+    private var expectedSecret: String?  // For nostrconnect:// flow validation
+    private var connectContinuation: CheckedContinuation<Void, Error>?  // For waiting on connect response
 
     private var pendingRequests: [String: PendingRequest] = [:]
 
@@ -37,20 +39,76 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
 
     // MARK: - Connection Management
 
-    /// Connect to a bunker using a bunker:// URI
-    /// - Parameter bunkerURI: The bunker URI (bunker://<pubkey>?relay=<url>...)
+    /// Wait for signer to connect after scanning nostrconnect:// QR code (reverse flow)
+    /// - Parameter nostrConnectURI: The nostrconnect URI we displayed
+    func waitForSignerConnection(bunkerURI: String) async throws {
+        connectionState = .connecting
+
+        // Parse URI (supports both bunker:// and nostrconnect://)
+        guard bunkerURI.hasPrefix("nostrconnect://") || bunkerURI.hasPrefix("bunker://") else {
+            throw BunkerError.invalidURI("URI must start with nostrconnect:// or bunker://")
+        }
+
+        let isReverseFlow = bunkerURI.hasPrefix("nostrconnect://")
+
+        // Parse the URI components
+        // For nostrconnect://, the pubkey is OUR client pubkey
+        // We extract the relay and secret
+        let components = try parseNostrConnectURI(bunkerURI)
+
+        bunkerRelay = components.relay
+        expectedSecret = components.secret  // Store for validation
+
+        // Use the keypair from NostrKeyManager (which matches the URI)
+        guard let keyPair = keyManager.currentKeyPair else {
+            throw BunkerError.notConnected
+        }
+        clientKeyPair = keyPair
+
+        // Connect to the relay
+        try await connectToRelay(components.relay)
+
+        // Subscribe to messages addressed to our client pubkey
+        try await subscribeToMessages()
+
+        connectionState = .waitingForScan
+
+        print("🔄 Waiting for signer to scan QR and send connect response...")
+
+        // Actually wait for the signer to send connect response
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            self.connectContinuation = continuation
+
+            // Set a timeout (60 seconds for user to scan and approve)
+            Task {
+                try? await Task.sleep(nanoseconds: 60_000_000_000) // 60 seconds
+
+                if self.connectContinuation != nil {
+                    self.connectContinuation?.resume(throwing: BunkerError.timeout)
+                    self.connectContinuation = nil
+                    await MainActor.run {
+                        self.connectionState = .error("Timeout waiting for signer")
+                    }
+                }
+            }
+        }
+
+        print("✅ Signer connected and secret validated!")
+    }
+
+    /// Connect to a bunker using a bunker:// URI (traditional flow for session restoration)
+    /// - Parameter bunkerURI: The bunker URI (bunker://<signer-pubkey>?relay=<url>...)
     func connect(bunkerURI: String) async throws {
         connectionState = .connecting
 
         // Parse bunker URI
         let components = try BunkerURIComponents.parse(bunkerURI)
 
-        // This is actually the CLIENT pubkey in the URI, not bunker pubkey
-        // The bunker will respond to messages sent to this pubkey
-        bunkerPubkey = components.clientPubkey
+        // In traditional flow, URI contains the SIGNER's pubkey
+        bunkerPubkey = components.clientPubkey  // This is actually signer pubkey in bunker://
         bunkerRelay = components.relay
 
-        // Generate ephemeral keypair for this bunker session
+        // Generate ephemeral keypair for this bunker session if not already set
         if clientKeyPair == nil {
             clientKeyPair = try NostrKeyPair.generate()
         }
@@ -61,22 +119,76 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
         // Subscribe to messages from the bunker
         try await subscribeToMessages()
 
-        connectionState = .waitingForScan
+        connectionState = .waitingForApproval
+
+        print("📡 Connected to bunker (traditional flow)")
+    }
+
+    /// Parse nostrconnect:// URI
+    private func parseNostrConnectURI(_ uri: String) throws -> (relay: String, secret: String?) {
+        let withoutScheme: String
+        if uri.hasPrefix("nostrconnect://") {
+            withoutScheme = String(uri.dropFirst(15))
+        } else if uri.hasPrefix("bunker://") {
+            withoutScheme = String(uri.dropFirst(9))
+        } else {
+            throw BunkerError.invalidURI("Invalid URI scheme")
+        }
+
+        guard let questionMarkIndex = withoutScheme.firstIndex(of: "?") else {
+            throw BunkerError.invalidURI("Missing query parameters")
+        }
+
+        let queryString = String(withoutScheme[withoutScheme.index(after: questionMarkIndex)...])
+
+        // Parse query parameters
+        var components = URLComponents()
+        components.query = queryString
+
+        guard let queryItems = components.queryItems else {
+            throw BunkerError.invalidURI("Invalid query parameters")
+        }
+
+        var relay: String?
+        var secret: String?
+
+        for item in queryItems {
+            switch item.name {
+            case "relay":
+                relay = item.value
+            case "secret":
+                secret = item.value
+            default:
+                break
+            }
+        }
+
+        guard let relayURL = relay else {
+            throw BunkerError.invalidURI("Missing relay parameter")
+        }
+
+        return (relay: relayURL, secret: secret)
     }
 
     /// Connect to a specific relay for bunker communication
     private func connectToRelay(_ relayURL: String) async throws {
-        // Note: In a production app, you'd want to ensure the relay is connected
-        // For now, we'll rely on NostrClient's existing relay connections
-        // or add this specific relay if needed
+        // Connect to the bunker relay using NostrClient
+        let connected = nostrClient.connectToRelay(relayURL)
 
-        // Check if relay is already in NostrClient's connections
-        // If not, we'd need to add it (NostrClient modification needed)
+        guard connected else {
+            throw BunkerError.connectionFailed("Failed to connect to bunker relay: \(relayURL)")
+        }
+
+        // Give the connection a moment to establish
+        try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+
+        print("✅ Connected to bunker relay: \(relayURL)")
     }
 
     /// Subscribe to kind 24133 events addressed to our client pubkey
     private func subscribeToMessages() async throws {
-        guard let clientPubkey = clientKeyPair?.publicKeyHex else {
+        guard let clientPubkey = clientKeyPair?.publicKeyHex,
+              let relay = bunkerRelay else {
             throw BunkerError.notConnected
         }
 
@@ -89,9 +201,12 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
             "limit": 10
         ]
 
-        // Note: We would send this subscription request to NostrClient
-        // For now, we rely on NostrClient's callback mechanism
-        _ = ["REQ", subscriptionId!, filter]
+        let request: [Any] = ["REQ", subscriptionId!, filter]
+
+        // Send subscription request to the bunker relay
+        try nostrClient.sendRequest(request, to: relay)
+
+        print("📥 Subscribed to bunker messages on \(relay) for pubkey \(clientPubkey.prefix(8))...")
     }
 
     /// Disconnect from bunker
@@ -225,8 +340,11 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
                         using: clientKeyPair
                     )
 
-                    // Publish event
-                    try self.nostrClient.publishEvent(event)
+                    // Publish event only to the bunker relay
+                    guard let relay = self.bunkerRelay else {
+                        throw BunkerError.notConnected
+                    }
+                    try self.nostrClient.publishEvent(event, to: relay)
 
                 } catch {
                     Task { @MainActor in
@@ -256,14 +374,28 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
             guard let clientKeyPair = clientKeyPair,
                   let senderPubkey = event.pubkey,
                   let encryptedContent = event.content else {
+                print("⚠️ Missing required fields in bunker message")
                 return
+            }
+
+            print("📨 Received kind 24133 event from: \(senderPubkey.prefix(8))...")
+
+            // If this is the first message and we don't have bunkerPubkey yet,
+            // this is the initial connect response from the signer
+            if bunkerPubkey == nil {
+                print("📩 First message - setting bunkerPubkey to: \(senderPubkey.prefix(8))...")
+                bunkerPubkey = senderPubkey
+                connectionState = .waitingForApproval
             }
 
             // Create NostrSDK keys for decryption
             let clientPrivateKey = clientKeyPair.privateKey
             guard let senderPublicKey = PublicKey(hex: senderPubkey) else {
+                print("❌ Invalid signer public key")
                 return
             }
+
+            print("🔓 Attempting to decrypt message...")
 
             // Decrypt response with NIP-44 using NostrSDK
             let decrypted = try self.decrypt(
@@ -272,14 +404,64 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
                 publicKeyB: senderPublicKey
             )
 
+            print("✅ Decrypted message: \(decrypted)")
+
             // Parse response
-            guard let data = decrypted.data(using: .utf8),
-                  let response = try? JSONDecoder().decode(BunkerResponse.self, from: data) else {
-                print("❌ Failed to parse bunker response")
+            guard let data = decrypted.data(using: .utf8) else {
+                print("❌ Could not convert decrypted string to data")
                 return
             }
 
-            // Handle response
+            guard let response = try? JSONDecoder().decode(BunkerResponse.self, from: data) else {
+                print("❌ Failed to parse bunker response as BunkerResponse")
+                print("📄 Decrypted content: \(decrypted)")
+
+                // Try to parse as raw JSON to see what we got
+                if let json = try? JSONSerialization.jsonObject(with: data) {
+                    print("📋 Raw JSON: \(json)")
+                }
+                return
+            }
+
+            print("✅ Parsed response - ID: \(response.id), Result: \(response.result ?? "nil"), Error: \(response.error ?? "nil")")
+
+            // If this is a connect response, validate the secret
+            if let secret = expectedSecret {
+                print("🔑 Expecting secret validation...")
+                print("   Expected secret: \(secret)")
+                print("   Response result: \(response.result ?? "nil")")
+
+                if let result = response.result {
+                    // The result should be "ack" or the secret
+                    if result != "ack" && result != secret {
+                        print("⚠️ Secret mismatch! Expected: \(secret), Got: \(result)")
+                        connectionState = .error("Secret validation failed")
+
+                        // Resume with error if we're waiting for connection
+                        if let continuation = connectContinuation {
+                            connectContinuation = nil
+                            continuation.resume(throwing: BunkerError.authenticationFailed)
+                        }
+                        return
+                    }
+                    print("✅ Secret validated successfully! Result: \(result)")
+                    expectedSecret = nil  // Clear it after validation
+
+                    // Resume the waiting continuation - connection established!
+                    if let continuation = connectContinuation {
+                        print("✅ Resuming connect continuation...")
+                        connectContinuation = nil
+                        continuation.resume()
+                    } else {
+                        print("⚠️ No connect continuation to resume!")
+                    }
+                    return  // Don't process as regular response
+                } else {
+                    print("⚠️ Connect response has no result field!")
+                }
+            }
+
+            // Handle regular responses
             await handleBunkerResponse(response)
 
         } catch {
