@@ -3,23 +3,25 @@
 //  nostrTV
 //
 //  Created by Claude Code
+//  Refactored: 2026-01-07 to use NostrSDK
 //
 
 import Foundation
 import Combine
+import NostrSDK
 
 /// Manages live chat messages for streams
-/// Subscribes to kind 1311 (live chat) events
+/// Subscribes to kind 1311 (live chat) events using NostrSDK
 @MainActor
 class ChatManager: ObservableObject {
     @Published private(set) var messagesByStream: [String: [ChatMessage]] = [:]
     @Published var profileUpdateTrigger: Int = 0  // Triggers UI updates when profiles change
     @Published var messageUpdateTrigger: Int = 0  // Triggers UI updates when messages change
 
-    private let nostrClient: NostrClient
+    private let nostrClient: NostrSDKClient
     private var subscriptionIDs: [String: String] = [:]  // streamID -> subscriptionID
 
-    init(nostrClient: NostrClient) {
+    init(nostrClient: NostrSDKClient) {
         self.nostrClient = nostrClient
 
         // Set up callback to receive chat messages (kind 1311)
@@ -40,7 +42,7 @@ class ChatManager: ObservableObject {
 
     /// Fetch chat messages for a specific stream
     func fetchChatMessagesForStream(_ streamEventId: String, pubkey: String, dTag: String) {
-        print("💬 Fetching chat messages for stream")
+        print("💬 ChatManager: Fetching chat messages for stream")
         print("   Event ID: \(streamEventId)")
         print("   D-tag: \(dTag)")
         print("   Pubkey: \(pubkey)")
@@ -49,33 +51,48 @@ class ChatManager: ObservableObject {
         let aTag = "30311:\(pubkey.lowercased()):\(dTag)"
         print("   A-tag filter: \(aTag)")
 
-        // Create subscription for kind 1311 (live chat) events
-        let filter: [String: Any] = [
-            "kinds": [1311],
-            "#a": [aTag],
-            "limit": 15  // Get last 15 messages
-        ]
+        // Create SDK Filter for kind 1311 (live chat) events
+        print("   🔧 Creating Filter object...")
+        guard let filter = Filter(
+            kinds: [1311],
+            tags: ["a": [aTag]],
+            limit: 20  // Get last 20 messages
+        ) else {
+            print("   ❌ Failed to create chat filter")
+            return
+        }
+        print("   ✅ Filter created successfully")
 
-        let subscriptionId = "chat-\(streamEventId.prefix(8))"
-        subscriptionIDs[streamEventId] = subscriptionId
+        // IMPORTANT: Wait for relays to connect before subscribing
+        // The SDK needs time to establish WebSocket connections
+        print("   ⏳ Waiting 2 seconds for relays to connect...")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self = self else { return }
 
-        // Send request via NostrClient using REQ format
-        let chatReq: [Any] = ["REQ", subscriptionId, filter]
+            print("   📡 Now calling nostrClient.subscribe()...")
+            let subscriptionId = self.nostrClient.subscribe(
+                with: filter,
+                purpose: "chat-\(streamEventId.prefix(8))"
+            )
 
-        do {
-            try nostrClient.sendRawRequest(chatReq)
-            print("   ✓ Chat message request sent to relays with ID: \(subscriptionId)")
-        } catch {
-            print("   ❌ Failed to fetch chat messages: \(error)")
+            self.subscriptionIDs[streamEventId] = subscriptionId
+            print("   ✅ ChatManager stored subscription ID: \(subscriptionId)")
         }
     }
 
     /// Handle incoming chat message
     private func handleChatMessage(_ zapComment: ZapComment) {
+        print("📨 ChatManager: Received chat message")
+        print("   Message ID: \(zapComment.id)")
+        print("   Content: \"\(zapComment.comment)\"")
+        print("   From: \(zapComment.senderPubkey.prefix(8))...")
+        print("   Timestamp: \(zapComment.timestamp)")
+
         guard let streamId = zapComment.streamEventId else {
-            print("   ⚠️ Chat message has no stream ID")
+            print("   ⚠️ Chat message has no stream ID - SKIPPING")
             return
         }
+        print("   Stream ID: \(streamId)")
 
         // Convert ZapComment to ChatMessage (don't store senderName, fetch it dynamically)
         let chatMessage = ChatMessage(
@@ -87,6 +104,7 @@ class ChatManager: ObservableObject {
 
         // Add to messages array for this stream
         if messagesByStream[streamId] == nil {
+            print("   📝 Creating new message array for stream: \(streamId)")
             messagesByStream[streamId] = []
         }
 
@@ -97,16 +115,19 @@ class ChatManager: ObservableObject {
             // Sort by timestamp (oldest first, newest at bottom)
             messagesByStream[streamId]!.sort { $0.timestamp < $1.timestamp }
 
-            // Keep only last 15 messages
-            if messagesByStream[streamId]!.count > 15 {
+            // Keep only last 100 messages
+            if messagesByStream[streamId]!.count > 100 {
                 messagesByStream[streamId]!.removeFirst()
             }
 
             // Trigger UI update
             messageUpdateTrigger += 1
 
-            print("💬 Added chat message from \(chatMessage.senderPubkey.prefix(8))...")
-            print("   Total messages for stream: \(messagesByStream[streamId]!.count)")
+            print("   ✅ Added chat message to stream")
+            print("   📊 Total messages for stream: \(messagesByStream[streamId]!.count)")
+            print("   🔄 Message update trigger: \(messageUpdateTrigger)")
+        } else {
+            print("   ⏭️ Duplicate message - SKIPPING")
         }
     }
 
@@ -119,16 +140,11 @@ class ChatManager: ObservableObject {
     func clearMessagesForStream(_ streamId: String) {
         messagesByStream.removeValue(forKey: streamId)
 
-        // Unsubscribe from chat messages
+        // Unsubscribe from chat messages using NostrSDKClient
         if let subscriptionId = subscriptionIDs[streamId] {
-            let closeReq: [Any] = ["CLOSE", subscriptionId]
-            do {
-                try nostrClient.sendRawRequest(closeReq)
-                print("💬 Closed chat subscription: \(subscriptionId)")
-            } catch {
-                print("❌ Failed to close chat subscription: \(error)")
-            }
+            nostrClient.closeSubscription(subscriptionId)
             subscriptionIDs.removeValue(forKey: streamId)
+            print("💬 Closed chat subscription: \(subscriptionId)")
         }
     }
 }

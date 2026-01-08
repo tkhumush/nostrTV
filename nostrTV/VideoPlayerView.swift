@@ -30,6 +30,9 @@ struct VideoPlayerView: View {
     @State private var chatMessage = ""
     @Environment(\.dismiss) private var dismiss
 
+    // Phase 2: SDK client for chat
+    private let sdkClient: NostrSDKClient
+
     init(player: AVPlayer, lightningAddress: String?, stream: Stream?, nostrClient: NostrClient, zapManager: ZapManager?, authManager: NostrAuthManager) {
         self.player = player
         self.lightningAddress = lightningAddress
@@ -37,7 +40,13 @@ struct VideoPlayerView: View {
         self.nostrClient = nostrClient
         self.zapManager = zapManager
         self.authManager = authManager
-        _chatManager = StateObject(wrappedValue: ChatManager(nostrClient: nostrClient))
+
+        // Phase 2: Create NostrSDKClient for ChatManager
+        // TODO: Phase 3 will pass this from ContentView instead of creating here
+        let tempSDKClient = try! NostrSDKClient() // Force-try acceptable for Phase 2 testing
+        tempSDKClient.connect()
+        self.sdkClient = tempSDKClient
+        _chatManager = StateObject(wrappedValue: ChatManager(nostrClient: tempSDKClient))
     }
 
     var body: some View {
@@ -88,7 +97,7 @@ struct VideoPlayerView: View {
                         LiveChatView(
                             chatManager: chatManager,
                             stream: stream,
-                            nostrClient: nostrClient
+                            nostrClient: sdkClient
                         )
 
                         // Chat input area
