@@ -13,7 +13,8 @@ struct Stream: Identifiable, Codable, Equatable {
     let title: String
     let streaming_url: String
     let imageURL: String?
-    let pubkey: String?
+    let pubkey: String?  // Host pubkey (from p-tag) - used for profile display
+    let eventAuthorPubkey: String?  // Event author pubkey (event signer) - used for a-tag coordinates
     let profile: Profile?
     let status: String
     let tags: [String]

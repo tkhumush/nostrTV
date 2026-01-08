@@ -316,8 +316,12 @@ class NostrClient {
         let streamID = extractTagValue("d", from: tagsAny)
         let status = extractTagValue("status", from: tagsAny) ?? "unknown"
         let imageURL = extractTagValue("image", from: tagsAny)
-        // The "p" tag in kind 30311 is the stream host pubkey (preferred), fallback to event author
-        let pubkey = extractTagValue("p", from: tagsAny) ?? eventDict["pubkey"] as? String
+
+        // IMPORTANT: We need BOTH pubkeys for different purposes:
+        // 1. Host pubkey (p-tag): Used for profile display
+        // 2. Event author pubkey (event.pubkey): Used for a-tag coordinate in chat subscriptions
+        let hostPubkey = extractTagValue("p", from: tagsAny) ?? eventDict["pubkey"] as? String
+        let eventAuthorPubkey = eventDict["pubkey"] as? String
 
         // Extract viewer count from current_participants tag
         let viewerCount: Int = {
@@ -372,7 +376,8 @@ class NostrClient {
             title: combinedTitle,
             streaming_url: finalStreamURL,
             imageURL: imageURL,
-            pubkey: pubkey,
+            pubkey: hostPubkey,
+            eventAuthorPubkey: eventAuthorPubkey,
             profile: nil,
             status: status,
             tags: allTags,
@@ -384,8 +389,8 @@ class NostrClient {
             self.onStreamReceived?(stream)
         }
 
-        // If we have a pubkey, request the profile if we don't have it
-        if let pubkey = pubkey {
+        // If we have a host pubkey, request the profile if we don't have it
+        if let pubkey = hostPubkey {
             let hasProfile = profileQueue.sync {
                 return self.profileCache[pubkey] != nil
             }
