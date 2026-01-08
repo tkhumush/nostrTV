@@ -470,7 +470,27 @@ struct ContentView: View {
                             let player = AVPlayer(url: url)
                             self.player = player
                             self.selectedLightningAddress = lightningAddress
-                            self.selectedStream = selectedStream
+
+                            // Attach profile to stream before passing to VideoPlayerView
+                            var streamWithProfile = selectedStream
+                            if let pubkey = selectedStream.pubkey, let profile = viewModel.getProfile(for: pubkey) {
+                                streamWithProfile = Stream(
+                                    streamID: selectedStream.streamID,
+                                    eventID: selectedStream.eventID,
+                                    title: selectedStream.title,
+                                    streaming_url: selectedStream.streaming_url,
+                                    imageURL: selectedStream.imageURL,
+                                    pubkey: selectedStream.pubkey,
+                                    eventAuthorPubkey: selectedStream.eventAuthorPubkey,
+                                    profile: profile,
+                                    status: selectedStream.status,
+                                    tags: selectedStream.tags,
+                                    createdAt: selectedStream.createdAt,
+                                    viewerCount: selectedStream.viewerCount
+                                )
+                            }
+
+                            self.selectedStream = streamWithProfile
                             self.showPlayer = true
                         }
                     }
@@ -490,7 +510,27 @@ struct ContentView: View {
                             let player = AVPlayer(url: url)
                             self.player = player
                             self.selectedLightningAddress = lightningAddress
-                            self.selectedStream = selectedStream
+
+                            // Attach profile to stream before passing to VideoPlayerView
+                            var streamWithProfile = selectedStream
+                            if let pubkey = selectedStream.pubkey, let profile = viewModel.getProfile(for: pubkey) {
+                                streamWithProfile = Stream(
+                                    streamID: selectedStream.streamID,
+                                    eventID: selectedStream.eventID,
+                                    title: selectedStream.title,
+                                    streaming_url: selectedStream.streaming_url,
+                                    imageURL: selectedStream.imageURL,
+                                    pubkey: selectedStream.pubkey,
+                                    eventAuthorPubkey: selectedStream.eventAuthorPubkey,
+                                    profile: profile,
+                                    status: selectedStream.status,
+                                    tags: selectedStream.tags,
+                                    createdAt: selectedStream.createdAt,
+                                    viewerCount: selectedStream.viewerCount
+                                )
+                            }
+
+                            self.selectedStream = streamWithProfile
                             self.showPlayer = true
                         }
                     } else {
