@@ -78,20 +78,24 @@ struct LiveChatView: View {
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 8) {
                                 ForEach(uniqueMessages) { message in
-                                    ChatMessageRow(message: message, nostrClient: nostrClient)
-                                        .id(message.id)
-                                        .onAppear {
-                                            // Re-enable auto-scroll when user scrolls back to bottom
-                                            if message.id == uniqueMessages.last?.id {
-                                                shouldAutoScroll = true
-                                            }
+                                    ChatMessageRow(
+                                        message: message,
+                                        nostrClient: nostrClient,
+                                        profileUpdateTrigger: chatManager.profileUpdateTrigger
+                                    )
+                                    .id(message.id)
+                                    .onAppear {
+                                        // Re-enable auto-scroll when user scrolls back to bottom
+                                        if message.id == uniqueMessages.last?.id {
+                                            shouldAutoScroll = true
                                         }
-                                        .onDisappear {
-                                            // Disable auto-scroll when user scrolls up (last message goes off screen)
-                                            if message.id == uniqueMessages.last?.id {
-                                                shouldAutoScroll = false
-                                            }
+                                    }
+                                    .onDisappear {
+                                        // Disable auto-scroll when user scrolls up (last message goes off screen)
+                                        if message.id == uniqueMessages.last?.id {
+                                            shouldAutoScroll = false
                                         }
+                                    }
                                 }
                             }
                             .padding(.horizontal, 12)
@@ -122,29 +126,74 @@ struct LiveChatView: View {
 private struct ChatMessageRow: View {
     let message: ChatMessage
     let nostrClient: NostrSDKClient
+    let profileUpdateTrigger: Int  // Forces re-render when profiles update
 
     var body: some View {
         // Dynamically fetch profile name from NostrSDKClient
         let profile = nostrClient.getProfile(for: message.senderPubkey)
         let displayName = profile?.displayName ?? profile?.name ?? "Anonymous"
+        let pictureURL = profile?.picture
 
-        VStack(alignment: .leading, spacing: 4) {
-            // Username and timestamp
-            HStack(spacing: 8) {
-                Text(displayName)
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(.yellow)
+        // Use the trigger to force re-computation (SwiftUI dependency tracking)
+        let _ = profileUpdateTrigger
 
-                Text(timeString(from: message.timestamp))
-                    .font(.system(size: 14))
-                    .foregroundColor(.gray)
+        HStack(alignment: .top, spacing: 8) {
+            // Profile picture (circular, 32x32)
+            if let pictureURL = pictureURL, let url = URL(string: pictureURL) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 32, height: 32)
+                            .clipShape(Circle())
+                    case .failure(_), .empty:
+                        // Fallback to default avatar
+                        Circle()
+                            .fill(Color.gray)
+                            .frame(width: 32, height: 32)
+                            .overlay(
+                                Text(String(displayName.prefix(1)).uppercased())
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundColor(.white)
+                            )
+                    @unknown default:
+                        Circle()
+                            .fill(Color.gray)
+                            .frame(width: 32, height: 32)
+                    }
+                }
+            } else {
+                // Default avatar with first letter
+                Circle()
+                    .fill(Color.gray)
+                    .frame(width: 32, height: 32)
+                    .overlay(
+                        Text(String(displayName.prefix(1)).uppercased())
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+                    )
             }
 
-            // Message content
-            Text(message.message)
-                .font(.system(size: 16))
-                .foregroundColor(.white)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                // Username and timestamp
+                HStack(spacing: 8) {
+                    Text(displayName)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.yellow)
+
+                    Text(timeString(from: message.timestamp))
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                }
+
+                // Message content
+                Text(message.message)
+                    .font(.system(size: 16))
+                    .foregroundColor(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 8)

@@ -83,6 +83,11 @@ class ChatManager: ObservableObject {
             timestamp: zapComment.timestamp
         )
 
+        // Request profile for this sender if we don't have it yet
+        if nostrClient.getProfile(for: zapComment.senderPubkey) == nil {
+            nostrClient.requestProfile(for: zapComment.senderPubkey)
+        }
+
         // Add to messages array for this stream
         if messagesByStream[streamId] == nil {
             messagesByStream[streamId] = []
