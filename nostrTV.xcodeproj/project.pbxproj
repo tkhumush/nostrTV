@@ -579,10 +579,10 @@
 /* Begin XCRemoteSwiftPackageReference section */
 		1091B13F2F0F1F8C0019A1AF /* XCRemoteSwiftPackageReference "nostr-sdk-ios" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/nostr-sdk/nostr-sdk-ios";
+			repositoryURL = "https://github.com/tkhumush/nostr-sdk-ios";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.3.0;
+				branch = "fix-bytes-conflict-0.3.0";
+				kind = branch;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
