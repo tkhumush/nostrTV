@@ -46,30 +46,93 @@ struct VideoPlayerView: View {
 
     var body: some View {
         ZStack {
-            // Main layout - Split between video and chat
-            HStack(spacing: 0) {
-                // Left side: Video player and controls
-                VStack(spacing: 0) {
-                    // nostrTV ribbon at top
-                    HStack(spacing: 5) {
+            VStack(spacing: 0) {
+                // Unified banner across entire top
+                if let stream = stream {
+                    HStack(spacing: 12) {
+                        // nostrTV logo
                         Text("nostrTV")
                             .font(.system(size: 18, weight: .bold))
                             .foregroundColor(.white)
 
-                        Spacer()
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.gray)
+                        Text("|")
+                            .font(.system(size: 18))
+                            .foregroundColor(.gray)
 
-                    // Video player takes most of the screen
-                    VideoPlayerContainer(
-                        player: player,
-                        stream: stream,
-                        nostrClient: nostrClient,
-                        onDismiss: { dismiss() }
-                    )
+                        // Stream info: profile pic + username + stream name
+                        HStack(spacing: 8) {
+                            // Profile picture
+                            if let profile = stream.profile, let pictureURL = profile.picture, let url = URL(string: pictureURL) {
+                                AsyncImage(url: url) { phase in
+                                    switch phase {
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                            .frame(width: 32, height: 32)
+                                            .clipShape(Circle())
+                                    case .failure(_), .empty:
+                                        Circle()
+                                            .fill(Color.gray)
+                                            .frame(width: 32, height: 32)
+                                    @unknown default:
+                                        Circle()
+                                            .fill(Color.gray)
+                                            .frame(width: 32, height: 32)
+                                    }
+                                }
+                            } else {
+                                Circle()
+                                    .fill(Color.gray)
+                                    .frame(width: 32, height: 32)
+                            }
+
+                            // Username
+                            Text(stream.profile?.displayName ?? stream.profile?.name ?? "Anonymous")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.white)
+
+                            // Stream name
+                            Text(stream.title)
+                                .font(.system(size: 16))
+                                .foregroundColor(.white.opacity(0.8))
+                                .lineLimit(1)
+                        }
+
+                        Spacer()
+
+                        // Viewer count on far right
+                        HStack(spacing: 8) {
+                            Text("|")
+                                .font(.system(size: 18))
+                                .foregroundColor(.gray)
+
+                            Image(systemName: "eye.fill")
+                                .font(.system(size: 16))
+                                .foregroundColor(.white)
+
+                            Text("\(stream.viewerCount)")
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.black)
+                }
+
+                // Main content - Split between video and chat
+                HStack(spacing: 0) {
+                    // Left side: Video player and controls
+                    VStack(spacing: 0) {
+                        // Video player takes most of the screen
+                        VideoPlayerContainer(
+                            player: player,
+                            stream: stream,
+                            nostrClient: nostrClient,
+                            onDismiss: { dismiss() }
+                        )
 
                     // Bottom bar with zap chyron and chat button
                     HStack(spacing: 0) {
@@ -119,6 +182,7 @@ struct VideoPlayerView: View {
                     .focusSection()  // Separate focus section for chat
                 }
             }
+            }  // Close VStack wrapper for banner + content
 
             // QR code overlay (only shown when payment is being made)
             if showZapQR, let option = selectedZapOption, let uri = invoiceURI {

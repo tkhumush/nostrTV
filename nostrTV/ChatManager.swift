@@ -49,7 +49,7 @@ class ChatManager: ObservableObject {
         guard let filter = Filter(
             kinds: [1311],
             tags: ["a": [aTag]],
-            limit: 20  // Get last 20 messages
+            limit: 15  // Get last 15 messages
         ) else {
             print("❌ ChatManager: Failed to create chat filter")
             return
@@ -100,8 +100,8 @@ class ChatManager: ObservableObject {
             // Sort by timestamp (oldest first, newest at bottom)
             messagesByStream[streamId]!.sort { $0.timestamp < $1.timestamp }
 
-            // Keep only last 100 messages
-            if messagesByStream[streamId]!.count > 100 {
+            // Keep only last 15 messages
+            if messagesByStream[streamId]!.count > 15 {
                 messagesByStream[streamId]!.removeFirst()
             }
 

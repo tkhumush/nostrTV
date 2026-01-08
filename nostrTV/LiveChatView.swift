@@ -33,92 +33,70 @@ struct LiveChatView: View {
         let _ = chatManager.profileUpdateTrigger
         let _ = chatManager.messageUpdateTrigger
 
-        ZStack {
-            // Black background
-            Rectangle()
-                .fill(Color.black)
-
-            VStack(spacing: 0) {
-                // Viewer count ribbon at top
-                HStack(spacing: 5) {
-                    Spacer()
-
-                    Image(systemName: "eye.fill")
+        VStack(spacing: 0) {
+            // Messages
+            if uniqueMessages.isEmpty {
+                // Empty state
+                VStack(spacing: 12) {
+                    Text("💭")
+                        .font(.system(size: 60))
+                    Text("No messages yet")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(.gray)
+                    Text("Be the first to chat!")
                         .font(.system(size: 16))
-                        .foregroundColor(.white)
-
-                    Text("\(stream.viewerCount)")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(.white)
+                        .foregroundColor(.gray.opacity(0.7))
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10) // 9 * 1.1 = 9.9, rounded to 10
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .background(Color.gray)
-
-                Divider()
-                    .background(Color.gray.opacity(0.3))
-
-                // Messages
-                if uniqueMessages.isEmpty {
-                    // Empty state
-                    VStack(spacing: 12) {
-                        Text("💭")
-                            .font(.system(size: 60))
-                        Text("No messages yet")
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundColor(.gray)
-                        Text("Be the first to chat!")
-                            .font(.system(size: 16))
-                            .foregroundColor(.gray.opacity(0.7))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 8) {
+                            ForEach(uniqueMessages) { message in
+                                ChatMessageRow(
+                                    message: message,
+                                    nostrClient: nostrClient,
+                                    profileUpdateTrigger: chatManager.profileUpdateTrigger
+                                )
+                                .id(message.id)
+                                .onAppear {
+                                    // Re-enable auto-scroll when user scrolls back to bottom
+                                    if message.id == uniqueMessages.last?.id {
+                                        shouldAutoScroll = true
+                                    }
+                                }
+                                .onDisappear {
+                                    // Disable auto-scroll when user scrolls up (last message goes off screen)
+                                    if message.id == uniqueMessages.last?.id {
+                                        shouldAutoScroll = false
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.top, 8)
+                        .padding(.bottom, 8)  // Ensure last message has space
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 8) {
-                                ForEach(uniqueMessages) { message in
-                                    ChatMessageRow(
-                                        message: message,
-                                        nostrClient: nostrClient,
-                                        profileUpdateTrigger: chatManager.profileUpdateTrigger
-                                    )
-                                    .id(message.id)
-                                    .onAppear {
-                                        // Re-enable auto-scroll when user scrolls back to bottom
-                                        if message.id == uniqueMessages.last?.id {
-                                            shouldAutoScroll = true
-                                        }
-                                    }
-                                    .onDisappear {
-                                        // Disable auto-scroll when user scrolls up (last message goes off screen)
-                                        if message.id == uniqueMessages.last?.id {
-                                            shouldAutoScroll = false
-                                        }
-                                    }
-                                }
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                        }
-                        .onChange(of: uniqueMessages.count) { oldValue, newValue in
-                            // Only auto-scroll when new messages arrive AND user is at bottom
-                            if newValue > oldValue, shouldAutoScroll, let lastMessage = uniqueMessages.last {
-                                withAnimation {
-                                    proxy.scrollTo(lastMessage.id, anchor: .bottom)
-                                }
-                            }
-                        }
-                        .onAppear {
-                            // Scroll to bottom on initial appear
-                            if let lastMessage = uniqueMessages.last {
+                    .background(Color.black)
+                    .onChange(of: uniqueMessages.count) { oldValue, newValue in
+                        // Only auto-scroll when new messages arrive AND user is at bottom
+                        if newValue > oldValue, shouldAutoScroll, let lastMessage = uniqueMessages.last {
+                            withAnimation {
                                 proxy.scrollTo(lastMessage.id, anchor: .bottom)
                             }
+                        }
+                    }
+                    .onAppear {
+                        // Scroll to bottom on initial appear
+                        if let lastMessage = uniqueMessages.last {
+                            proxy.scrollTo(lastMessage.id, anchor: .bottom)
                         }
                     }
                 }
             }
         }
+        .background(Color.black)
     }
 }
 
