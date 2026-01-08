@@ -25,6 +25,9 @@ struct VideoPlayerView: View {
     @State private var zapRefreshTimer: Timer?
     @State private var lastZapRequestPubkey: String?
     @State private var liveActivityManager: LiveActivityManager?
+    @StateObject private var chatManager: ChatManager
+    @State private var showChatInput = false
+    @State private var chatMessage = ""
     @Environment(\.dismiss) private var dismiss
 
     init(player: AVPlayer, lightningAddress: String?, stream: Stream?, nostrClient: NostrClient, zapManager: ZapManager?, authManager: NostrAuthManager) {
@@ -34,45 +37,91 @@ struct VideoPlayerView: View {
         self.nostrClient = nostrClient
         self.zapManager = zapManager
         self.authManager = authManager
+        _chatManager = StateObject(wrappedValue: ChatManager(nostrClient: nostrClient))
     }
 
     var body: some View {
         ZStack {
-            // Main layout
-            VStack(spacing: 0) {
-                // nostrTV ribbon at top
-                HStack(spacing: 5) {
-                    Text("nostrTV")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(.white)
+            // Main layout - Split between video and chat
+            HStack(spacing: 0) {
+                // Left side: Video player and controls
+                VStack(spacing: 0) {
+                    // nostrTV ribbon at top
+                    HStack(spacing: 5) {
+                        Text("nostrTV")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.white)
 
-                    Spacer()
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.gray)
-
-                // Video player takes most of the screen
-                VideoPlayerContainer(
-                    player: player,
-                    stream: stream,
-                    nostrClient: nostrClient,
-                    onDismiss: { dismiss() }
-                )
-
-                // Bottom bar with zap chyron
-                HStack(spacing: 0) {
-                    // Zap chyron - stretches across full width
-                    if let stream = stream, let zapManager = zapManager {
-                        ZapChyronWrapper(zapManager: zapManager, stream: stream, nostrClient: nostrClient)
-                            .frame(height: 102)
-                    } else {
                         Spacer()
-                            .frame(height: 102)
                     }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.gray)
+
+                    // Video player takes most of the screen
+                    VideoPlayerContainer(
+                        player: player,
+                        stream: stream,
+                        nostrClient: nostrClient,
+                        onDismiss: { dismiss() }
+                    )
+
+                    // Bottom bar with zap chyron and chat button
+                    HStack(spacing: 0) {
+                        // Zap chyron
+                        if let stream = stream, let zapManager = zapManager {
+                            ZapChyronWrapper(zapManager: zapManager, stream: stream, nostrClient: nostrClient)
+                                .frame(height: 102)
+                        } else {
+                            Spacer()
+                                .frame(height: 102)
+                        }
+                    }
+                    .background(Color.black.opacity(0.3))
                 }
-                .background(Color.black.opacity(0.3))
+
+                // Right side: Live chat
+                if let stream = stream {
+                    VStack(spacing: 0) {
+                        LiveChatView(
+                            chatManager: chatManager,
+                            stream: stream,
+                            nostrClient: nostrClient
+                        )
+
+                        // Chat input area
+                        if showChatInput {
+                            ChatInputView(
+                                message: $chatMessage,
+                                onSend: {
+                                    sendChatMessage()
+                                },
+                                onDismiss: {
+                                    showChatInput = false
+                                    chatMessage = ""
+                                }
+                            )
+                            .frame(height: 120)
+                        } else {
+                            // Show "Type a message" button when not typing
+                            Button(action: { showChatInput = true }) {
+                                HStack {
+                                    Image(systemName: "bubble.left.fill")
+                                    Text("Type a message")
+                                }
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 60)
+                                .background(Color.purple)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .frame(width: 500)  // Fixed width for chat column
+                    .background(Color.black)
+                }
             }
 
             // QR code overlay (only shown when payment is being made)
@@ -90,8 +139,8 @@ struct VideoPlayerView: View {
         }
         .ignoresSafeArea()
         .onAppear {
-            // Initialize LiveActivityManager
-            liveActivityManager = LiveActivityManager(nostrClient: nostrClient)
+            // Initialize LiveActivityManager with authManager for signing
+            liveActivityManager = LiveActivityManager(nostrClient: nostrClient, authManager: authManager)
 
             // Join the stream
             if let stream = stream, let activityManager = liveActivityManager {
@@ -116,6 +165,17 @@ struct VideoPlayerView: View {
 
                 // Start periodic refresh every 30 seconds
                 startZapRefreshTimer()
+            }
+
+            // Fetch chat messages for this stream
+            if let stream = stream, let eventID = stream.eventID, let pubkey = stream.pubkey {
+                print("💬 Fetching chat messages for stream:")
+                print("   Event ID: \(eventID)")
+                print("   Stream ID (d-tag): \(stream.streamID)")
+                print("   Pubkey: \(pubkey)")
+
+                // Fetch chat messages (kind 1311)
+                chatManager.fetchChatMessagesForStream(eventID, pubkey: pubkey, dTag: stream.streamID)
             }
         }
         .onDisappear {
@@ -230,6 +290,50 @@ struct VideoPlayerView: View {
             if let stream = stream, let eventID = stream.eventID, let zapManager = zapManager {
                 print("🔄 Refreshing zaps for stream...")
                 zapManager.fetchZapsForStream(eventID, pubkey: stream.pubkey, dTag: stream.streamID)
+            }
+        }
+    }
+
+    private func sendChatMessage() {
+        guard !chatMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            print("⚠️ Cannot send empty message")
+            return
+        }
+
+        guard let stream = stream else {
+            print("❌ No stream available for chat")
+            return
+        }
+
+        guard let liveActivityManager = liveActivityManager else {
+            print("❌ LiveActivityManager not initialized")
+            return
+        }
+
+        guard authManager.isAuthenticated else {
+            print("❌ User not authenticated - cannot send chat message")
+            return
+        }
+
+        print("💬 Sending chat message: \(chatMessage)")
+
+        Task {
+            do {
+                try await liveActivityManager.sendChatMessage(chatMessage)
+
+                await MainActor.run {
+                    // Clear input and hide keyboard
+                    chatMessage = ""
+                    showChatInput = false
+                }
+
+                print("✅ Chat message sent successfully!")
+            } catch {
+                print("❌ Failed to send chat message: \(error)")
+                await MainActor.run {
+                    // Show error to user (could add an alert here)
+                    print("⚠️ Message not sent: \(error.localizedDescription)")
+                }
             }
         }
     }

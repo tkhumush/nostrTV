@@ -9,6 +9,7 @@ class LiveActivityManager: ObservableObject {
 
     private let nostrClient: NostrClient
     private let keyManager: NostrKeyManager
+    private var authManager: NostrAuthManager?
 
     @Published private(set) var currentStream: Stream?
     @Published private(set) var isWatchingStream: Bool = false
@@ -16,12 +17,14 @@ class LiveActivityManager: ObservableObject {
     private init(nostrClient: NostrClient? = nil) {
         self.nostrClient = nostrClient ?? NostrClient()
         self.keyManager = NostrKeyManager.shared
+        self.authManager = nil
     }
 
     /// Initialize with custom NostrClient (for dependency injection)
-    init(nostrClient: NostrClient, keyManager: NostrKeyManager = NostrKeyManager.shared) {
+    init(nostrClient: NostrClient, keyManager: NostrKeyManager = NostrKeyManager.shared, authManager: NostrAuthManager? = nil) {
         self.nostrClient = nostrClient
         self.keyManager = keyManager
+        self.authManager = authManager
     }
 
     /// Configure to use an existing NostrClient instance
@@ -239,10 +242,6 @@ class LiveActivityManager: ObservableObject {
             throw LiveActivityError.noActiveStream
         }
 
-        guard let keyPair = keyManager.currentKeyPair else {
-            throw LiveActivityError.noKeyPairAvailable
-        }
-
         guard let streamPubkey = stream.pubkey else {
             throw LiveActivityError.missingStreamPubkey
         }
@@ -259,16 +258,36 @@ class LiveActivityManager: ObservableObject {
         // Add stream author as a p tag
         tags.append(["p", streamPubkey])
 
-        // Create and sign the event
-        let event = try nostrClient.createSignedEvent(
+        // Create unsigned event
+        let unsignedEvent = NostrEvent(
             kind: 1311,
-            content: message,
             tags: tags,
-            using: keyPair
+            id: nil,
+            pubkey: nil,
+            created_at: Int(Date().timeIntervalSince1970),
+            content: message,
+            sig: nil
         )
 
+        // Sign using authManager (supports both bunker and local signing)
+        let signedEvent: NostrEvent
+        if let authManager = authManager {
+            signedEvent = try await authManager.signEvent(unsignedEvent)
+        } else {
+            // Fallback to local keyPair signing if no authManager
+            guard let keyPair = keyManager.currentKeyPair else {
+                throw LiveActivityError.noKeyPairAvailable
+            }
+            signedEvent = try nostrClient.createSignedEvent(
+                kind: 1311,
+                content: message,
+                tags: tags,
+                using: keyPair
+            )
+        }
+
         // Publish to relays
-        try nostrClient.publishEvent(event)
+        try nostrClient.publishEvent(signedEvent)
     }
 }
 

@@ -321,6 +321,55 @@ class NostrAuthManager: ObservableObject {
         // Disconnect client
         nostrClient.disconnect()
     }
+
+    // MARK: - Event Signing
+
+    /// Sign a Nostr event using the current authentication method (bunker or local keys)
+    func signEvent(_ event: NostrEvent) async throws -> NostrEvent {
+        switch authMethod {
+        case .bunker:
+            // Use bunker for remote signing
+            guard let bunkerClient = bunkerClient else {
+                throw NostrAuthError.bunkerNotConnected
+            }
+            return try await bunkerClient.signEvent(event)
+
+        case .nip05:
+            // Use local keypair signing
+            guard let keyPair = NostrKeyManager.shared.currentKeyPair else {
+                throw NostrAuthError.noKeyPairAvailable
+            }
+            // Sign locally using NostrClient
+            return try nostrClient.createSignedEvent(
+                kind: event.kind,
+                content: event.content ?? "",
+                tags: event.tags,
+                using: keyPair
+            )
+
+        case .none:
+            throw NostrAuthError.notAuthenticated
+        }
+    }
+}
+
+// MARK: - Errors
+
+enum NostrAuthError: LocalizedError {
+    case notAuthenticated
+    case noKeyPairAvailable
+    case bunkerNotConnected
+
+    var errorDescription: String? {
+        switch self {
+        case .notAuthenticated:
+            return "User is not authenticated"
+        case .noKeyPairAvailable:
+            return "No key pair available for signing"
+        case .bunkerNotConnected:
+            return "Bunker client not connected"
+        }
+    }
 }
 
 // MARK: - Auth Method Enum
