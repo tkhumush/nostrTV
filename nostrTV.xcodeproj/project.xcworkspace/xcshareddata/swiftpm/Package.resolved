@@ -1,5 +1,5 @@
 {
-  "originHash" : "e584a2904f8adad2cb14e1942115998b18dc0edf8dd4cf413e7c418de65bddb3",
+  "originHash" : "ce4e01e76daec4d3316afca143df000a22f3d159ad2e533bc84e0a7b08896ca4",
   "pins" : [
     {
       "identity" : "cryptoswift",
@@ -13,10 +13,10 @@
     {
       "identity" : "nostr-sdk-ios",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/nostr-sdk/nostr-sdk-ios",
+      "location" : "https://github.com/tkhumush/nostr-sdk-ios",
       "state" : {
-        "revision" : "e453d2793c15ebdb9ae20f27416e398ba6142bb3",
-        "version" : "0.3.0"
+        "branch" : "fix-bytes-conflict-0.3.0",
+        "revision" : "32a5b05120e3356e680369d0ec52e32592953b2e"
       }
     },
     {
