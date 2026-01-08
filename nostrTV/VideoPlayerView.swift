@@ -80,6 +80,7 @@ struct VideoPlayerView: View {
                     }
                     .background(Color.black.opacity(0.3))
                 }
+                .focusSection()  // Separate focus section for video
 
                 // Right side: Live chat
                 if let stream = stream {
@@ -115,12 +116,14 @@ struct VideoPlayerView: View {
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 60)
                                 .background(Color.purple)
+                                .cornerRadius(10)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.card)
                         }
                     }
                     .frame(width: 500)  // Fixed width for chat column
                     .background(Color.black)
+                    .focusSection()  // Separate focus section for chat
                 }
             }
 
@@ -316,6 +319,11 @@ struct VideoPlayerView: View {
         }
 
         print("💬 Sending chat message: \(chatMessage)")
+        print("   Auth method: \(authManager.authMethod.map { "\($0)" } ?? "nil")")
+        if case .bunker = authManager.authMethod {
+            print("   Bunker client state: \(authManager.bunkerClient?.connectionState ?? .disconnected)")
+            print("   ⚠️ NOTE: Remote signer must be running and connected!")
+        }
 
         Task {
             do {
