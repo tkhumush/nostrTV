@@ -103,25 +103,14 @@ struct VideoPlayerView: View {
                                     chatMessage = ""
                                 }
                             )
-                            .frame(height: 120)
+                            .frame(height: 90)
                         } else {
-                            // Show "Type a message" button when not typing
-                            Button(action: { showChatInput = true }) {
-                                HStack {
-                                    Image(systemName: "bubble.left.fill")
-                                    Text("Type a message")
-                                }
-                                .font(.system(size: 20, weight: .semibold))
-                                .foregroundColor(.white)
+                            // Show "Type a message" button when not typing - matching Send/Cancel style
+                            TypeMessageButton(action: { showChatInput = true })
                                 .frame(maxWidth: .infinity)
-                                .frame(height: 60)
-                                .background(Color.purple)
-                                .cornerRadius(10)
-                            }
-                            .buttonStyle(.card)
                         }
                     }
-                    .frame(width: 500)  // Fixed width for chat column
+                    .frame(width: 425)  // Fixed width for chat column (reduced by 15%)
                     .background(Color.black)
                     .focusSection()  // Separate focus section for chat
                 }
@@ -487,28 +476,28 @@ struct ChatInputView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // Text field container - square style
+            // Text field container - reduced size
             ZStack {
                 Rectangle()
                     .fill(Color.gray)
-                    .frame(width: 400, height: 120)
+                    .frame(width: 245, height: 90)
 
                 TextField("Type your message...", text: $message)
-                    .padding(16)
+                    .padding(12)
                     .foregroundColor(.white)
                     .focused($isTextFieldFocused)
-                    .frame(width: 380)
+                    .frame(width: 225)
             }
-            .frame(width: 400, height: 120)
+            .frame(width: 245, height: 90)
 
-            // Send button - square style matching zap menu
+            // Send button - reduced size
             ChatActionButton(
                 label: "Send",
                 color: .green,
                 action: onSend
             )
 
-            // Cancel button - square style matching zap menu
+            // Cancel button - reduced size
             ChatActionButton(
                 label: "Cancel",
                 color: .gray,
@@ -532,26 +521,69 @@ private struct ChatActionButton: View {
             if isFocused {
                 Rectangle()
                     .fill(Color.white.opacity(0.3))
-                    .frame(width: 140, height: 140)
+                    .frame(width: 105, height: 105)
                     .blur(radius: 20)
             }
 
             // Focus indicator - 5% larger square with yellow border
             if isFocused {
                 Rectangle()
-                    .strokeBorder(Color.yellow, lineWidth: 6)
-                    .frame(width: 126, height: 126) // 120 * 1.05 = 126
+                    .strokeBorder(Color.yellow, lineWidth: 4)
+                    .frame(width: 95, height: 95) // 90 * 1.05 = 94.5
             }
 
             // Button
             Button(action: action) {
                 Rectangle()
                     .fill(color)
-                    .frame(width: 120, height: 120)
+                    .frame(width: 90, height: 90)
                     .overlay(
                         Text(label)
-                            .font(.system(size: 20, weight: .bold))
+                            .font(.system(size: 18, weight: .bold))
                             .foregroundColor(.white)
+                    )
+            }
+            .buttonStyle(SquareCardButtonStyle())
+        }
+    }
+}
+
+/// Type message button matching the square chat action button style
+private struct TypeMessageButton: View {
+    let action: () -> Void
+
+    @Environment(\.isFocused) var isFocused: Bool
+
+    var body: some View {
+        ZStack {
+            // Background glow indicator when focused
+            if isFocused {
+                Rectangle()
+                    .fill(Color.white.opacity(0.3))
+                    .frame(height: 70)
+                    .blur(radius: 20)
+            }
+
+            // Focus indicator - 5% larger square with yellow border
+            if isFocused {
+                Rectangle()
+                    .strokeBorder(Color.yellow, lineWidth: 4)
+                    .frame(height: 63) // 60 * 1.05 = 63
+            }
+
+            // Button
+            Button(action: action) {
+                Rectangle()
+                    .fill(Color.purple)
+                    .frame(height: 60)
+                    .overlay(
+                        HStack(spacing: 8) {
+                            Image(systemName: "bubble.left.fill")
+                                .font(.system(size: 18))
+                            Text("Type a message")
+                                .font(.system(size: 18, weight: .bold))
+                        }
+                        .foregroundColor(.white)
                     )
             }
             .buttonStyle(SquareCardButtonStyle())
