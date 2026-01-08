@@ -242,21 +242,23 @@ class LiveActivityManager: ObservableObject {
             throw LiveActivityError.noActiveStream
         }
 
-        guard let streamPubkey = stream.pubkey else {
+        // IMPORTANT: Use eventAuthorPubkey (not host pubkey) for a-tag
+        // Chat messages must reference: "30311:<event-author-pubkey>:<d-tag>"
+        guard let eventAuthorPubkey = stream.eventAuthorPubkey else {
             throw LiveActivityError.missingStreamPubkey
         }
 
         // Create the "a" tag referencing the stream event
         let streamDTag = stream.streamID
-        let aTag = "30311:\(streamPubkey):\(streamDTag)"
+        let aTag = "30311:\(eventAuthorPubkey):\(streamDTag)"
 
         // Prepare tags for kind 1311 (Live Chat Message)
         var tags: [[String]] = [
             ["a", aTag, "", "root"]  // Reference to the stream
         ]
 
-        // Add stream author as a p tag
-        tags.append(["p", streamPubkey])
+        // Add stream author as a p tag (use event author, not host)
+        tags.append(["p", eventAuthorPubkey])
 
         // Create unsigned event
         let unsignedEvent = NostrEvent(
