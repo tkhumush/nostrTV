@@ -19,8 +19,18 @@ import NostrSDK
 /// - Maintains backward compatibility with existing callbacks
 /// - Implements profile caching (SDK doesn't provide this)
 ///
-/// **Migration Status:** Phase 1 - Parallel implementation alongside NostrClient
+/// **Migration Status:** Phase 2 - Used by ChatManager
 class NostrSDKClient {
+
+    // MARK: - Singleton for Phase 2
+
+    /// Shared instance for chat functionality (Phase 2 temporary solution)
+    /// Phase 3 will pass SDK client from ContentView properly
+    static let sharedForChat: NostrSDKClient = {
+        let client = try! NostrSDKClient()
+        client.connect()
+        return client
+    }()
 
     // MARK: - Properties
 
@@ -79,8 +89,6 @@ class NostrSDKClient {
 
         // Set up event stream subscription
         setupEventStream()
-
-        print("✅ NostrSDKClient initialized with \(urls.count) relays")
     }
 
     /// Convenience initializer with default relays
@@ -100,7 +108,6 @@ class NostrSDKClient {
     /// Connect to all relays in the pool
     func connect() {
         relayPool.connect()
-        print("📡 NostrSDKClient connecting to relays...")
     }
 
     /// Disconnect from all relays
@@ -108,7 +115,6 @@ class NostrSDKClient {
         relayPool.disconnect()
         cancellables.removeAll()
         activeSubscriptions.removeAll()
-        print("🔌 NostrSDKClient disconnected from all relays")
     }
 
     // MARK: - Event Stream Setup
@@ -120,14 +126,11 @@ class NostrSDKClient {
                 self?.handleRelayEvent(relayEvent)
             }
             .store(in: &cancellables)
-
-        print("✅ Event stream pipeline established")
     }
 
     /// Route incoming relay events to appropriate handlers based on event kind
     private func handleRelayEvent(_ relayEvent: RelayEvent) {
         let event = relayEvent.event
-        let subscriptionId = relayEvent.subscriptionId
 
         // Route by event kind
         switch event.kind.rawValue {
@@ -146,7 +149,6 @@ class NostrSDKClient {
         case 30311:
             handleLiveStreamEvent(event)
         default:
-            // Unknown event kind - safe to ignore
             break
         }
     }
@@ -160,7 +162,6 @@ class NostrSDKClient {
     func subscribe(with filter: Filter, purpose: String = "custom") -> String {
         let subscriptionId = relayPool.subscribe(with: filter)
         activeSubscriptions[subscriptionId] = purpose
-        print("📨 Subscribed: \(purpose) (id: \(subscriptionId))")
         return subscriptionId
     }
 
@@ -169,13 +170,11 @@ class NostrSDKClient {
     func closeSubscription(_ subscriptionId: String) {
         relayPool.closeSubscription(with: subscriptionId)
         activeSubscriptions.removeValue(forKey: subscriptionId)
-        print("🚫 Closed subscription: \(subscriptionId)")
     }
 
     /// Request live streams (kind 30311)
     func requestLiveStreams(limit: Int = 50) {
         guard let filter = Filter(kinds: [30311], limit: limit) else {
-            print("❌ Failed to create live streams filter")
             return
         }
         subscribe(with: filter, purpose: "live-streams")
@@ -236,7 +235,6 @@ class NostrSDKClient {
 
             self.profileCache[pubkey] = entry
         }
-        print("✅ Cached profile for \(pubkey.prefix(8))...")
     }
 
     /// Evict expired and least recently used profiles
@@ -275,7 +273,6 @@ class NostrSDKClient {
 
         // Subscribe to profile
         guard let filter = Filter(authors: [pubkey], kinds: [0], limit: 1) else {
-            print("❌ Failed to create profile filter for \(pubkey.prefix(8))")
             return
         }
 
@@ -295,12 +292,10 @@ class NostrSDKClient {
     private func handleMetadataEvent(_ event: NostrSDK.NostrEvent) {
         // SDK provides MetadataEvent subclass
         guard let metadataEvent = event as? MetadataEvent else {
-            print("⚠️ Received kind 0 but not MetadataEvent subclass")
             return
         }
 
         guard let metadata = metadataEvent.userMetadata else {
-            print("⚠️ MetadataEvent has no userMetadata")
             return
         }
 
@@ -333,7 +328,6 @@ class NostrSDKClient {
             }
         }
 
-        print("✅ Profile received: \(profile.displayName ?? profile.name ?? "Unknown")")
     }
 
     /// Handle kind 3 (follow list) events
@@ -343,7 +337,6 @@ class NostrSDKClient {
             .filter { $0.name == "p" }
             .compactMap { $0.value }
 
-        print("📋 Follow list received: \(follows.count) follows")
 
         DispatchQueue.main.async { [weak self] in
             self?.onFollowListReceived?(follows)
@@ -358,7 +351,6 @@ class NostrSDKClient {
             .compactMap { $0.value }
             .filter { $0.hasPrefix("wss://") || $0.hasPrefix("ws://") }
 
-        print("📡 Relay list received: \(relays.count) relays")
 
         DispatchQueue.main.async { [weak self] in
             self?.onUserRelaysReceived?(relays)
@@ -367,7 +359,6 @@ class NostrSDKClient {
 
     /// Handle kind 1311 (live chat) events
     private func handleLiveChatEvent(_ event: NostrSDK.NostrEvent) {
-        print("💬 Received kind 1311 (live chat) event")
 
         let chatEventId = event.id
         let senderPubkey = event.pubkey
@@ -377,10 +368,6 @@ class NostrSDKClient {
         // Extract "a" tag (stream reference)
         let aTag = event.tags.first { $0.name == "a" }?.value
 
-        print("   Event ID: \(chatEventId.prefix(8))...")
-        print("   Sender: \(senderPubkey.prefix(8))...")
-        print("   Message: \(content)")
-        print("   A-tag: \(aTag ?? "nil")")
 
         // Get sender's profile name if cached
         let senderName = getProfile(for: senderPubkey)?.displayName ?? getProfile(for: senderPubkey)?.name
@@ -396,7 +383,6 @@ class NostrSDKClient {
             streamEventId: aTag
         )
 
-        print("   ✓ Created chat comment object, notifying callback")
 
         // Notify callback
         DispatchQueue.main.async { [weak self] in
@@ -411,14 +397,12 @@ class NostrSDKClient {
 
     /// Handle kind 9735 (zap receipt) events
     private func handleZapReceiptEvent(_ event: NostrSDK.NostrEvent) {
-        print("⚡ Received kind 9735 (zap receipt) event")
 
         let zapReceiptId = event.id
         let createdAt = Date(timeIntervalSince1970: TimeInterval(event.createdAt))
 
         // Extract bolt11 invoice
         guard let bolt11 = event.tags.first(where: { $0.name == "bolt11" })?.value else {
-            print("   ⚠️ No bolt11 tag found")
             return
         }
 
@@ -426,13 +410,11 @@ class NostrSDKClient {
         guard let descriptionJSON = event.tags.first(where: { $0.name == "description" })?.value,
               let descriptionData = descriptionJSON.data(using: .utf8),
               let zapRequest = try? JSONSerialization.jsonObject(with: descriptionData) as? [String: Any] else {
-            print("   ⚠️ Failed to parse description tag")
             return
         }
 
         // Extract sender pubkey from zap request
         guard let senderPubkey = zapRequest["pubkey"] as? String else {
-            print("   ⚠️ No sender pubkey in zap request")
             return
         }
 
@@ -472,7 +454,6 @@ class NostrSDKClient {
             streamEventId: streamEventId
         )
 
-        print("   ✓ Zap: \(amount) msats from \(senderPubkey.prefix(8))...")
 
         // Notify callback
         DispatchQueue.main.async { [weak self] in
@@ -487,7 +468,6 @@ class NostrSDKClient {
 
     /// Handle kind 24133 (bunker message) events
     private func handleBunkerMessageEvent(_ event: NostrSDK.NostrEvent) {
-        print("🔐 Received kind 24133 (bunker message) event")
 
         // Convert SDK NostrEvent to our legacy NostrEvent struct
         // This is needed because NostrBunkerClient expects the old format
@@ -509,7 +489,6 @@ class NostrSDKClient {
 
     /// Handle kind 30311 (live stream) events
     private func handleLiveStreamEvent(_ event: NostrSDK.NostrEvent) {
-        print("📺 Received kind 30311 (live stream) event")
 
         // Helper to extract tag value
         func tagValue(_ name: String) -> String? {
@@ -523,7 +502,12 @@ class NostrSDKClient {
         let streamID = tagValue("d")
         let status = tagValue("status") ?? "unknown"
         let imageURL = tagValue("image")
-        let pubkey = tagValue("p") ?? event.pubkey // Prefer p tag, fallback to event author
+
+        // IMPORTANT: We need BOTH pubkeys for different purposes:
+        // 1. Host pubkey (p-tag): Used for profile display
+        // 2. Event author pubkey (event.pubkey): Used for a-tag coordinate in chat subscriptions
+        let hostPubkey = tagValue("p") ?? event.pubkey  // Prefer p-tag, fallback to event author
+        let eventAuthorPubkey = event.pubkey  // Always the event signer
 
         // Extract viewer count
         let viewerCount: Int = {
@@ -544,7 +528,6 @@ class NostrSDKClient {
 
         // Validate required fields
         guard let streamID = streamID else {
-            print("   ⚠️ Stream missing 'd' tag, skipping")
             return
         }
 
@@ -573,7 +556,8 @@ class NostrSDKClient {
             title: combinedTitle,
             streaming_url: finalStreamURL,
             imageURL: imageURL,
-            pubkey: pubkey,
+            pubkey: hostPubkey,
+            eventAuthorPubkey: eventAuthorPubkey,
             profile: nil, // Will be fetched separately
             status: status,
             tags: allTags,
@@ -581,16 +565,15 @@ class NostrSDKClient {
             viewerCount: viewerCount
         )
 
-        print("   ✓ Stream: \(combinedTitle)")
 
         // Notify callback
         DispatchQueue.main.async { [weak self] in
             self?.onStreamReceived?(stream)
         }
 
-        // Request profile if not cached
-        if getProfile(for: pubkey) == nil {
-            requestProfile(for: pubkey)
+        // Request profile for host if not cached
+        if getProfile(for: hostPubkey) == nil {
+            requestProfile(for: hostPubkey)
         }
     }
 
@@ -650,7 +633,6 @@ class NostrSDKClient {
     /// - Parameter event: The NostrSDK event to publish
     func publishEvent(_ event: NostrSDK.NostrEvent) {
         relayPool.publishEvent(event)
-        print("📤 Published event kind \(event.kind.rawValue) to relay pool")
     }
 }
 

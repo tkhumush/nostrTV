@@ -42,57 +42,38 @@ class ChatManager: ObservableObject {
 
     /// Fetch chat messages for a specific stream
     func fetchChatMessagesForStream(_ streamEventId: String, pubkey: String, dTag: String) {
-        print("💬 ChatManager: Fetching chat messages for stream")
-        print("   Event ID: \(streamEventId)")
-        print("   D-tag: \(dTag)")
-        print("   Pubkey: \(pubkey)")
-
         // Build the "a" tag reference for the stream
         let aTag = "30311:\(pubkey.lowercased()):\(dTag)"
-        print("   A-tag filter: \(aTag)")
 
         // Create SDK Filter for kind 1311 (live chat) events
-        print("   🔧 Creating Filter object...")
         guard let filter = Filter(
             kinds: [1311],
             tags: ["a": [aTag]],
             limit: 20  // Get last 20 messages
         ) else {
-            print("   ❌ Failed to create chat filter")
+            print("❌ ChatManager: Failed to create chat filter")
             return
         }
-        print("   ✅ Filter created successfully")
 
         // IMPORTANT: Wait for relays to connect before subscribing
         // The SDK needs time to establish WebSocket connections
-        print("   ⏳ Waiting 2 seconds for relays to connect...")
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             guard let self = self else { return }
 
-            print("   📡 Now calling nostrClient.subscribe()...")
             let subscriptionId = self.nostrClient.subscribe(
                 with: filter,
                 purpose: "chat-\(streamEventId.prefix(8))"
             )
 
             self.subscriptionIDs[streamEventId] = subscriptionId
-            print("   ✅ ChatManager stored subscription ID: \(subscriptionId)")
         }
     }
 
     /// Handle incoming chat message
     private func handleChatMessage(_ zapComment: ZapComment) {
-        print("📨 ChatManager: Received chat message")
-        print("   Message ID: \(zapComment.id)")
-        print("   Content: \"\(zapComment.comment)\"")
-        print("   From: \(zapComment.senderPubkey.prefix(8))...")
-        print("   Timestamp: \(zapComment.timestamp)")
-
         guard let streamId = zapComment.streamEventId else {
-            print("   ⚠️ Chat message has no stream ID - SKIPPING")
             return
         }
-        print("   Stream ID: \(streamId)")
 
         // Convert ZapComment to ChatMessage (don't store senderName, fetch it dynamically)
         let chatMessage = ChatMessage(
@@ -104,7 +85,6 @@ class ChatManager: ObservableObject {
 
         // Add to messages array for this stream
         if messagesByStream[streamId] == nil {
-            print("   📝 Creating new message array for stream: \(streamId)")
             messagesByStream[streamId] = []
         }
 
@@ -122,12 +102,6 @@ class ChatManager: ObservableObject {
 
             // Trigger UI update
             messageUpdateTrigger += 1
-
-            print("   ✅ Added chat message to stream")
-            print("   📊 Total messages for stream: \(messagesByStream[streamId]!.count)")
-            print("   🔄 Message update trigger: \(messageUpdateTrigger)")
-        } else {
-            print("   ⏭️ Duplicate message - SKIPPING")
         }
     }
 
@@ -144,7 +118,6 @@ class ChatManager: ObservableObject {
         if let subscriptionId = subscriptionIDs[streamId] {
             nostrClient.closeSubscription(subscriptionId)
             subscriptionIDs.removeValue(forKey: streamId)
-            print("💬 Closed chat subscription: \(subscriptionId)")
         }
     }
 }
