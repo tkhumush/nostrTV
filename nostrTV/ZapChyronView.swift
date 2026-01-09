@@ -11,7 +11,7 @@ import SwiftUI
 /// Rotates through the latest 10 zaps with a 7-second timer per zap
 struct ZapChyronView: View {
     let zapComments: [ZapComment]
-    let nostrClient: NostrClient
+    let nostrSDKClient: NostrSDKClient
     @ObservedObject var zapManager: ZapManager
 
     @State private var currentIndex: Int = 0
@@ -38,7 +38,7 @@ struct ZapChyronView: View {
             if !zapComments.isEmpty {
                 let displayZaps = Array(zapComments.prefix(maxZapsToShow))
                 if !displayZaps.isEmpty {
-                    ZapDisplayView(zap: displayZaps[currentIndex], nostrClient: nostrClient)
+                    ZapDisplayView(zap: displayZaps[currentIndex], nostrSDKClient: nostrSDKClient)
                         .id(displayZaps[currentIndex].id) // Force view update on change
                         .transition(.asymmetric(
                             insertion: .opacity.combined(with: .scale(scale: 0.95)),
@@ -93,11 +93,11 @@ struct ZapChyronView: View {
 /// View that displays a single zap with formatted text
 private struct ZapDisplayView: View {
     let zap: ZapComment
-    let nostrClient: NostrClient
+    let nostrSDKClient: NostrSDKClient
 
     var body: some View {
-        // Dynamically fetch profile name from NostrClient
-        let profile = nostrClient.getProfile(for: zap.senderPubkey)
+        // Dynamically fetch profile name from NostrSDKClient
+        let profile = nostrSDKClient.getProfile(for: zap.senderPubkey)
         let displayName = profile?.displayName ?? profile?.name ?? "Anonymous"
 
         HStack(spacing: 12) {
@@ -144,8 +144,8 @@ private struct ZapDisplayView: View {
 }
 
 #Preview {
-    let nostrClient = NostrClient()
-    let zapManager = ZapManager(nostrClient: nostrClient)
+    let nostrSDKClient = try! NostrSDKClient()
+    let zapManager = ZapManager(nostrSDKClient: nostrSDKClient)
 
     ZStack {
         Color.blue
@@ -181,7 +181,7 @@ private struct ZapDisplayView: View {
                     streamEventId: "stream1"
                 )
             ],
-                nostrClient: nostrClient,
+                nostrSDKClient: nostrSDKClient,
                 zapManager: zapManager
             )
             .padding(.bottom, 40)

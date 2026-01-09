@@ -15,6 +15,7 @@ struct VideoPlayerView: View {
     let lightningAddress: String?
     let stream: Stream?
     let nostrClient: NostrClient
+    let nostrSDKClient: NostrSDKClient
     let zapManager: ZapManager?
     let authManager: NostrAuthManager
 
@@ -30,11 +31,12 @@ struct VideoPlayerView: View {
     @State private var chatMessage = ""
     @Environment(\.dismiss) private var dismiss
 
-    init(player: AVPlayer, lightningAddress: String?, stream: Stream?, nostrClient: NostrClient, zapManager: ZapManager?, authManager: NostrAuthManager) {
+    init(player: AVPlayer, lightningAddress: String?, stream: Stream?, nostrClient: NostrClient, nostrSDKClient: NostrSDKClient, zapManager: ZapManager?, authManager: NostrAuthManager) {
         self.player = player
         self.lightningAddress = lightningAddress
         self.stream = stream
         self.nostrClient = nostrClient
+        self.nostrSDKClient = nostrSDKClient
         self.zapManager = zapManager
         self.authManager = authManager
 
@@ -138,7 +140,7 @@ struct VideoPlayerView: View {
                     HStack(spacing: 0) {
                         // Zap chyron
                         if let stream = stream, let zapManager = zapManager {
-                            ZapChyronWrapper(zapManager: zapManager, stream: stream, nostrClient: nostrClient)
+                            ZapChyronWrapper(zapManager: zapManager, stream: stream, nostrSDKClient: nostrSDKClient)
                                 .frame(height: 102)
                         } else {
                             Spacer()
@@ -449,7 +451,7 @@ class CustomAVPlayerViewController: AVPlayerViewController {
 struct ZapChyronWrapper: View {
     @ObservedObject var zapManager: ZapManager
     let stream: Stream
-    let nostrClient: NostrClient
+    let nostrSDKClient: NostrSDKClient
 
     var body: some View {
         // Try both eventID and a-tag format for lookup
@@ -462,7 +464,7 @@ struct ZapChyronWrapper: View {
             zaps = zapManager.getZapsForStream(aTag)
         }
 
-        return ZapChyronView(zapComments: zaps, nostrClient: nostrClient, zapManager: zapManager)
+        return ZapChyronView(zapComments: zaps, nostrSDKClient: nostrSDKClient, zapManager: zapManager)
     }
 }
 

@@ -13,21 +13,21 @@ class ZapManager: ObservableObject {
     @Published var zapComments: [String: [ZapComment]] = [:] // streamEventId -> [ZapComment]
     @Published var profileUpdateTrigger: Int = 0  // Triggers UI updates when profiles change
 
-    private let nostrClient: NostrClient
+    private let nostrSDKClient: NostrSDKClient
     private var subscriptionIds: Set<String> = []
     private var currentStreamEventId: String?  // Track current stream event ID
     private var currentStreamATag: String?     // Track current stream "a" tag
 
-    init(nostrClient: NostrClient) {
-        self.nostrClient = nostrClient
+    init(nostrSDKClient: NostrSDKClient) {
+        self.nostrSDKClient = nostrSDKClient
 
         // Set up callback to receive zap receipts
-        nostrClient.onZapReceived = { [weak self] zapComment in
+        nostrSDKClient.onZapReceived = { [weak self] zapComment in
             self?.handleZapReceived(zapComment)
         }
 
         // Set up callback to detect profile updates
-        nostrClient.addProfileReceivedCallback { [weak self] profile in
+        nostrSDKClient.addProfileReceivedCallback { [weak self] profile in
             DispatchQueue.main.async {
                 // Increment trigger to force UI refresh when any profile is received
                 self?.profileUpdateTrigger += 1
@@ -95,9 +95,9 @@ class ZapManager: ObservableObject {
         }
         print("     limit: 50")
 
-        // Send request via NostrClient
+        // Send request via NostrSDKClient
         do {
-            try nostrClient.sendRawRequest(zapReq)
+            try nostrSDKClient.sendRawRequest(zapReq)
             print("   ✓ Zap receipt request sent to relays")
         } catch {
             print("   ❌ Failed to fetch zap receipts for stream: \(error)")
@@ -157,7 +157,7 @@ class ZapManager: ObservableObject {
             // Send CLOSE message to relays
             let closeReq: [Any] = ["CLOSE", subscriptionId]
             do {
-                try nostrClient.sendRawRequest(closeReq)
+                try nostrSDKClient.sendRawRequest(closeReq)
                 print("📪 Closed zap subscription: \(subscriptionId)")
             } catch {
                 print("❌ Failed to close zap subscription: \(error)")
@@ -177,7 +177,7 @@ class ZapManager: ObservableObject {
         for subscriptionId in subscriptionIds {
             let closeReq: [Any] = ["CLOSE", subscriptionId]
             do {
-                try nostrClient.sendRawRequest(closeReq)
+                try nostrSDKClient.sendRawRequest(closeReq)
                 print("   ✓ Sent CLOSE for: \(subscriptionId)")
             } catch {
                 print("   ❌ Failed to close \(subscriptionId): \(error)")

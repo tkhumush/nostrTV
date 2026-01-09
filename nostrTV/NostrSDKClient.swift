@@ -682,6 +682,17 @@ class NostrSDKClient {
         relayPool.send(request: message)
     }
 
+    /// Send a raw request array to all relays (for REQ, CLOSE, etc.)
+    /// - Parameter request: The request array (e.g., ["REQ", "sub-id", {...}])
+    /// - Throws: Error if JSON serialization fails
+    func sendRawRequest(_ request: [Any]) throws {
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: request),
+              let jsonString = String(data: jsonData, encoding: .utf8) else {
+            throw NostrEventError.serializationFailed
+        }
+        relayPool.send(request: jsonString)
+    }
+
     // MARK: - Event Creation and Signing
 
     /// Create and sign a Nostr event locally using a keypair
