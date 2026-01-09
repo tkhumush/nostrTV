@@ -11,6 +11,7 @@ import Foundation
 class ZapRequestGenerator {
     private let nostrSDKClient: NostrSDKClient
     private let authManager: NostrAuthManager?
+    private let verbose: Bool = true  // Set to true for detailed debugging
 
     init(nostrSDKClient: NostrSDKClient, authManager: NostrAuthManager? = nil) {
         self.nostrSDKClient = nostrSDKClient
@@ -32,11 +33,7 @@ class ZapRequestGenerator {
         lud16: String,
         keyPair: NostrKeyPair? = nil
     ) async throws -> String {
-        print("🔧 Generating zap request:")
-        print("   Stream: \(stream.title)")
-        print("   Amount: \(amount) sats")
-        print("   Comment: \(comment)")
-        print("   LUD16: \(lud16)")
+        print("⚡️ Generating zap: \(amount) sats → \(stream.profile?.displayNameOrName ?? "streamer")")
 
         // Build tags for the zap request following NIP-57 specification
         var tags: [[String]] = []
@@ -70,7 +67,9 @@ class ZapRequestGenerator {
         // Add kind tag (k tag) to reference the kind of event being zapped
         tags.append(["k", "30311"])
 
-        print("   Tags: \(tags)")
+        if verbose {
+            print("   Tags: \(tags)")
+        }
 
         // Create unsigned event first
         let unsignedEvent = NostrEvent(
@@ -87,27 +86,23 @@ class ZapRequestGenerator {
         let zapRequestEvent: NostrEvent
         if let authManager = authManager, authManager.isAuthenticated {
             // Use authenticated user's signature (bunker or local)
-            print("   📝 Signing with authenticated user...")
             zapRequestEvent = try await authManager.signEvent(unsignedEvent)
+            print("   ✓ Signed with authenticated user")
         } else if let keyPair = keyPair {
             // Fallback to provided keypair (anonymous zaps)
-            print("   📝 Signing with provided keypair...")
             zapRequestEvent = try nostrSDKClient.createSignedEvent(
                 kind: 9734,
                 content: comment,
                 tags: tags,
                 using: keyPair
             )
+            print("   ✓ Signed with ephemeral keypair")
         } else {
             throw ZapRequestError.noSigningMethodAvailable
         }
 
-        print("   ✓ Created zap request event: \(zapRequestEvent.id?.prefix(8) ?? "unknown")")
-
-        // Print our zap request in the same format as the samples for comparison
-        print("\n📤 OUR KIND 9734 ZAP REQUEST EVENT:")
-        print(String(repeating: "=", count: 60))
-        let ourEventDict: [String: Any] = [
+        // Encode the zap request as JSON (without URL encoding - URLQueryItem will handle that)
+        let eventDict: [String: Any] = [
             "id": zapRequestEvent.id ?? "",
             "pubkey": zapRequestEvent.pubkey ?? "",
             "created_at": zapRequestEvent.created_at ?? 0,
@@ -116,24 +111,24 @@ class ZapRequestGenerator {
             "content": zapRequestEvent.content ?? "",
             "sig": zapRequestEvent.sig ?? ""
         ]
-        if let jsonData = try? JSONSerialization.data(withJSONObject: ourEventDict, options: .prettyPrinted),
-           let jsonString = String(data: jsonData, encoding: .utf8) {
-            print(jsonString)
-        }
-        print(String(repeating: "=", count: 60))
 
-        // Encode the zap request as JSON
-        guard let zapRequestJSON = try? encodeZapRequest(zapRequestEvent) else {
+        let jsonData = try JSONSerialization.data(withJSONObject: eventDict, options: [])
+        guard let zapRequestJSON = String(data: jsonData, encoding: .utf8) else {
+            print("   ❌ Failed to encode zap request")
             throw ZapRequestError.encodingFailed
         }
 
-        print("   ✓ Encoded zap request JSON")
+        if verbose {
+            print("\n📤 Zap Request Event:")
+            print("   ID: \(zapRequestEvent.id?.prefix(16) ?? "unknown")")
+            print("   Pubkey: \(zapRequestEvent.pubkey?.prefix(16) ?? "unknown")")
+        }
 
         // Fetch the callback URL from the lightning address
         let callbackURL = try await fetchLNURLCallback(lud16: lud16)
-        print("   ✓ Fetched callback URL: \(callbackURL)")
 
         // Build the payment request URL
+        // URLQueryItem will automatically URL-encode the values
         var components = URLComponents(string: callbackURL)
         var queryItems = components?.queryItems ?? []
         queryItems.append(URLQueryItem(name: "amount", value: String(amountMillisats)))
@@ -144,46 +139,26 @@ class ZapRequestGenerator {
         components?.queryItems = queryItems
 
         guard let paymentURL = components?.url else {
+            print("   ❌ Failed to build payment URL")
             throw ZapRequestError.invalidURL
         }
 
-        print("   ✓ Built payment URL: \(paymentURL.absoluteString.prefix(100))...")
+        if verbose {
+            print("   Payment URL: \(paymentURL.absoluteString)")
+        }
 
         // Fetch the lightning invoice
         let invoice = try await fetchLightningInvoice(url: paymentURL)
-        print("   ✓ Received invoice")
+        print("   ✅ Successfully generated invoice")
 
         return "lightning:\(invoice)"
-    }
-
-    private func encodeZapRequest(_ event: NostrEvent) throws -> String {
-        let eventDict: [String: Any] = [
-            "id": event.id ?? "",
-            "pubkey": event.pubkey ?? "",
-            "created_at": event.created_at ?? 0,
-            "kind": event.kind,
-            "tags": event.tags,
-            "content": event.content ?? "",
-            "sig": event.sig ?? ""
-        ]
-
-        let jsonData = try JSONSerialization.data(withJSONObject: eventDict, options: [.sortedKeys])
-        guard let jsonString = String(data: jsonData, encoding: .utf8) else {
-            throw ZapRequestError.encodingFailed
-        }
-
-        // URL encode the JSON
-        guard let encoded = jsonString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
-            throw ZapRequestError.encodingFailed
-        }
-
-        return encoded
     }
 
     private func fetchLNURLCallback(lud16: String) async throws -> String {
         // Parse lightning address (user@domain.com)
         let parts = lud16.split(separator: "@")
         guard parts.count == 2 else {
+            print("   ❌ Invalid Lightning address format: \(lud16)")
             throw ZapRequestError.invalidLightningAddress
         }
 
@@ -192,7 +167,6 @@ class ZapRequestGenerator {
 
         // Build LNURL endpoint
         let lnurlEndpoint = "https://\(domain)/.well-known/lnurlp/\(username)"
-        print("   Fetching LNURL data from: \(lnurlEndpoint)")
 
         guard let url = URL(string: lnurlEndpoint) else {
             throw ZapRequestError.invalidURL
@@ -202,35 +176,52 @@ class ZapRequestGenerator {
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
 
         guard let callback = json?["callback"] as? String else {
+            print("   ❌ No callback URL in LNURL response")
             throw ZapRequestError.missingCallback
         }
 
         // Check if the service supports nostr zaps
         if let allowsNostr = json?["allowsNostr"] as? Bool, !allowsNostr {
-            print("   ⚠️ Warning: Service does not explicitly support Nostr zaps")
+            print("   ⚠️ Warning: Service may not support Nostr zaps")
         }
 
+        print("   ✓ Got callback URL from \(domain)")
         return callback
     }
 
     private func fetchLightningInvoice(url: URL) async throws -> String {
-        print("   Fetching invoice from: \(url.absoluteString.prefix(100))...")
-        let (data, response) = try await URLSession.shared.data(from: url)
+        print("   Requesting invoice...")
+
+        // Create URLRequest with timeout
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 30  // 30 second timeout
+
+        let (data, response) = try await URLSession.shared.data(for: request)
 
         // Check HTTP status code
         if let httpResponse = response as? HTTPURLResponse {
-            print("   HTTP Status: \(httpResponse.statusCode)")
+            if verbose {
+                print("   HTTP Status: \(httpResponse.statusCode)")
+            }
 
             // Handle HTTP errors
             if httpResponse.statusCode >= 400 {
-                if let responseString = String(data: data, encoding: .utf8) {
-                    // Check if it's HTML (server error page)
-                    if responseString.contains("<!DOCTYPE html>") || responseString.contains("<html") {
-                        print("   ❌ Server returned HTML error page (status \(httpResponse.statusCode))")
-                        throw ZapRequestError.serverError("Lightning service is temporarily unavailable (HTTP \(httpResponse.statusCode))")
-                    }
-                    print("   Raw response: \(responseString.prefix(200))")
+                let responseString = String(data: data, encoding: .utf8) ?? ""
+
+                // Check if it's HTML (server error page)
+                if responseString.contains("<!DOCTYPE html>") || responseString.contains("<html") {
+                    print("   ❌ Lightning service error (HTTP \(httpResponse.statusCode))")
+                    throw ZapRequestError.serverError("Lightning service is temporarily unavailable (HTTP \(httpResponse.statusCode))")
                 }
+
+                // Try to parse as JSON error
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let reason = json["reason"] as? String {
+                    print("   ❌ Lightning service rejected: \(reason)")
+                    throw ZapRequestError.serverError(reason)
+                }
+
+                print("   ❌ HTTP \(httpResponse.statusCode): \(responseString.prefix(200))")
                 throw ZapRequestError.serverError("HTTP error \(httpResponse.statusCode)")
             }
         }

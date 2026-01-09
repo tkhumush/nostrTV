@@ -290,10 +290,11 @@ struct StreamerSideMenu: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, 30)
+                        .offset(y: -15)  // Move QR code section up by 15 pixels
                     }
                 }
 
-                Spacer(minLength: 50)
+                Spacer(minLength: 20)
             }
         }
     }

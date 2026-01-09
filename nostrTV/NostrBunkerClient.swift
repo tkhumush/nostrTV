@@ -38,14 +38,34 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
     /// Wait for signer to connect after scanning nostrconnect:// QR code (reverse flow)
     /// - Parameter nostrConnectURI: The nostrconnect URI we displayed
     func waitForSignerConnection(bunkerURI: String) async throws {
+        // Clean up any previous connection state before starting fresh
+        print("🧹 Cleaning up previous connection state...")
+
+        // Cancel any pending requests from old connection
+        for (_, pending) in pendingRequests {
+            pending.timeoutTask.cancel()
+            pending.continuation.resume(throwing: BunkerError.notConnected)
+        }
+        pendingRequests.removeAll()
+
+        // Clear old state
+        bunkerPubkey = nil
+        expectedSecret = nil
+        connectContinuation = nil
+
+        // Disconnect old NostrSDK client if exists
+        if nostrSDKClient != nil {
+            print("   Disconnecting old relay connection...")
+            nostrSDKClient = nil
+            subscriptionId = nil
+        }
+
         connectionState = .connecting
 
         // Parse URI (supports both bunker:// and nostrconnect://)
         guard bunkerURI.hasPrefix("nostrconnect://") || bunkerURI.hasPrefix("bunker://") else {
             throw BunkerError.invalidURI("URI must start with nostrconnect:// or bunker://")
         }
-
-        let isReverseFlow = bunkerURI.hasPrefix("nostrconnect://")
 
         // Parse the URI components
         // For nostrconnect://, the pubkey is OUR client pubkey
@@ -75,15 +95,15 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             self.connectContinuation = continuation
 
-            // Set a timeout (60 seconds for user to scan and approve)
+            // Set a timeout (3 minutes for user to scan and approve)
             Task {
-                try? await Task.sleep(nanoseconds: 60_000_000_000) // 60 seconds
+                try? await Task.sleep(nanoseconds: 180_000_000_000) // 180 seconds (3 minutes)
 
                 if self.connectContinuation != nil {
                     self.connectContinuation?.resume(throwing: BunkerError.timeout)
                     self.connectContinuation = nil
                     await MainActor.run {
-                        self.connectionState = .error("Timeout waiting for signer")
+                        self.connectionState = .error("Timeout waiting for signer (3 minutes)")
                     }
                 }
             }
@@ -291,9 +311,9 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
             let request = BunkerRequest(method: method.rawValue, params: params)
             let requestId = request.id
 
-            // Create timeout task (30 seconds)
+            // Create timeout task (90 seconds / 1.5 minutes)
             let timeoutTask = Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds
+                try? await Task.sleep(nanoseconds: 90_000_000_000) // 90 seconds (1.5 minutes)
 
                 if self.pendingRequests.removeValue(forKey: requestId) != nil {
                     continuation.resume(throwing: BunkerError.timeout)
@@ -439,37 +459,35 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
 
             print("✅ Parsed response - ID: \(response.id)")
 
-            // If this is a connect response, validate the secret
-            if let secret = expectedSecret {
+            // If we're actively waiting for a connection AND expecting a secret, validate it
+            // Only validate when we have both an active connection attempt and an expected secret
+            if let secret = expectedSecret, connectContinuation != nil {
                 print("🔑 Validating connection secret...")
 
-                if let result = response.result {
-                    // The result should be "ack" or the secret
-                    if result != "ack" && result != secret {
-                        print("⚠️ Secret validation failed - mismatch detected")
-                        connectionState = .error("Secret validation failed")
+                // Check if this response has a result field
+                if let result = response.result, !result.isEmpty {
+                    // The result should be "ack" or match the secret
+                    if result == "ack" || result == secret {
+                        print("✅ Secret validated successfully! (result: \(result.prefix(10))...)")
+                        expectedSecret = nil  // Clear it after validation
 
-                        // Resume with error if we're waiting for connection
+                        // Resume the waiting continuation - connection established!
                         if let continuation = connectContinuation {
+                            print("✅ Resuming connect continuation...")
                             connectContinuation = nil
-                            continuation.resume(throwing: BunkerError.authenticationFailed)
+                            continuation.resume()
                         }
-                        return
-                    }
-                    print("✅ Secret validated successfully!")
-                    expectedSecret = nil  // Clear it after validation
-
-                    // Resume the waiting continuation - connection established!
-                    if let continuation = connectContinuation {
-                        print("✅ Resuming connect continuation...")
-                        connectContinuation = nil
-                        continuation.resume()
+                        return  // Don't process as regular response
                     } else {
-                        print("⚠️ No connect continuation to resume!")
+                        // Only log mismatch, don't fail immediately - might be an old message
+                        print("⚠️ Secret mismatch (expected: \(secret.prefix(10))..., got: \(result.prefix(10))...)")
+                        print("   Ignoring this message, waiting for correct connect response...")
+                        return  // Ignore this message and wait for the right one
                     }
-                    return  // Don't process as regular response
                 } else {
-                    print("⚠️ Connect response has no result field!")
+                    // No result field or empty result - this is likely an old message, ignore it
+                    print("⚠️ Message has no result field - ignoring (likely old message)")
+                    return
                 }
             }
 
