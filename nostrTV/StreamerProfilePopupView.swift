@@ -8,6 +8,7 @@
 import SwiftUI
 import CoreImage
 import CoreImage.CIFilterBuiltins
+import NostrSDK
 
 /// Side menu displaying streamer profile and zap interface
 struct StreamerProfilePopupView: View {
@@ -50,6 +51,9 @@ struct StreamerSideMenu: View {
     @State private var isGenerating = false
     @State private var qrCodeImage: UIImage?
     @State private var errorMessage: String?
+    @State private var zapReceived = false
+    @State private var generatedInvoice: String?  // Store just the invoice string for matching
+    @State private var nostrSDKClient: NostrSDKClient?
 
     // Zap amount options
     private let zapAmounts = [
@@ -222,7 +226,27 @@ struct StreamerSideMenu: View {
                                     .foregroundColor(.yellow)
                             }
 
-                            if isGenerating {
+                            if zapReceived {
+                                // Success state - Zap received!
+                                VStack(spacing: 20) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 100))
+                                        .foregroundColor(.green)
+                                        .scaleEffect(1.0)
+                                        .animation(.spring(response: 0.5, dampingFraction: 0.6), value: zapReceived)
+
+                                    Text("⚡️ Zap Received!")
+                                        .font(.system(size: 36, weight: .bold))
+                                        .foregroundColor(.yellow)
+
+                                    Text("Thank you for supporting \(stream.profile?.displayNameOrName ?? "the streamer")!")
+                                        .font(.system(size: 20))
+                                        .foregroundColor(.white.opacity(0.8))
+                                        .multilineTextAlignment(.center)
+                                        .padding(.horizontal, 20)
+                                }
+                                .padding(.vertical, 60)
+                            } else if isGenerating {
                                 ProgressView()
                                     .scaleEffect(1.5)
                                 Text("Generating QR code...")
@@ -264,19 +288,17 @@ struct StreamerSideMenu: View {
                                     .shadow(color: .yellow.opacity(0.3), radius: 15)
                             }
 
-                            // Instructions
-                            Text("Scan to send zap")
-                                .font(.system(size: 20))
-                                .foregroundColor(.gray)
+                            // Instructions (hide when zap received)
+                            if !zapReceived {
+                                Text("Scan to send zap")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.gray)
+                            }
 
-                            // Back button
-                            if errorMessage == nil {
+                            // Back button (hide when zap received - will auto-dismiss)
+                            if errorMessage == nil && !zapReceived {
                                 Button(action: {
-                                    showQRCode = false
-                                    selectedAmount = nil
-                                    qrCodeImage = nil
-                                    invoiceURI = nil
-                                    errorMessage = nil
+                                    cleanupZapState()
                                 }) {
                                     Text("Back")
                                         .font(.system(size: 20))
@@ -315,9 +337,9 @@ struct StreamerSideMenu: View {
 
         Task {
             do {
-                let nostrSDKClient = try NostrSDKClient()
+                let sdkClient = try NostrSDKClient()
                 let generator = ZapRequestGenerator(
-                    nostrSDKClient: nostrSDKClient,
+                    nostrSDKClient: sdkClient,
                     authManager: authManager
                 )
 
@@ -331,10 +353,18 @@ struct StreamerSideMenu: View {
 
                 let qrImage = await generateQRCode(from: uri)
 
+                // Extract just the invoice string (without "lightning:" prefix)
+                let invoice = uri.replacingOccurrences(of: "lightning:", with: "")
+
                 await MainActor.run {
                     invoiceURI = uri
+                    generatedInvoice = invoice
                     qrCodeImage = qrImage
                     isGenerating = false
+                    nostrSDKClient = sdkClient
+
+                    // Subscribe to zap receipts
+                    subscribeToZapReceipts(invoice: invoice, sdkClient: sdkClient)
                 }
             } catch let error as ZapRequestError {
                 await MainActor.run {
@@ -394,6 +424,59 @@ struct StreamerSideMenu: View {
 
             return nil
         }.value
+    }
+
+    private func subscribeToZapReceipts(invoice: String, sdkClient: NostrSDKClient) {
+        print("📡 Subscribing to zap receipts for invoice: \(invoice.prefix(20))...")
+
+        // Subscribe to kind 9735 (zap receipt) events
+        guard let filter = Filter(kinds: [9735], limit: 100) else {
+            print("❌ Failed to create zap receipt filter")
+            return
+        }
+
+        let subscriptionId = sdkClient.subscribe(with: filter, purpose: "zap-receipts")
+        print("✅ Subscribed to zap receipts with ID: \(subscriptionId)")
+
+        // Set up callback for zap receipts
+        sdkClient.onZapReceived = { zapComment in
+            Task { @MainActor [self] in
+                print("📨 Received zap receipt")
+
+                // Check if this receipt matches our invoice
+                if let bolt11 = zapComment.bolt11 {
+                    print("   Receipt invoice: \(bolt11.prefix(20))...")
+                    print("   Our invoice:     \(invoice.prefix(20))...")
+
+                    if bolt11 == invoice {
+                        print("✅ Zap receipt matched! Payment received!")
+
+                        // Update UI to show success
+                        self.zapReceived = true
+
+                        // Auto-dismiss after 3 seconds
+                        Task {
+                            try? await Task.sleep(nanoseconds: 3_000_000_000)
+                            await MainActor.run {
+                                self.cleanupZapState()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func cleanupZapState() {
+        print("🧹 Cleaning up zap state")
+        showQRCode = false
+        selectedAmount = nil
+        qrCodeImage = nil
+        invoiceURI = nil
+        errorMessage = nil
+        zapReceived = false
+        generatedInvoice = nil
+        nostrSDKClient = nil
     }
 }
 

@@ -17,6 +17,7 @@ struct ZapComment: Identifiable, Codable {
     let comment: String  // Message content
     let timestamp: Date  // When the message was sent
     let streamEventId: String?  // Stream identifier
+    let bolt11: String?  // Lightning invoice (for zap receipts)
 
     /// Amount formatted as sats (divide millisats by 1000)
     var amountInSats: Int {

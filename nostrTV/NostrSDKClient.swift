@@ -420,7 +420,8 @@ class NostrSDKClient {
             senderName: senderName,
             comment: content,
             timestamp: createdAt,
-            streamEventId: aTag
+            streamEventId: aTag,
+            bolt11: nil  // No invoice for regular chat
         )
 
 
@@ -491,7 +492,8 @@ class NostrSDKClient {
             senderName: senderName,
             comment: comment,
             timestamp: createdAt,
-            streamEventId: streamEventId
+            streamEventId: streamEventId,
+            bolt11: bolt11
         )
 
 

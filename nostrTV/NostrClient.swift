@@ -584,7 +584,8 @@ class NostrClient {
             senderName: senderName,
             comment: content,
             timestamp: Date(timeIntervalSince1970: createdAt),
-            streamEventId: aTag  // Use the a-tag as the stream identifier
+            streamEventId: aTag,  // Use the a-tag as the stream identifier
+            bolt11: nil  // No invoice for regular chat
         )
 
         print("   ✓ Created chat comment object, notifying callback")
@@ -653,7 +654,8 @@ class NostrClient {
             senderName: senderName,
             comment: comment,
             timestamp: Date(timeIntervalSince1970: createdAt),
-            streamEventId: streamEventId
+            streamEventId: streamEventId,
+            bolt11: bolt11
         )
 
         // Notify callback

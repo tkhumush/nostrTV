@@ -160,7 +160,8 @@ private struct ZapDisplayView: View {
                     senderName: "Alice",
                     comment: "Great stream!",
                     timestamp: Date(),
-                    streamEventId: "stream1"
+                    streamEventId: "stream1",
+                    bolt11: nil
                 ),
                 ZapComment(
                     id: "2",
@@ -169,7 +170,8 @@ private struct ZapDisplayView: View {
                     senderName: "Bob",
                     comment: "Love this content",
                     timestamp: Date(),
-                    streamEventId: "stream1"
+                    streamEventId: "stream1",
+                    bolt11: nil
                 ),
                 ZapComment(
                     id: "3",
@@ -178,7 +180,8 @@ private struct ZapDisplayView: View {
                     senderName: nil,
                     comment: "",
                     timestamp: Date(),
-                    streamEventId: "stream1"
+                    streamEventId: "stream1",
+                    bolt11: nil
                 )
             ],
                 nostrSDKClient: nostrSDKClient,
