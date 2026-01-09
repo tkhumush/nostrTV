@@ -62,7 +62,7 @@ struct VideoPlayerView: View {
                             .font(.system(size: 18))
                             .foregroundColor(.gray)
 
-                        // Stream info: profile pic + username + stream name
+                        // Stream info: profile pic + username + stream name + viewer count
                         HStack(spacing: 8) {
                             // Profile picture
                             if let profile = stream.profile, let pictureURL = profile.picture, let url = URL(string: pictureURL) {
@@ -100,12 +100,8 @@ struct VideoPlayerView: View {
                                 .font(.system(size: 16))
                                 .foregroundColor(.white.opacity(0.8))
                                 .lineLimit(1)
-                        }
 
-                        Spacer()
-
-                        // Viewer count on far right
-                        HStack(spacing: 8) {
+                            // Viewer count
                             Text("|")
                                 .font(.system(size: 18))
                                 .foregroundColor(.gray)
@@ -118,6 +114,8 @@ struct VideoPlayerView: View {
                                 .font(.system(size: 18, weight: .bold))
                                 .foregroundColor(.white)
                         }
+
+                        Spacer()
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
