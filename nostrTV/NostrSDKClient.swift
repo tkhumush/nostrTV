@@ -676,6 +676,29 @@ class NostrSDKClient {
         relayPool.publishEvent(event)
     }
 
+    /// Publish a legacy NostrEvent to all relays
+    /// - Parameter event: The legacy NostrEvent to publish
+    /// - Throws: Error if event serialization fails
+    func publishLegacyEvent(_ event: NostrEvent) throws {
+        let eventDict: [String: Any] = [
+            "id": event.id ?? "",
+            "pubkey": event.pubkey ?? "",
+            "created_at": event.created_at ?? Int(Date().timeIntervalSince1970),
+            "kind": event.kind,
+            "tags": event.tags,
+            "content": event.content ?? "",
+            "sig": event.sig ?? ""
+        ]
+
+        guard let eventJSON = try? JSONSerialization.data(withJSONObject: eventDict),
+              let eventJSONString = String(data: eventJSON, encoding: .utf8) else {
+            throw NostrEventError.serializationFailed
+        }
+
+        let eventMessage = "[\"EVENT\",\(eventJSONString)]"
+        relayPool.send(request: eventMessage)
+    }
+
     /// Publish a raw message to all relays (for bunker and other special cases)
     /// - Parameter message: The raw Nostr protocol message (e.g., ["EVENT", {...}])
     func publishRawMessage(_ message: String) {

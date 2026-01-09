@@ -7,28 +7,32 @@ import Combine
 class LiveActivityManager: ObservableObject {
     static let shared = LiveActivityManager()
 
-    private let nostrClient: NostrClient
+    private let nostrSDKClient: NostrSDKClient
     private let keyManager: NostrKeyManager
     private var authManager: NostrAuthManager?
 
     @Published private(set) var currentStream: Stream?
     @Published private(set) var isWatchingStream: Bool = false
 
-    private init(nostrClient: NostrClient? = nil) {
-        self.nostrClient = nostrClient ?? NostrClient()
+    private init(nostrSDKClient: NostrSDKClient? = nil) {
+        if let client = nostrSDKClient {
+            self.nostrSDKClient = client
+        } else {
+            self.nostrSDKClient = try! NostrSDKClient()
+        }
         self.keyManager = NostrKeyManager.shared
         self.authManager = nil
     }
 
-    /// Initialize with custom NostrClient (for dependency injection)
-    init(nostrClient: NostrClient, keyManager: NostrKeyManager = NostrKeyManager.shared, authManager: NostrAuthManager? = nil) {
-        self.nostrClient = nostrClient
+    /// Initialize with custom NostrSDKClient (for dependency injection)
+    init(nostrSDKClient: NostrSDKClient, keyManager: NostrKeyManager = NostrKeyManager.shared, authManager: NostrAuthManager? = nil) {
+        self.nostrSDKClient = nostrSDKClient
         self.keyManager = keyManager
         self.authManager = authManager
     }
 
-    /// Configure to use an existing NostrClient instance
-    func configure(with nostrClient: NostrClient) {
+    /// Configure to use an existing NostrSDKClient instance
+    func configure(with nostrSDKClient: NostrSDKClient) {
         // Store reference but don't create new connections
         // We'll use the existing client's connections
     }
@@ -47,27 +51,20 @@ class LiveActivityManager: ObservableObject {
             throw LiveActivityError.missingStreamPubkey
         }
 
-        // Publish ephemeral profile if we haven't already
-        if !keyManager.hasPublishedProfile {
-            print("🆕 Publishing ephemeral profile for the first time...")
-            do {
-                try keyManager.publishEphemeralProfile(using: nostrClient)
-            } catch {
-                print("⚠️ Failed to publish profile: \(error.localizedDescription)")
-            }
-        }
-
         // Update state
         self.currentStream = stream
         self.isWatchingStream = true
 
-        // DISABLED: Presence and chat announcements
-        // These features work correctly but may be filtered by streaming services
-        // to prevent spam from accounts with no followers.
-        //
-        // To re-enable, uncomment the code below:
+        // Only publish presence for bunker-authenticated users
+        // Ephemeral/anonymous users don't announce presence to avoid spam filtering
+        guard let authManager = authManager,
+              case .bunker = authManager.authMethod else {
+            print("⏭️ Skipping presence announcement - user not authenticated with bunker")
+            return
+        }
 
-        /*
+        print("📍 Publishing presence for bunker-authenticated user...")
+
         // Create the "a" tag referencing the stream event
         // Format: "30311:<stream_author_pubkey>:<d_identifier>"
         let streamDTag = stream.streamID
@@ -83,7 +80,7 @@ class LiveActivityManager: ObservableObject {
         let content = ""
 
         // Create and sign the event
-        let event = try nostrClient.createSignedEvent(
+        let event = try nostrSDKClient.createSignedEvent(
             kind: 10312,
             content: content,
             tags: tags,
@@ -91,7 +88,7 @@ class LiveActivityManager: ObservableObject {
         )
 
         // Publish to relays
-        try nostrClient.publishEvent(event)
+        try nostrSDKClient.publishLegacyEvent(event)
 
         // Also send a chat message announcing we're watching
         do {
@@ -99,7 +96,6 @@ class LiveActivityManager: ObservableObject {
         } catch {
             print("⚠️ Failed to send join chat message: \(error.localizedDescription)")
         }
-        */
     }
 
     // MARK: - Leave Stream
@@ -116,10 +112,15 @@ class LiveActivityManager: ObservableObject {
         self.currentStream = nil
         self.isWatchingStream = false
 
-        // DISABLED: Presence clearing
-        // To re-enable, uncomment the code below:
+        // Only clear presence for bunker-authenticated users
+        guard let authManager = authManager,
+              case .bunker = authManager.authMethod else {
+            print("⏭️ Skipping presence clear - user not authenticated with bunker")
+            return
+        }
 
-        /*
+        print("📍 Clearing presence for bunker-authenticated user...")
+
         // For kind 10312 (replaceable event), leaving means publishing an empty presence
         // event with no 'a' tag, which clears the user's presence from any room
 
@@ -130,7 +131,7 @@ class LiveActivityManager: ObservableObject {
         let content = ""
 
         // Create and sign the event
-        let event = try nostrClient.createSignedEvent(
+        let event = try nostrSDKClient.createSignedEvent(
             kind: 10312,
             content: content,
             tags: tags,
@@ -138,8 +139,7 @@ class LiveActivityManager: ObservableObject {
         )
 
         // Publish to relays
-        try nostrClient.publishEvent(event)
-        */
+        try nostrSDKClient.publishLegacyEvent(event)
     }
 
     // MARK: - Chat Messages
@@ -159,7 +159,7 @@ class LiveActivityManager: ObservableObject {
         let content = "watching from nostrTV"
 
         // Create and sign the event
-        let event = try nostrClient.createSignedEvent(
+        let event = try nostrSDKClient.createSignedEvent(
             kind: 1311,
             content: content,
             tags: tags,
@@ -167,7 +167,7 @@ class LiveActivityManager: ObservableObject {
         )
 
         // Publish to relays
-        try nostrClient.publishEvent(event)
+        try nostrSDKClient.publishLegacyEvent(event)
     }
 
     // MARK: - Convenience Methods
@@ -209,10 +209,12 @@ class LiveActivityManager: ObservableObject {
             throw LiveActivityError.missingStreamPubkey
         }
 
-        // DISABLED: Periodic presence updates
-        // To re-enable, uncomment the code below:
+        // Only update presence for bunker-authenticated users
+        guard let authManager = authManager,
+              case .bunker = authManager.authMethod else {
+            return
+        }
 
-        /*
         // Create the "a" tag referencing the stream event
         let streamDTag = stream.streamID
         let aTag = "30311:\(streamPubkey):\(streamDTag)"
@@ -223,7 +225,7 @@ class LiveActivityManager: ObservableObject {
         ]
 
         // Create and sign the event
-        let event = try nostrClient.createSignedEvent(
+        let event = try nostrSDKClient.createSignedEvent(
             kind: 10312,
             content: "",
             tags: tags,
@@ -231,8 +233,7 @@ class LiveActivityManager: ObservableObject {
         )
 
         // Publish to relays
-        try nostrClient.publishEvent(event)
-        */
+        try nostrSDKClient.publishLegacyEvent(event)
     }
 
     /// Send a chat message to the current stream
@@ -280,7 +281,7 @@ class LiveActivityManager: ObservableObject {
             guard let keyPair = keyManager.currentKeyPair else {
                 throw LiveActivityError.noKeyPairAvailable
             }
-            signedEvent = try nostrClient.createSignedEvent(
+            signedEvent = try nostrSDKClient.createSignedEvent(
                 kind: 1311,
                 content: message,
                 tags: tags,
@@ -289,7 +290,7 @@ class LiveActivityManager: ObservableObject {
         }
 
         // Publish to relays
-        try nostrClient.publishEvent(signedEvent)
+        try nostrSDKClient.publishLegacyEvent(signedEvent)
     }
 }
 

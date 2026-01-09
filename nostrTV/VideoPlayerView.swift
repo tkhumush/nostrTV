@@ -24,6 +24,7 @@ struct VideoPlayerView: View {
     @State private var selectedZapOption: ZapOption?
     @State private var invoiceURI: String?
     @State private var zapRefreshTimer: Timer?
+    @State private var presenceTimer: Timer?
     @State private var lastZapRequestPubkey: String?
     @State private var liveActivityManager: LiveActivityManager?
     @StateObject private var chatManager: ChatManager
@@ -202,7 +203,7 @@ struct VideoPlayerView: View {
         .ignoresSafeArea()
         .onAppear {
             // Initialize LiveActivityManager with authManager for signing
-            liveActivityManager = LiveActivityManager(nostrClient: nostrClient, authManager: authManager)
+            liveActivityManager = LiveActivityManager(nostrSDKClient: nostrSDKClient, authManager: authManager)
 
             // Join the stream
             if let stream = stream, let activityManager = liveActivityManager {
@@ -224,6 +225,11 @@ struct VideoPlayerView: View {
                 startZapRefreshTimer()
             }
 
+            // Start presence updates for bunker-authenticated users
+            if authManager.authMethod != nil, case .bunker = authManager.authMethod {
+                startPresenceTimer()
+            }
+
             // Fetch chat messages for this stream
             if let stream = stream, let eventID = stream.eventID, let authorPubkey = stream.eventAuthorPubkey {
                 // IMPORTANT: Use eventAuthorPubkey (not host pubkey) for a-tag coordinate
@@ -243,9 +249,11 @@ struct VideoPlayerView: View {
                 }
             }
 
-            // Stop refresh timer
+            // Stop refresh timers
             zapRefreshTimer?.invalidate()
             zapRefreshTimer = nil
+            presenceTimer?.invalidate()
+            presenceTimer = nil
 
             // Clear zap subscriptions when view disappears
             if let stream = stream, let eventID = stream.eventID, let zapManager = zapManager {
@@ -316,6 +324,20 @@ struct VideoPlayerView: View {
         }
     }
 
+    private func startPresenceTimer() {
+        // Update presence every 60 seconds for bunker-authenticated users
+        presenceTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [self] _ in
+            guard let activityManager = liveActivityManager else { return }
+            Task {
+                do {
+                    try await activityManager.updatePresence()
+                } catch {
+                    print("⚠️ Failed to update presence: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
     private func sendChatMessage() {
         guard !chatMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return
@@ -370,55 +392,25 @@ struct VideoPlayerContainer: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 
-// Custom controller that disables the idle timer and manages live activity
+// Custom controller that disables the idle timer
 class CustomAVPlayerViewController: AVPlayerViewController {
-    private var presenceTimer: Timer?  // Timer for periodic presence updates
-    var stream: Stream?  // Stream being watched
-    var nostrClient: NostrClient?  // NostrClient for publishing events
-    private var liveActivityManager: LiveActivityManager?
+    var stream: Stream?  // Stream being watched (for reference)
+    var nostrClient: NostrClient?  // Legacy NostrClient (for reference)
     var onDismiss: (() -> Void)?  // Closure to dismiss the view
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         UIApplication.shared.isIdleTimerDisabled = true
 
-        // Initialize LiveActivityManager with the shared NostrClient (which has active connections)
-        if let nostrClient = nostrClient {
-            liveActivityManager = LiveActivityManager(nostrClient: nostrClient)
-        }
-
-        // Announce joining the stream
-        if let stream = stream, let activityManager = liveActivityManager {
-            Task {
-                do {
-                    try await activityManager.joinStreamWithConnection(stream)
-                    // Start periodic presence updates
-                    startPresenceUpdates()
-                } catch {
-                    print("❌ Error joining stream: \(error)")
-                }
-            }
-        }
+        // Note: LiveActivityManager is now handled by VideoPlayerView.onAppear
+        // which has access to authManager for proper bunker authentication support
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         UIApplication.shared.isIdleTimerDisabled = false
 
-        // Stop presence updates
-        presenceTimer?.invalidate()
-        presenceTimer = nil
-
-        // Announce leaving the stream
-        if let stream = stream, let activityManager = liveActivityManager {
-            Task {
-                do {
-                    try await activityManager.leaveStream(stream)
-                } catch {
-                    // Failed to announce leaving stream
-                }
-            }
-        }
+        // Note: LiveActivityManager cleanup is handled by VideoPlayerView.onDisappear
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
@@ -430,20 +422,6 @@ class CustomAVPlayerViewController: AVPlayerViewController {
             }
         }
         super.pressesBegan(presses, with: event)
-    }
-
-    private func startPresenceUpdates() {
-        // Update presence every 60 seconds to show continued viewing
-        presenceTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
-            guard let self = self, let activityManager = self.liveActivityManager else { return }
-            Task {
-                do {
-                    try await activityManager.updatePresence()
-                } catch {
-                    // Failed to update presence
-                }
-            }
-        }
     }
 }
 
