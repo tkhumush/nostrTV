@@ -19,10 +19,18 @@ class NostrAuthManager: ObservableObject {
     @Published var bunkerClient: NostrBunkerClient?
 
     private let userDefaultsKey = "nostrUserNip05"
-    private let nostrClient = NostrClient()
+    private var nostrSDKClient: NostrSDKClient
+    private var legacyNostrClient = NostrClient() // Temporary: for NostrBunkerClient until it's migrated
     private let bunkerSessionManager = BunkerSessionManager()
 
     init() {
+        // Initialize NostrSDKClient
+        do {
+            self.nostrSDKClient = try NostrSDKClient()
+        } catch {
+            fatalError("Failed to initialize NostrSDKClient: \(error)")
+        }
+
         // Check for bunker session first
         if let bunkerSession = bunkerSessionManager.loadSession(),
            let userPubkey = bunkerSession.userPubkey {
@@ -183,7 +191,7 @@ class NostrAuthManager: ObservableObject {
         errorMessage = nil
 
         // Setup callback for profile
-        nostrClient.addProfileReceivedCallback { [weak self] profile in
+        nostrSDKClient.addProfileReceivedCallback { [weak self] profile in
             DispatchQueue.main.async {
                 self?.currentProfile = profile
                 self?.isLoadingProfile = false
@@ -192,7 +200,7 @@ class NostrAuthManager: ObservableObject {
         }
 
         // Setup callback for follow list
-        nostrClient.onFollowListReceived = { [weak self] follows in
+        nostrSDKClient.onFollowListReceived = { [weak self] follows in
             DispatchQueue.main.async {
                 self?.followList = follows
                 self?.saveFollowListToCache(follows)
@@ -209,7 +217,7 @@ class NostrAuthManager: ObservableObject {
         }
 
         // Connect and fetch
-        nostrClient.connectAndFetchUserData(pubkey: user.hexPubkey)
+        nostrSDKClient.connectAndFetchUserData(pubkey: user.hexPubkey)
     }
 
     func login() {
@@ -256,8 +264,8 @@ class NostrAuthManager: ObservableObject {
     @MainActor
     private func restoreBunkerSession(_ session: BunkerSession) async {
         do {
-            // Recreate bunker client
-            let client = NostrBunkerClient(nostrClient: nostrClient, keyManager: NostrKeyManager.shared)
+            // Recreate bunker client (uses legacy NostrClient for now)
+            let client = NostrBunkerClient(nostrClient: legacyNostrClient, keyManager: NostrKeyManager.shared)
 
             // Attempt to reconnect
             let uri = BunkerURIComponents(
@@ -318,8 +326,9 @@ class NostrAuthManager: ObservableObject {
         authMethod = nil
         errorMessage = nil
 
-        // Disconnect client
-        nostrClient.disconnect()
+        // Disconnect clients
+        nostrSDKClient.disconnect()
+        legacyNostrClient.disconnect()
     }
 
     // MARK: - Event Signing
@@ -339,8 +348,8 @@ class NostrAuthManager: ObservableObject {
             guard let keyPair = NostrKeyManager.shared.currentKeyPair else {
                 throw NostrAuthError.noKeyPairAvailable
             }
-            // Sign locally using NostrClient
-            return try nostrClient.createSignedEvent(
+            // Sign locally using NostrSDKClient
+            return try nostrSDKClient.createSignedEvent(
                 kind: event.kind,
                 content: event.content ?? "",
                 tags: event.tags,

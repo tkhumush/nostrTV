@@ -205,6 +205,21 @@ class NostrSDKClient {
         subscribe(with: filter, purpose: "follow-list-\(pubkey.prefix(8))")
     }
 
+    /// Convenience method: Connect to relays and fetch user profile + follow list
+    /// - Parameter pubkey: The user's public key
+    func connectAndFetchUserData(pubkey: String) {
+        print("🔧 NostrSDKClient: Connecting and fetching user data for \(pubkey.prefix(16))...")
+        connect()
+
+        // Wait for connections to establish
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self = self else { return }
+            print("🔧 NostrSDKClient: Requesting profile and follow list...")
+            self.requestProfile(for: pubkey)
+            self.requestFollowList(for: pubkey)
+        }
+    }
+
     // MARK: - Profile Management
 
     /// Add a callback for profile received events (supports multiple observers)
@@ -659,6 +674,60 @@ class NostrSDKClient {
     /// - Parameter event: The NostrSDK event to publish
     func publishEvent(_ event: NostrSDK.NostrEvent) {
         relayPool.publishEvent(event)
+    }
+
+    // MARK: - Event Creation and Signing
+
+    /// Create and sign a Nostr event locally using a keypair
+    /// - Parameters:
+    ///   - kind: The event kind
+    ///   - content: The event content
+    ///   - tags: The event tags
+    ///   - keyPair: The keypair to sign with
+    /// - Returns: A signed NostrEvent (legacy format for compatibility)
+    func createSignedEvent(kind: Int, content: String, tags: [[String]] = [], using keyPair: NostrKeyPair) throws -> NostrEvent {
+        let pubkey = keyPair.publicKeyHex
+        let created_at = Int(Date().timeIntervalSince1970)
+
+        // Create event for signing (without id and sig)
+        let eventForSigning: [Any] = [
+            0,
+            pubkey,
+            created_at,
+            kind,
+            tags,
+            content
+        ]
+
+        // Serialize to JSON for hashing with specific options
+        // NIP-01 requires compact JSON with no whitespace and specific formatting
+        guard let jsonData = try? JSONSerialization.data(
+            withJSONObject: eventForSigning,
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        ),
+              let jsonString = String(data: jsonData, encoding: .utf8) else {
+            throw NostrEventError.serializationFailed
+        }
+
+        // Hash the serialized event
+        let eventHash = jsonString.data(using: .utf8)!.sha256()
+        let eventId = eventHash.hexString
+
+        // Sign the event hash
+        let signature = try keyPair.sign(messageHash: eventHash)
+        let signatureHex = signature.hexString
+
+        // Create the full signed event
+        var event = NostrEvent(kind: kind, tags: tags)
+        event.id = eventId
+        event.pubkey = pubkey
+        event.created_at = created_at
+        event.content = content
+        event.sig = signatureHex
+
+        print("✅ NostrSDKClient: Created and signed event (kind: \(kind), id: \(eventId.prefix(16))...)")
+
+        return event
     }
 }
 
