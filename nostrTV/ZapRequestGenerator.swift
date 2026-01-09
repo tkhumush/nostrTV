@@ -9,10 +9,12 @@ import Foundation
 
 /// Generates NIP-57 zap requests and payment QR codes
 class ZapRequestGenerator {
-    private let nostrClient: NostrClient
+    private let nostrSDKClient: NostrSDKClient
+    private let authManager: NostrAuthManager?
 
-    init(nostrClient: NostrClient) {
-        self.nostrClient = nostrClient
+    init(nostrSDKClient: NostrSDKClient, authManager: NostrAuthManager? = nil) {
+        self.nostrSDKClient = nostrSDKClient
+        self.authManager = authManager
     }
 
     /// Generate a zap request for a stream and return the lightning invoice URI
@@ -21,13 +23,14 @@ class ZapRequestGenerator {
     ///   - amount: Amount in sats
     ///   - comment: Zap comment/message
     ///   - lud16: Lightning address of the recipient
+    ///   - keyPair: Optional keypair for anonymous zaps (defaults to authenticated user)
     /// - Returns: Lightning invoice URI for QR code generation
     func generateZapRequest(
         stream: Stream,
         amount: Int,
         comment: String,
         lud16: String,
-        keyPair: NostrKeyPair
+        keyPair: NostrKeyPair? = nil
     ) async throws -> String {
         print("🔧 Generating zap request:")
         print("   Stream: \(stream.title)")
@@ -69,13 +72,35 @@ class ZapRequestGenerator {
 
         print("   Tags: \(tags)")
 
-        // Create the zap request event (kind 9734)
-        let zapRequestEvent = try nostrClient.createSignedEvent(
+        // Create unsigned event first
+        let unsignedEvent = NostrEvent(
             kind: 9734,
-            content: comment,
             tags: tags,
-            using: keyPair
+            id: nil,
+            pubkey: nil,
+            created_at: Int(Date().timeIntervalSince1970),
+            content: comment,
+            sig: nil
         )
+
+        // Sign the event using authenticated user or provided keypair
+        let zapRequestEvent: NostrEvent
+        if let authManager = authManager, authManager.isAuthenticated {
+            // Use authenticated user's signature (bunker or local)
+            print("   📝 Signing with authenticated user...")
+            zapRequestEvent = try await authManager.signEvent(unsignedEvent)
+        } else if let keyPair = keyPair {
+            // Fallback to provided keypair (anonymous zaps)
+            print("   📝 Signing with provided keypair...")
+            zapRequestEvent = try nostrSDKClient.createSignedEvent(
+                kind: 9734,
+                content: comment,
+                tags: tags,
+                using: keyPair
+            )
+        } else {
+            throw ZapRequestError.noSigningMethodAvailable
+        }
 
         print("   ✓ Created zap request event: \(zapRequestEvent.id?.prefix(8) ?? "unknown")")
 
@@ -251,6 +276,7 @@ enum ZapRequestError: Error, LocalizedError {
     case missingInvoice
     case serverError(String)
     case invalidResponse(String)
+    case noSigningMethodAvailable
 
     var errorDescription: String? {
         switch self {
@@ -268,6 +294,8 @@ enum ZapRequestError: Error, LocalizedError {
             return "Server error: \(reason)"
         case .invalidResponse(let response):
             return "Invalid response from server: \(response)"
+        case .noSigningMethodAvailable:
+            return "No signing method available. Please sign in or provide a keypair."
         }
     }
 }

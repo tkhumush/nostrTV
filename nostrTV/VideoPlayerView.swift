@@ -27,6 +27,7 @@ struct VideoPlayerView: View {
     @State private var presenceTimer: Timer?
     @State private var lastZapRequestPubkey: String?
     @State private var liveActivityManager: LiveActivityManager?
+    @State private var showStreamerProfile = false
     @StateObject private var chatManager: ChatManager
     @State private var showChatInput = false
     @State private var chatMessage = ""
@@ -62,58 +63,61 @@ struct VideoPlayerView: View {
                             .font(.system(size: 18))
                             .foregroundColor(.gray)
 
-                        // Stream info: profile pic + username + stream name + viewer count
-                        HStack(spacing: 8) {
-                            // Profile picture
-                            if let profile = stream.profile, let pictureURL = profile.picture, let url = URL(string: pictureURL) {
-                                AsyncImage(url: url) { phase in
-                                    switch phase {
-                                    case .success(let image):
-                                        image
-                                            .resizable()
-                                            .aspectRatio(contentMode: .fill)
-                                            .frame(width: 32, height: 32)
-                                            .clipShape(Circle())
-                                    case .failure(_), .empty:
-                                        Circle()
-                                            .fill(Color.gray)
-                                            .frame(width: 32, height: 32)
-                                    @unknown default:
-                                        Circle()
-                                            .fill(Color.gray)
-                                            .frame(width: 32, height: 32)
+                        // Stream info: profile pic + username + stream name + viewer count (clickable)
+                        Button(action: { showStreamerProfile = true }) {
+                            HStack(spacing: 8) {
+                                // Profile picture
+                                if let profile = stream.profile, let pictureURL = profile.picture, let url = URL(string: pictureURL) {
+                                    AsyncImage(url: url) { phase in
+                                        switch phase {
+                                        case .success(let image):
+                                            image
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fill)
+                                                .frame(width: 32, height: 32)
+                                                .clipShape(Circle())
+                                        case .failure(_), .empty:
+                                            Circle()
+                                                .fill(Color.gray)
+                                                .frame(width: 32, height: 32)
+                                        @unknown default:
+                                            Circle()
+                                                .fill(Color.gray)
+                                                .frame(width: 32, height: 32)
+                                        }
                                     }
+                                } else {
+                                    Circle()
+                                        .fill(Color.gray)
+                                        .frame(width: 32, height: 32)
                                 }
-                            } else {
-                                Circle()
-                                    .fill(Color.gray)
-                                    .frame(width: 32, height: 32)
+
+                                // Username
+                                Text(stream.profile?.displayName ?? stream.profile?.name ?? "Anonymous")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.white)
+
+                                // Stream name
+                                Text(stream.title)
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.white.opacity(0.8))
+                                    .lineLimit(1)
+
+                                // Viewer count
+                                Text("|")
+                                    .font(.system(size: 18))
+                                    .foregroundColor(.gray)
+
+                                Image(systemName: "eye.fill")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.white)
+
+                                Text("\(stream.viewerCount)")
+                                    .font(.system(size: 18, weight: .bold))
+                                    .foregroundColor(.white)
                             }
-
-                            // Username
-                            Text(stream.profile?.displayName ?? stream.profile?.name ?? "Anonymous")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.white)
-
-                            // Stream name
-                            Text(stream.title)
-                                .font(.system(size: 16))
-                                .foregroundColor(.white.opacity(0.8))
-                                .lineLimit(1)
-
-                            // Viewer count
-                            Text("|")
-                                .font(.system(size: 18))
-                                .foregroundColor(.gray)
-
-                            Image(systemName: "eye.fill")
-                                .font(.system(size: 16))
-                                .foregroundColor(.white)
-
-                            Text("\(stream.viewerCount)")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(.white)
                         }
+                        .buttonStyle(.plain)
 
                         Spacer()
                     }
@@ -197,6 +201,17 @@ struct VideoPlayerView: View {
                     }
                 )
             }
+
+            // Streamer profile popup overlay
+            if showStreamerProfile, let stream = stream {
+                StreamerProfilePopupView(
+                    stream: stream,
+                    authManager: authManager,
+                    onDismiss: { showStreamerProfile = false }
+                )
+                .transition(.opacity)
+                .zIndex(999)
+            }
         }
         .ignoresSafeArea()
         .onAppear {
@@ -276,7 +291,7 @@ struct VideoPlayerView: View {
                 let keyPair = try NostrKeyPair.generate()
                 let zapSenderPubkey = keyPair.publicKeyHex
 
-                let generator = ZapRequestGenerator(nostrClient: nostrClient)
+                let generator = ZapRequestGenerator(nostrSDKClient: nostrSDKClient, authManager: authManager)
                 let uri = try await generator.generateZapRequest(
                     stream: stream,
                     amount: option.amount,
