@@ -12,7 +12,8 @@ class StreamViewModel: ObservableObject {
     @Published var allCategorizedStreams: [StreamCategory] = []  // Discover streams (filtered by admin follow list)
     @Published var isLoadingAdminFollowList: Bool = true // Track if we're loading the admin follow list
     @Published var isInitialLoad: Bool = true // Track if this is the initial load (no streams received yet)
-    private var nostrClient = NostrClient()
+    private var nostrSDKClient: NostrSDKClient
+    private var legacyNostrClient = NostrClient() // Temporary: for ZapManager until it's migrated
     private var refreshTimer: Timer?
     private var followList: Set<String> = [] // User follow list - Use Set for O(1) lookups
     private var adminFollowList: Set<String> = [] // Admin follow list for Discover tab
@@ -28,9 +29,15 @@ class StreamViewModel: ObservableObject {
         "9cb3545c36940d9a2ef86d50d5c7a8fab90310cc898c4344bcfc4c822ff47bca"  // tkay@bitcoindistrict.org (backup)
     ]
 
-    /// Expose the NostrClient for use by other components
+    /// Expose the NostrSDKClient for use by other components
+    var sdkClient: NostrSDKClient {
+        return nostrSDKClient
+    }
+
+    /// Expose the legacy NostrClient for backward compatibility (temporary)
+    /// TODO: Remove once ZapManager is migrated to NostrSDKClient
     var client: NostrClient {
-        return nostrClient
+        return legacyNostrClient
     }
 
     /// Get the featured stream (live stream with most viewers)
@@ -65,7 +72,18 @@ class StreamViewModel: ObservableObject {
     }
 
     init() {
-        nostrClient.onStreamReceived = { [weak self] stream in
+        print("🚀 StreamViewModel: Initializing...")
+        // Initialize NostrSDKClient
+        do {
+            print("🔧 StreamViewModel: Creating NostrSDKClient...")
+            self.nostrSDKClient = try NostrSDKClient()
+            print("✅ StreamViewModel: NostrSDKClient created successfully")
+        } catch {
+            print("❌ StreamViewModel: Failed to initialize NostrSDKClient: \(error)")
+            fatalError("Failed to initialize NostrSDKClient: \(error)")
+        }
+
+        nostrSDKClient.onStreamReceived = { [weak self] stream in
             DispatchQueue.main.async {
                 guard let self = self else { return }
 
@@ -127,17 +145,33 @@ class StreamViewModel: ObservableObject {
 
     deinit {
         stopAutoRefresh()
-        nostrClient.disconnect()
+        nostrSDKClient.disconnect()
+        legacyNostrClient.disconnect()
     }
 
     private func startAutoRefresh() {
-        // Initial connection
-        nostrClient.connect()
+        print("🔧 StreamViewModel: Starting auto-refresh...")
+        // Initial connection and stream request
+        print("🔧 StreamViewModel: Calling nostrSDKClient.connect()...")
+        nostrSDKClient.connect()
+
+        // Wait for relay connections to establish before subscribing
+        print("⏳ StreamViewModel: Waiting 2 seconds for relay connections...")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self = self else { return }
+            print("🔧 StreamViewModel: Calling nostrSDKClient.requestLiveStreams(limit: 50)...")
+            self.nostrSDKClient.requestLiveStreams(limit: 50)
+        }
+
+        // Also connect legacy client for ZapManager (temporary)
+        print("🔧 StreamViewModel: Connecting legacy client...")
+        legacyNostrClient.connect()
 
         // Set up timer for automatic refresh every 30 seconds
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
             self?.refreshStreams()
         }
+        print("✅ StreamViewModel: Auto-refresh started")
     }
 
     private func stopAutoRefresh() {
@@ -147,8 +181,18 @@ class StreamViewModel: ObservableObject {
 
     func refreshStreams() {
         // Don't clear existing streams immediately - let new data come in and replace
-        nostrClient.disconnect()
-        nostrClient.connect()
+        nostrSDKClient.disconnect()
+        nostrSDKClient.connect()
+
+        // Wait for relay connections to establish before subscribing
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self = self else { return }
+            self.nostrSDKClient.requestLiveStreams(limit: 50)
+        }
+
+        // Also refresh legacy client
+        legacyNostrClient.disconnect()
+        legacyNostrClient.connect()
     }
 
     /// Evict oldest ended streams when collection exceeds size limit
@@ -202,7 +246,7 @@ class StreamViewModel: ObservableObject {
     }
 
     func getProfile(for pubkey: String) -> Profile? {
-        return nostrClient.getProfile(for: pubkey)
+        return nostrSDKClient.getProfile(for: pubkey)
     }
 
     private func updateCategorizedStreams() {
@@ -398,7 +442,7 @@ class StreamViewModel: ObservableObject {
         adminFollowFetchState = (Set<String>(), 0)
 
         // Setup callback for admin follow list
-        nostrClient.onFollowListReceived = { [weak self] follows in
+        nostrSDKClient.onFollowListReceived = { [weak self] follows in
             print("🔧 Admin follow list received! Count: \(follows.count)")
             DispatchQueue.main.async {
                 guard let self = self else { return }
@@ -431,7 +475,7 @@ class StreamViewModel: ObservableObject {
         // Fetch the admin follow lists from all pubkeys
         for pubkey in adminPubkeys {
             print("🔧 Fetching from admin: \(pubkey.prefix(16))...")
-            nostrClient.connectAndFetchUserData(pubkey: pubkey)
+            nostrSDKClient.requestFollowList(for: pubkey)
         }
     }
 }

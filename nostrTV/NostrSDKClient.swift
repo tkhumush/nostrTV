@@ -81,18 +81,25 @@ class NostrSDKClient {
     /// Initialize with relay URLs
     /// - Parameter relayURLs: Array of WebSocket relay URLs (e.g., ["wss://relay.damus.io"])
     init(relayURLs: [String] = []) throws {
+        print("🔧 NostrSDKClient: Initializing with \(relayURLs.count) relay URLs")
         // Convert strings to URLs
         let urls = relayURLs.compactMap { URL(string: $0) }
+        print("🔧 NostrSDKClient: Converted to \(urls.count) URL objects")
 
         // Create relay pool
+        print("🔧 NostrSDKClient: Creating RelayPool...")
         self.relayPool = try RelayPool(relayURLs: Set(urls))
+        print("✅ NostrSDKClient: RelayPool created successfully")
 
         // Set up event stream subscription
+        print("🔧 NostrSDKClient: Setting up event stream...")
         setupEventStream()
+        print("✅ NostrSDKClient: Event stream setup complete")
     }
 
     /// Convenience initializer with default relays
     convenience init() throws {
+        print("🚀 NostrSDKClient: Using default relay configuration")
         let defaultRelays = [
             "wss://relay.snort.social",
             "wss://relay.tunestr.io",
@@ -100,6 +107,7 @@ class NostrSDKClient {
             "wss://relay.primal.net",
             "wss://purplepag.es"
         ]
+        print("🔧 NostrSDKClient: Default relays: \(defaultRelays.joined(separator: ", "))")
         try self.init(relayURLs: defaultRelays)
     }
 
@@ -107,6 +115,7 @@ class NostrSDKClient {
 
     /// Connect to all relays in the pool
     func connect() {
+        print("🔌 NostrSDKClient: Connecting to relays...")
         relayPool.connect()
     }
 
@@ -132,6 +141,9 @@ class NostrSDKClient {
     private func handleRelayEvent(_ relayEvent: RelayEvent) {
         let event = relayEvent.event
 
+        // Log all events for debugging
+        print("📨 NostrSDKClient: Received event kind \(event.kind.rawValue) from relay")
+
         // Route by event kind
         switch event.kind.rawValue {
         case 0:
@@ -147,6 +159,7 @@ class NostrSDKClient {
         case 24133:
             handleBunkerMessageEvent(event)
         case 30311:
+            print("🎥 NostrSDKClient: Processing live stream event")
             handleLiveStreamEvent(event)
         default:
             break
@@ -174,10 +187,22 @@ class NostrSDKClient {
 
     /// Request live streams (kind 30311)
     func requestLiveStreams(limit: Int = 50) {
+        print("🔧 NostrSDKClient: Requesting live streams (limit: \(limit))")
         guard let filter = Filter(kinds: [30311], limit: limit) else {
+            print("❌ NostrSDKClient: Failed to create filter for live streams")
             return
         }
-        subscribe(with: filter, purpose: "live-streams")
+        let subId = subscribe(with: filter, purpose: "live-streams")
+        print("✅ NostrSDKClient: Subscribed to live streams with ID: \(subId)")
+    }
+
+    /// Request follow list for a specific user (kind 3)
+    /// - Parameter pubkey: The user's public key
+    func requestFollowList(for pubkey: String) {
+        guard let filter = Filter(authors: [pubkey], kinds: [3], limit: 1) else {
+            return
+        }
+        subscribe(with: filter, purpose: "follow-list-\(pubkey.prefix(8))")
     }
 
     // MARK: - Profile Management
@@ -567,6 +592,7 @@ class NostrSDKClient {
 
 
         // Notify callback
+        print("📢 NostrSDKClient: Calling onStreamReceived for stream: \(stream.title)")
         DispatchQueue.main.async { [weak self] in
             self?.onStreamReceived?(stream)
         }
