@@ -20,7 +20,6 @@ struct BunkerLoginView: View {
     init(authManager: NostrAuthManager) {
         self.authManager = authManager
         _bunkerClient = StateObject(wrappedValue: NostrBunkerClient(
-            nostrClient: NostrClient(),
             keyManager: NostrKeyManager.shared
         ))
     }

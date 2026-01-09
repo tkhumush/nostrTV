@@ -20,7 +20,6 @@ class NostrAuthManager: ObservableObject {
 
     private let userDefaultsKey = "nostrUserNip05"
     private var nostrSDKClient: NostrSDKClient
-    private var legacyNostrClient = NostrClient() // Temporary: for NostrBunkerClient until it's migrated
     private let bunkerSessionManager = BunkerSessionManager()
 
     init() {
@@ -264,8 +263,8 @@ class NostrAuthManager: ObservableObject {
     @MainActor
     private func restoreBunkerSession(_ session: BunkerSession) async {
         do {
-            // Recreate bunker client (uses legacy NostrClient for now)
-            let client = NostrBunkerClient(nostrClient: legacyNostrClient, keyManager: NostrKeyManager.shared)
+            // Recreate bunker client
+            let client = NostrBunkerClient(keyManager: NostrKeyManager.shared)
 
             // Attempt to reconnect
             let uri = BunkerURIComponents(
@@ -326,9 +325,8 @@ class NostrAuthManager: ObservableObject {
         authMethod = nil
         errorMessage = nil
 
-        // Disconnect clients
+        // Disconnect client
         nostrSDKClient.disconnect()
-        legacyNostrClient.disconnect()
     }
 
     // MARK: - Event Signing

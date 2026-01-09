@@ -14,7 +14,7 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
 
     // MARK: - Properties
 
-    private let nostrClient: NostrClient
+    private var nostrSDKClient: NostrSDKClient?
     private let keyManager: NostrKeyManager
 
     var bunkerPubkey: String?
@@ -29,12 +29,8 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
 
     // MARK: - Initialization
 
-    init(nostrClient: NostrClient, keyManager: NostrKeyManager) {
-        self.nostrClient = nostrClient
+    init(keyManager: NostrKeyManager) {
         self.keyManager = keyManager
-
-        // Subscribe to bunker messages from NostrClient
-        setupMessageHandler()
     }
 
     // MARK: - Connection Management
@@ -172,22 +168,29 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
 
     /// Connect to a specific relay for bunker communication
     private func connectToRelay(_ relayURL: String) async throws {
-        // Connect to the bunker relay using NostrClient
-        let connected = nostrClient.connectToRelay(relayURL)
+        do {
+            // Create NostrSDKClient with only the bunker relay
+            nostrSDKClient = try NostrSDKClient(relayURLs: [relayURL])
 
-        guard connected else {
-            throw BunkerError.connectionFailed("Failed to connect to bunker relay: \(relayURL)")
+            // Setup message handler
+            setupMessageHandler()
+
+            // Connect to the bunker relay
+            nostrSDKClient?.connect()
+
+            // Give the connection a moment to establish
+            try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+
+            print("✅ Connected to bunker relay: \(relayURL)")
+        } catch {
+            throw BunkerError.connectionFailed("Failed to connect to bunker relay: \(relayURL) - \(error.localizedDescription)")
         }
-
-        // Give the connection a moment to establish
-        try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-
-        print("✅ Connected to bunker relay: \(relayURL)")
     }
 
     /// Subscribe to kind 24133 events addressed to our client pubkey
     private func subscribeToMessages() async throws {
         guard let clientPubkey = clientKeyPair?.publicKeyHex,
+              let nostrSDKClient = nostrSDKClient,
               let relay = bunkerRelay else {
             throw BunkerError.notConnected
         }
@@ -195,16 +198,13 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
         // Subscribe to kind 24133 events with p-tag matching our pubkey
         subscriptionId = "bunker-\(UUID().uuidString.prefix(8))"
 
-        let filter: [String: Any] = [
-            "kinds": [24133],
-            "#p": [clientPubkey],
-            "limit": 10
-        ]
+        // Create filter for kind 24133 events with p-tag
+        guard let filter = Filter(kinds: [24133], pubkeys: [clientPubkey], limit: 10) else {
+            throw BunkerError.connectionFailed("Failed to create subscription filter")
+        }
 
-        let request: [Any] = ["REQ", subscriptionId!, filter]
-
-        // Send subscription request to the bunker relay
-        try nostrClient.sendRequest(request, to: relay)
+        // Subscribe to bunker messages
+        _ = nostrSDKClient.subscribe(with: filter, purpose: "bunker-messages")
 
         print("📥 Subscribed to bunker messages on \(relay) for pubkey \(clientPubkey.prefix(8))...")
     }
@@ -333,18 +333,37 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
                     )
 
                     // Create kind 24133 event
-                    let event = try self.nostrClient.createSignedEvent(
+                    guard let nostrSDKClient = self.nostrSDKClient else {
+                        throw BunkerError.notConnected
+                    }
+
+                    // Create signed event using NostrSDKClient's helper method
+                    let legacyEvent = try nostrSDKClient.createSignedEvent(
                         kind: 24133,
                         content: encrypted,
                         tags: [["p", bunkerPubkey]],
                         using: clientKeyPair
                     )
 
-                    // Publish event only to the bunker relay
-                    guard let relay = self.bunkerRelay else {
-                        throw BunkerError.notConnected
+                    // Manually publish using the relay pool's send method
+                    // Build EVENT message: ["EVENT", <event JSON>]
+                    let eventDict: [String: Any] = [
+                        "id": legacyEvent.id ?? "",
+                        "pubkey": legacyEvent.pubkey ?? "",
+                        "created_at": legacyEvent.created_at ?? Int(Date().timeIntervalSince1970),
+                        "kind": legacyEvent.kind,
+                        "tags": legacyEvent.tags,
+                        "content": legacyEvent.content ?? "",
+                        "sig": legacyEvent.sig ?? ""
+                    ]
+
+                    guard let eventJSON = try? JSONSerialization.data(withJSONObject: eventDict),
+                          let eventJSONString = String(data: eventJSON, encoding: .utf8) else {
+                        throw BunkerError.encryptionFailed
                     }
-                    try self.nostrClient.publishEvent(event, to: relay)
+
+                    let eventMessage = "[\"EVENT\",\(eventJSONString)]"
+                    nostrSDKClient.publishRawMessage(eventMessage)
 
                 } catch {
                     Task { @MainActor in
@@ -361,7 +380,7 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
 
     /// Setup handler for incoming kind 24133 events
     private func setupMessageHandler() {
-        nostrClient.onBunkerMessageReceived = { [weak self] event in
+        nostrSDKClient?.onBunkerMessageReceived = { [weak self] event in
             Task { @MainActor in
                 await self?.handleBunkerMessage(event)
             }

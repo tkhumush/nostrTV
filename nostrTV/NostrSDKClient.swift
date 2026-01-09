@@ -676,6 +676,12 @@ class NostrSDKClient {
         relayPool.publishEvent(event)
     }
 
+    /// Publish a raw message to all relays (for bunker and other special cases)
+    /// - Parameter message: The raw Nostr protocol message (e.g., ["EVENT", {...}])
+    func publishRawMessage(_ message: String) {
+        relayPool.send(request: message)
+    }
+
     // MARK: - Event Creation and Signing
 
     /// Create and sign a Nostr event locally using a keypair
