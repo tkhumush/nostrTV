@@ -56,11 +56,11 @@ struct VideoPlayerView: View {
                     HStack(spacing: 12) {
                         // nostrTV logo
                         Text("nostrTV")
-                            .font(.system(size: 18, weight: .bold))
+                            .font(.system(size: 22, weight: .bold))
                             .foregroundColor(.white)
 
                         Text("|")
-                            .font(.system(size: 18))
+                            .font(.system(size: 22))
                             .foregroundColor(.gray)
 
                         // Stream info: profile pic + username + stream name + viewer count (clickable)
@@ -74,46 +74,46 @@ struct VideoPlayerView: View {
                                             image
                                                 .resizable()
                                                 .aspectRatio(contentMode: .fill)
-                                                .frame(width: 32, height: 32)
+                                                .frame(width: 48, height: 48)
                                                 .clipShape(Circle())
                                         case .failure(_), .empty:
                                             Circle()
                                                 .fill(Color.gray)
-                                                .frame(width: 32, height: 32)
+                                                .frame(width: 48, height: 48)
                                         @unknown default:
                                             Circle()
                                                 .fill(Color.gray)
-                                                .frame(width: 32, height: 32)
+                                                .frame(width: 48, height: 48)
                                         }
                                     }
                                 } else {
                                     Circle()
                                         .fill(Color.gray)
-                                        .frame(width: 32, height: 32)
+                                        .frame(width: 48, height: 48)
                                 }
 
                                 // Username
                                 Text(stream.profile?.displayName ?? stream.profile?.name ?? "Anonymous")
-                                    .font(.system(size: 16, weight: .semibold))
+                                    .font(.system(size: 19, weight: .semibold))
                                     .foregroundColor(.white)
 
                                 // Stream name
                                 Text(stream.title)
-                                    .font(.system(size: 16))
+                                    .font(.system(size: 19))
                                     .foregroundColor(.white.opacity(0.8))
                                     .lineLimit(1)
 
                                 // Viewer count
                                 Text("|")
-                                    .font(.system(size: 18))
+                                    .font(.system(size: 22))
                                     .foregroundColor(.gray)
 
                                 Image(systemName: "eye.fill")
-                                    .font(.system(size: 16))
+                                    .font(.system(size: 19))
                                     .foregroundColor(.white)
 
                                 Text("\(stream.viewerCount)")
-                                    .font(.system(size: 18, weight: .bold))
+                                    .font(.system(size: 22, weight: .bold))
                                     .foregroundColor(.white)
                             }
                         }
@@ -122,7 +122,7 @@ struct VideoPlayerView: View {
                         Spacer()
                     }
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 15)
                     .frame(maxWidth: .infinity)
                     .background(Color.black)
                 }
@@ -585,7 +585,7 @@ private struct TypeMessageButton: View {
                         HStack(spacing: 8) {
                             Image(systemName: "bubble.left.fill")
                                 .font(.system(size: 18))
-                            Text("Type a message")
+                            Text("Comment")
                                 .font(.system(size: 18, weight: .bold))
                         }
                         .foregroundColor(.white)
