@@ -9,151 +9,37 @@ import SwiftUI
 import CoreImage
 import CoreImage.CIFilterBuiltins
 
-/// Full-screen popup overlay displaying streamer profile and zap interface
+/// Side menu displaying streamer profile and zap interface
 struct StreamerProfilePopupView: View {
     let stream: Stream
     let authManager: NostrAuthManager
     let onDismiss: () -> Void
 
     var body: some View {
-        ZStack {
-            // Semi-transparent background - make it focusable to intercept Menu button
-            Color.black.opacity(0.85)
-                .ignoresSafeArea()
-                .focusable()
-                .onTapGesture { onDismiss() }
-
-            HStack(spacing: 40) {
-                // Left panel: Streamer info
-                StreamerInfoPanel(stream: stream, onClose: onDismiss)
-                    .frame(width: 500)
-
-                // Right panel: Zap interface
-                ZapStreamerPanel(
-                    stream: stream,
-                    authManager: authManager,
-                    onClose: onDismiss
-                )
-                .frame(width: 600)
-            }
-            .padding(60)
+        HStack(spacing: 0) {
+            // Side menu panel
+            StreamerSideMenu(
+                stream: stream,
+                authManager: authManager,
+                onClose: onDismiss
+            )
+            .frame(width: 600)
             .background(Color.black)
-            .cornerRadius(20)
-        }
-    }
-}
-
-// MARK: - Streamer Info Panel
-
-struct StreamerInfoPanel: View {
-    let stream: Stream
-    let onClose: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // Close button (top-right of panel)
-            HStack {
-                Spacer()
-                Button(action: onClose) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 40))
-                        .foregroundColor(.gray)
-                }
-                .buttonStyle(.card)
-            }
-
-            if let profile = stream.profile {
-                // Profile picture (large)
-                AsyncImage(url: URL(string: profile.picture ?? "")) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 250, height: 250)
-                            .clipShape(Circle())
-                    case .failure(_):
-                        Circle()
-                            .fill(Color.gray.opacity(0.3))
-                            .frame(width: 250, height: 250)
-                            .overlay(
-                                Image(systemName: "person.fill")
-                                    .font(.system(size: 100))
-                                    .foregroundColor(.gray)
-                            )
-                    case .empty:
-                        ProgressView()
-                            .frame(width: 250, height: 250)
-                    @unknown default:
-                        Circle()
-                            .fill(Color.gray.opacity(0.3))
-                            .frame(width: 250, height: 250)
-                    }
-                }
-
-                // Display name
-                Text(profile.displayNameOrName)
-                    .font(.system(size: 48, weight: .bold))
-                    .foregroundColor(.white)
-
-                // Username (@handle)
-                if let name = profile.name {
-                    Text("@\(name)")
-                        .font(.system(size: 24))
-                        .foregroundColor(.gray)
-                }
-
-                // NIP-05 verification
-                if let nip05 = profile.nip05, !nip05.isEmpty {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.seal.fill")
-                            .foregroundColor(.blue)
-                            .font(.system(size: 20))
-                        Text(nip05)
-                            .font(.system(size: 20))
-                            .foregroundColor(.blue)
-                    }
-                }
-
-                // Bio/About
-                if let about = profile.about, !about.isEmpty {
-                    Text(about)
-                        .font(.system(size: 20))
-                        .foregroundColor(.white.opacity(0.8))
-                        .lineLimit(10)
-                        .padding(.top, 10)
-                }
-            } else {
-                // No profile available
-                VStack(spacing: 20) {
-                    Circle()
-                        .fill(Color.gray.opacity(0.3))
-                        .frame(width: 250, height: 250)
-                        .overlay(
-                            Image(systemName: "person.fill")
-                                .font(.system(size: 100))
-                                .foregroundColor(.gray)
-                        )
-
-                    Text("Anonymous Streamer")
-                        .font(.system(size: 48, weight: .bold))
-                        .foregroundColor(.white)
-
-                    Text("No profile information available")
-                        .font(.system(size: 20))
-                        .foregroundColor(.gray)
-                }
-            }
 
             Spacer()
         }
-        .padding(30)
+        .transition(.move(edge: .leading))
+        .background(
+            Color.black.opacity(0.7)
+                .ignoresSafeArea()
+                .onTapGesture { onDismiss() }
+        )
     }
 }
 
-// MARK: - Zap Streamer Panel
+// MARK: - Streamer Side Menu
 
-struct ZapStreamerPanel: View {
+struct StreamerSideMenu: View {
     let stream: Stream
     let authManager: NostrAuthManager
     let onClose: () -> Void
@@ -165,8 +51,6 @@ struct ZapStreamerPanel: View {
     @State private var qrCodeImage: UIImage?
     @State private var errorMessage: String?
 
-    @Namespace private var zapNamespace
-
     // Zap amount options
     private let zapAmounts = [
         (amount: 21, emoji: "☕️", label: "Espresso"),
@@ -177,135 +61,241 @@ struct ZapStreamerPanel: View {
     ]
 
     var body: some View {
-        VStack(spacing: 30) {
-            // Title
-            Text("Buy \(stream.profile?.displayNameOrName ?? "Streamer") Coffee")
-                .font(.system(size: 36, weight: .bold))
-                .foregroundColor(.white)
-                .multilineTextAlignment(.center)
-
-            // Check for Lightning address
-            if stream.profile?.lud16 == nil || stream.profile?.lud16?.isEmpty == true {
-                VStack(spacing: 20) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 48))
-                        .foregroundColor(.orange)
-
-                    Text("⚠️ This streamer hasn't set up Lightning zaps")
-                        .font(.system(size: 24))
-                        .foregroundColor(.orange)
-                        .multilineTextAlignment(.center)
-                }
-            } else if !authManager.isAuthenticated {
-                VStack(spacing: 20) {
-                    Image(systemName: "person.crop.circle.badge.exclamationmark")
-                        .font(.system(size: 48))
-                        .foregroundColor(.gray)
-
-                    Text("Please sign in to send authenticated zaps")
-                        .font(.system(size: 24))
-                        .foregroundColor(.gray)
-                        .multilineTextAlignment(.center)
-                }
-            } else if !showQRCode {
-                // Amount selection grid
-                VStack(spacing: 20) {
-                    ForEach(Array(zapAmounts.enumerated()), id: \.element.amount) { index, option in
-                        ZapAmountButton(
-                            emoji: option.emoji,
-                            amount: option.amount,
-                            label: option.label,
-                            isSelected: selectedAmount == option.amount,
-                            action: { handleAmountSelection(option.amount) }
-                        )
-                        .prefersDefaultFocus(index == 2, in: zapNamespace)
-                    }
-                }
-                .focusScope(zapNamespace)
-            } else {
-                // QR Code display
-                VStack(spacing: 20) {
-                    // Amount display
-                    HStack(spacing: 8) {
-                        Text("⚡️")
-                            .font(.system(size: 48))
-                        Text("\(selectedAmount ?? 0) sats")
-                            .font(.system(size: 36, weight: .bold))
-                            .foregroundColor(.yellow)
-                    }
-
-                    if isGenerating {
-                        ProgressView()
-                            .scaleEffect(2.0)
-                        Text("Generating QR code...")
-                            .font(.system(size: 24))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 30) {
+                // Close button
+                HStack {
+                    Spacer()
+                    Button(action: onClose) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 40))
                             .foregroundColor(.gray)
-                    } else if let error = errorMessage {
-                        // Error state
-                        VStack(spacing: 20) {
-                            Image(systemName: "exclamationmark.triangle")
-                                .font(.system(size: 48))
-                                .foregroundColor(.red)
-
-                            Text(error)
-                                .font(.system(size: 24))
-                                .foregroundColor(.white)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 40)
-
-                            Button("Try Again") {
-                                errorMessage = nil
-                                if let amount = selectedAmount {
-                                    handleAmountSelection(amount)
-                                }
-                            }
-                            .font(.system(size: 24))
-                            .foregroundColor(.white)
-                            .frame(width: 200, height: 60)
-                            .background(Color.blue)
-                            .cornerRadius(10)
-                            .buttonStyle(.card)
-                        }
-                    } else if let qrImage = qrCodeImage {
-                        Image(uiImage: qrImage)
-                            .interpolation(.none)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 500, height: 500)
-                            .background(Color.white)
-                            .cornerRadius(20)
-                            .shadow(color: .yellow.opacity(0.3), radius: 20)
                     }
+                    .buttonStyle(.card)
+                }
+                .padding(.horizontal, 30)
+                .padding(.top, 30)
 
-                    // Instructions
-                    Text("Scan to send zap")
-                        .font(.system(size: 24))
-                        .foregroundColor(.gray)
-
-                    // Back button (only show if no error)
-                    if errorMessage == nil {
-                        Button(action: {
-                            showQRCode = false
-                            selectedAmount = nil
-                            qrCodeImage = nil
-                            invoiceURI = nil
-                            errorMessage = nil
-                        }) {
-                            Text("Back")
-                                .font(.system(size: 24))
-                                .foregroundColor(.white)
-                                .frame(width: 200, height: 60)
-                                .background(Color.gray)
-                                .cornerRadius(10)
+                // Profile Section
+                VStack(alignment: .center, spacing: 20) {
+                    if let profile = stream.profile {
+                        // Profile picture
+                        AsyncImage(url: URL(string: profile.picture ?? "")) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(width: 200, height: 200)
+                                    .clipShape(Circle())
+                            case .failure(_):
+                                Circle()
+                                    .fill(Color.gray.opacity(0.3))
+                                    .frame(width: 200, height: 200)
+                                    .overlay(
+                                        Image(systemName: "person.fill")
+                                            .font(.system(size: 80))
+                                            .foregroundColor(.gray)
+                                    )
+                            case .empty:
+                                ProgressView()
+                                    .frame(width: 200, height: 200)
+                            @unknown default:
+                                Circle()
+                                    .fill(Color.gray.opacity(0.3))
+                                    .frame(width: 200, height: 200)
+                            }
                         }
-                        .buttonStyle(.card)
+
+                        // Display name
+                        Text(profile.displayNameOrName)
+                            .font(.system(size: 36, weight: .bold))
+                            .foregroundColor(.white)
+
+                        // Username (@handle)
+                        if let name = profile.name {
+                            Text("@\(name)")
+                                .font(.system(size: 20))
+                                .foregroundColor(.gray)
+                        }
+
+                        // NIP-05 verification
+                        if let nip05 = profile.nip05, !nip05.isEmpty {
+                            HStack(spacing: 8) {
+                                Image(systemName: "checkmark.seal.fill")
+                                    .foregroundColor(.blue)
+                                    .font(.system(size: 18))
+                                Text(nip05)
+                                    .font(.system(size: 18))
+                                    .foregroundColor(.blue)
+                            }
+                        }
+
+                        // Bio/About
+                        if let about = profile.about, !about.isEmpty {
+                            Text(about)
+                                .font(.system(size: 18))
+                                .foregroundColor(.white.opacity(0.8))
+                                .multilineTextAlignment(.center)
+                                .lineLimit(6)
+                                .padding(.horizontal, 20)
+                        }
+                    } else {
+                        // No profile available
+                        Circle()
+                            .fill(Color.gray.opacity(0.3))
+                            .frame(width: 200, height: 200)
+                            .overlay(
+                                Image(systemName: "person.fill")
+                                    .font(.system(size: 80))
+                                    .foregroundColor(.gray)
+                            )
+
+                        Text("Anonymous Streamer")
+                            .font(.system(size: 36, weight: .bold))
+                            .foregroundColor(.white)
                     }
                 }
-            }
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 30)
 
-            Spacer()
+                Divider()
+                    .background(Color.gray.opacity(0.3))
+                    .padding(.horizontal, 30)
+
+                // Zap Section
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Buy \(stream.profile?.displayNameOrName ?? "Streamer") Coffee")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 30)
+
+                    if stream.profile?.lud16 == nil || stream.profile?.lud16?.isEmpty == true {
+                        VStack(spacing: 15) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.system(size: 40))
+                                .foregroundColor(.orange)
+
+                            Text("⚠️ This streamer hasn't set up Lightning zaps")
+                                .font(.system(size: 20))
+                                .foregroundColor(.orange)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 30)
+                    } else if !authManager.isAuthenticated {
+                        VStack(spacing: 15) {
+                            Image(systemName: "person.crop.circle.badge.exclamationmark")
+                                .font(.system(size: 40))
+                                .foregroundColor(.gray)
+
+                            Text("Please sign in to send authenticated zaps")
+                                .font(.system(size: 20))
+                                .foregroundColor(.gray)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 30)
+                    } else if !showQRCode {
+                        // Zap amount buttons
+                        VStack(spacing: 15) {
+                            ForEach(zapAmounts, id: \.amount) { option in
+                                ZapAmountButton(
+                                    emoji: option.emoji,
+                                    amount: option.amount,
+                                    label: option.label,
+                                    isSelected: selectedAmount == option.amount,
+                                    action: { handleAmountSelection(option.amount) }
+                                )
+                            }
+                        }
+                        .padding(.horizontal, 30)
+                    } else {
+                        // QR Code display
+                        VStack(spacing: 20) {
+                            // Amount display
+                            HStack(spacing: 8) {
+                                Text("⚡️")
+                                    .font(.system(size: 36))
+                                Text("\(selectedAmount ?? 0) sats")
+                                    .font(.system(size: 28, weight: .bold))
+                                    .foregroundColor(.yellow)
+                            }
+
+                            if isGenerating {
+                                ProgressView()
+                                    .scaleEffect(1.5)
+                                Text("Generating QR code...")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.gray)
+                            } else if let error = errorMessage {
+                                // Error state
+                                VStack(spacing: 15) {
+                                    Image(systemName: "exclamationmark.triangle")
+                                        .font(.system(size: 40))
+                                        .foregroundColor(.red)
+
+                                    Text(error)
+                                        .font(.system(size: 20))
+                                        .foregroundColor(.white)
+                                        .multilineTextAlignment(.center)
+
+                                    Button("Try Again") {
+                                        errorMessage = nil
+                                        if let amount = selectedAmount {
+                                            handleAmountSelection(amount)
+                                        }
+                                    }
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.white)
+                                    .frame(width: 180, height: 50)
+                                    .background(Color.blue)
+                                    .cornerRadius(10)
+                                    .buttonStyle(.card)
+                                }
+                            } else if let qrImage = qrCodeImage {
+                                Image(uiImage: qrImage)
+                                    .interpolation(.none)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 400, height: 400)
+                                    .background(Color.white)
+                                    .cornerRadius(20)
+                                    .shadow(color: .yellow.opacity(0.3), radius: 15)
+                            }
+
+                            // Instructions
+                            Text("Scan to send zap")
+                                .font(.system(size: 20))
+                                .foregroundColor(.gray)
+
+                            // Back button
+                            if errorMessage == nil {
+                                Button(action: {
+                                    showQRCode = false
+                                    selectedAmount = nil
+                                    qrCodeImage = nil
+                                    invoiceURI = nil
+                                    errorMessage = nil
+                                }) {
+                                    Text("Back")
+                                        .font(.system(size: 20))
+                                        .foregroundColor(.white)
+                                        .frame(width: 180, height: 50)
+                                        .background(Color.gray)
+                                        .cornerRadius(10)
+                                }
+                                .buttonStyle(.card)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 30)
+                    }
+                }
+
+                Spacer(minLength: 50)
+            }
         }
-        .padding(30)
     }
 
     private func handleAmountSelection(_ amount: Int) {
@@ -314,7 +304,6 @@ struct ZapStreamerPanel: View {
         isGenerating = true
 
         guard let lud16 = stream.profile?.lud16, !lud16.isEmpty else {
-            // Show error: No Lightning address
             Task { @MainActor in
                 errorMessage = "This streamer hasn't set up Lightning zaps"
                 isGenerating = false
@@ -325,25 +314,20 @@ struct ZapStreamerPanel: View {
 
         Task {
             do {
-                // Get NostrSDKClient instance
                 let nostrSDKClient = try NostrSDKClient()
-
-                // Create zap request generator with authManager
                 let generator = ZapRequestGenerator(
                     nostrSDKClient: nostrSDKClient,
                     authManager: authManager
                 )
 
-                // Generate zap request (will use authManager for signing if authenticated)
                 let uri = try await generator.generateZapRequest(
                     stream: stream,
                     amount: amount,
                     comment: "Sent from nostrTV",
                     lud16: lud16,
-                    keyPair: nil  // Will use authManager for signing
+                    keyPair: nil
                 )
 
-                // Generate QR code
                 let qrImage = await generateQRCode(from: uri)
 
                 await MainActor.run {
@@ -392,7 +376,7 @@ struct ZapStreamerPanel: View {
             filter.setValue("Q", forKey: "inputCorrectionLevel")
 
             if let outputImage = filter.outputImage {
-                let targetDimension: CGFloat = 500
+                let targetDimension: CGFloat = 400
                 let scaleX = targetDimension / outputImage.extent.size.width
                 let scaleY = targetDimension / outputImage.extent.size.height
                 let transformedImage = outputImage.transformed(
@@ -411,6 +395,7 @@ struct ZapStreamerPanel: View {
         }.value
     }
 }
+
 
 // MARK: - Zap Amount Button
 

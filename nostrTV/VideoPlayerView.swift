@@ -202,14 +202,14 @@ struct VideoPlayerView: View {
                 )
             }
 
-            // Streamer profile popup overlay
+            // Streamer profile side menu
             if showStreamerProfile, let stream = stream {
                 StreamerProfilePopupView(
                     stream: stream,
                     authManager: authManager,
                     onDismiss: { showStreamerProfile = false }
                 )
-                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.3), value: showStreamerProfile)
                 .zIndex(999)
             }
         }
