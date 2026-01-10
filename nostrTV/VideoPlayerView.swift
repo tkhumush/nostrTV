@@ -25,7 +25,6 @@ struct VideoPlayerView: View {
     @State private var invoiceURI: String?
     @State private var zapRefreshTimer: Timer?
     @State private var presenceTimer: Timer?
-    @State private var lastZapRequestPubkey: String?
     @State private var liveActivityManager: LiveActivityManager?
     @State private var showStreamerProfile = false
     @StateObject private var chatManager: ChatManager
@@ -288,22 +287,17 @@ struct VideoPlayerView: View {
         // Generate zap request and show QR code
         Task {
             do {
-                let keyPair = try NostrKeyPair.generate()
-                let zapSenderPubkey = keyPair.publicKeyHex
-
                 let generator = ZapRequestGenerator(nostrSDKClient: nostrSDKClient, authManager: authManager)
                 let uri = try await generator.generateZapRequest(
                     stream: stream,
                     amount: option.amount,
                     comment: option.message,
-                    lud16: lightningAddress,
-                    keyPair: keyPair
+                    lud16: lightningAddress
                 )
 
                 await MainActor.run {
                     invoiceURI = uri
                     showZapQR = true
-                    lastZapRequestPubkey = zapSenderPubkey
                 }
 
                 // Wait 30 seconds and query for our zap receipt
@@ -311,7 +305,7 @@ struct VideoPlayerView: View {
                 try await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds
 
                 await MainActor.run {
-                    queryForOurZapReceipt(zapSenderPubkey: zapSenderPubkey)
+                    queryForOurZapReceipt()
                 }
             } catch {
                 print("❌ Failed to generate zap request: \(error)")
@@ -319,7 +313,7 @@ struct VideoPlayerView: View {
         }
     }
 
-    private func queryForOurZapReceipt(zapSenderPubkey: String) {
+    private func queryForOurZapReceipt() {
         guard let stream = stream, let zapManager = zapManager else { return }
 
         // Refresh the zap request for this stream

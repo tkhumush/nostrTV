@@ -259,9 +259,9 @@ struct BunkerLoginView: View {
 
     /// Generate nostrconnect:// URI for QR code (reverse flow)
     private func generateBunkerURI() async throws -> String {
-        // Ensure key manager has a keypair
+        // Ensure key manager has a keypair for bunker handshake
         if !NostrKeyManager.shared.hasKeyPair {
-            try NostrKeyManager.shared.generateAndSaveKeyPair(persist: false)
+            try NostrKeyManager.shared.generateEphemeralKeyPair()
         }
 
         guard let clientPubkey = NostrKeyManager.shared.publicKeyHex else {

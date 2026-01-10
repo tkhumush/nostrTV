@@ -2,13 +2,12 @@ import Foundation
 import Combine
 
 /// Manages live activity tracking for streams using NIP-53
-/// Publishes events when users join or leave streams
+/// Publishes events when users join or leave streams (bunker-authenticated users only)
 @MainActor
 class LiveActivityManager: ObservableObject {
     static let shared = LiveActivityManager()
 
     private let nostrSDKClient: NostrSDKClient
-    private let keyManager: NostrKeyManager
     private var authManager: NostrAuthManager?
 
     @Published private(set) var currentStream: Stream?
@@ -20,14 +19,12 @@ class LiveActivityManager: ObservableObject {
         } else {
             self.nostrSDKClient = try! NostrSDKClient()
         }
-        self.keyManager = NostrKeyManager.shared
         self.authManager = nil
     }
 
     /// Initialize with custom NostrSDKClient (for dependency injection)
-    init(nostrSDKClient: NostrSDKClient, keyManager: NostrKeyManager = NostrKeyManager.shared, authManager: NostrAuthManager? = nil) {
+    init(nostrSDKClient: NostrSDKClient, authManager: NostrAuthManager? = nil) {
         self.nostrSDKClient = nostrSDKClient
-        self.keyManager = keyManager
         self.authManager = authManager
     }
 
@@ -40,13 +37,10 @@ class LiveActivityManager: ObservableObject {
     // MARK: - Join Stream
 
     /// Announce joining a stream (NIP-53 kind 10312 - Presence)
+    /// Only for bunker-authenticated users
     /// - Parameters:
     ///   - stream: The stream being joined
     func joinStream(_ stream: Stream) async throws {
-        guard let keyPair = keyManager.currentKeyPair else {
-            throw LiveActivityError.noKeyPairAvailable
-        }
-
         guard let streamPubkey = stream.pubkey else {
             throw LiveActivityError.missingStreamPubkey
         }
@@ -56,7 +50,6 @@ class LiveActivityManager: ObservableObject {
         self.isWatchingStream = true
 
         // Only publish presence for bunker-authenticated users
-        // Ephemeral/anonymous users don't announce presence to avoid spam filtering
         guard let authManager = authManager,
               case .bunker = authManager.authMethod else {
             print("⏭️ Skipping presence announcement - user not authenticated with bunker")
@@ -71,28 +64,30 @@ class LiveActivityManager: ObservableObject {
         let aTag = "30311:\(streamPubkey):\(streamDTag)"
 
         // Prepare tags for kind 10312 (Presence Event)
-        // Kind 10312 is a replaceable event that signals presence in a room
         let tags: [[String]] = [
             ["a", aTag]  // Reference to the stream/room
         ]
 
-        // Content should be empty for presence events
-        let content = ""
-
-        // Create and sign the event
-        let event = try nostrSDKClient.createSignedEvent(
+        // Create unsigned event
+        let unsignedEvent = NostrEvent(
             kind: 10312,
-            content: content,
             tags: tags,
-            using: keyPair
+            id: nil,
+            pubkey: nil,
+            created_at: Int(Date().timeIntervalSince1970),
+            content: "",
+            sig: nil
         )
 
+        // Sign with bunker
+        let signedEvent = try await authManager.signEvent(unsignedEvent)
+
         // Publish to relays
-        try nostrSDKClient.publishLegacyEvent(event)
+        try nostrSDKClient.publishLegacyEvent(signedEvent)
 
         // Also send a chat message announcing we're watching
         do {
-            try await sendJoinChatMessage(stream: stream, aTag: aTag, keyPair: keyPair)
+            try await sendJoinChatMessage(stream: stream, aTag: aTag)
         } catch {
             print("⚠️ Failed to send join chat message: \(error.localizedDescription)")
         }
@@ -101,13 +96,10 @@ class LiveActivityManager: ObservableObject {
     // MARK: - Leave Stream
 
     /// Announce leaving a stream (NIP-53 kind 10312 - Clear Presence)
+    /// Only for bunker-authenticated users
     /// - Parameters:
     ///   - stream: The stream being left
     func leaveStream(_ stream: Stream) async throws {
-        guard let keyPair = keyManager.currentKeyPair else {
-            throw LiveActivityError.noKeyPairAvailable
-        }
-
         // Update state
         self.currentStream = nil
         self.isWatchingStream = false
@@ -124,22 +116,22 @@ class LiveActivityManager: ObservableObject {
         // For kind 10312 (replaceable event), leaving means publishing an empty presence
         // event with no 'a' tag, which clears the user's presence from any room
 
-        // Prepare empty tags - no room reference means not present anywhere
-        let tags: [[String]] = []
-
-        // Content should be empty
-        let content = ""
-
-        // Create and sign the event
-        let event = try nostrSDKClient.createSignedEvent(
+        // Create unsigned event with empty tags
+        let unsignedEvent = NostrEvent(
             kind: 10312,
-            content: content,
-            tags: tags,
-            using: keyPair
+            tags: [],
+            id: nil,
+            pubkey: nil,
+            created_at: Int(Date().timeIntervalSince1970),
+            content: "",
+            sig: nil
         )
 
+        // Sign with bunker
+        let signedEvent = try await authManager.signEvent(unsignedEvent)
+
         // Publish to relays
-        try nostrSDKClient.publishLegacyEvent(event)
+        try nostrSDKClient.publishLegacyEvent(signedEvent)
     }
 
     // MARK: - Chat Messages
@@ -148,26 +140,32 @@ class LiveActivityManager: ObservableObject {
     /// - Parameters:
     ///   - stream: The stream being joined
     ///   - aTag: The "a" tag referencing the stream
-    ///   - keyPair: Key pair to sign with
-    private func sendJoinChatMessage(stream: Stream, aTag: String, keyPair: NostrKeyPair) async throws {
+    private func sendJoinChatMessage(stream: Stream, aTag: String) async throws {
+        guard let authManager = authManager else {
+            return
+        }
+
         // Prepare tags for kind 1311 (Live Chat Message)
-        // Match the exact NIP-53 structure with only the "a" tag
         let tags: [[String]] = [
             ["a", aTag, "", "root"]  // Reference to the stream with "root" marker
         ]
 
-        let content = "watching from nostrTV"
-
-        // Create and sign the event
-        let event = try nostrSDKClient.createSignedEvent(
+        // Create unsigned event
+        let unsignedEvent = NostrEvent(
             kind: 1311,
-            content: content,
             tags: tags,
-            using: keyPair
+            id: nil,
+            pubkey: nil,
+            created_at: Int(Date().timeIntervalSince1970),
+            content: "watching from nostrTV",
+            sig: nil
         )
 
+        // Sign with bunker
+        let signedEvent = try await authManager.signEvent(unsignedEvent)
+
         // Publish to relays
-        try nostrSDKClient.publishLegacyEvent(event)
+        try nostrSDKClient.publishLegacyEvent(signedEvent)
     }
 
     // MARK: - Convenience Methods
@@ -192,6 +190,7 @@ class LiveActivityManager: ObservableObject {
 
     /// Update presence periodically to show continued viewing
     /// Should be called every 60 seconds while watching
+    /// Only for bunker-authenticated users
     func updatePresence() async throws {
         guard let stream = currentStream else {
             return
@@ -199,10 +198,6 @@ class LiveActivityManager: ObservableObject {
 
         guard isWatchingStream else {
             return
-        }
-
-        guard let keyPair = keyManager.currentKeyPair else {
-            throw LiveActivityError.noKeyPairAvailable
         }
 
         guard let streamPubkey = stream.pubkey else {
@@ -224,16 +219,22 @@ class LiveActivityManager: ObservableObject {
             ["a", aTag]  // Reference to the stream/room
         ]
 
-        // Create and sign the event
-        let event = try nostrSDKClient.createSignedEvent(
+        // Create unsigned event
+        let unsignedEvent = NostrEvent(
             kind: 10312,
-            content: "",
             tags: tags,
-            using: keyPair
+            id: nil,
+            pubkey: nil,
+            created_at: Int(Date().timeIntervalSince1970),
+            content: "",
+            sig: nil
         )
 
+        // Sign with bunker
+        let signedEvent = try await authManager.signEvent(unsignedEvent)
+
         // Publish to relays
-        try nostrSDKClient.publishLegacyEvent(event)
+        try nostrSDKClient.publishLegacyEvent(signedEvent)
     }
 
     /// Send a chat message to the current stream
@@ -272,22 +273,12 @@ class LiveActivityManager: ObservableObject {
             sig: nil
         )
 
-        // Sign using authManager (supports both bunker and local signing)
-        let signedEvent: NostrEvent
-        if let authManager = authManager {
-            signedEvent = try await authManager.signEvent(unsignedEvent)
-        } else {
-            // Fallback to local keyPair signing if no authManager
-            guard let keyPair = keyManager.currentKeyPair else {
-                throw LiveActivityError.noKeyPairAvailable
-            }
-            signedEvent = try nostrSDKClient.createSignedEvent(
-                kind: 1311,
-                content: message,
-                tags: tags,
-                using: keyPair
-            )
+        // Sign using authManager (bunker only)
+        guard let authManager = authManager else {
+            throw LiveActivityError.noAuthManager
         }
+
+        let signedEvent = try await authManager.signEvent(unsignedEvent)
 
         // Publish to relays
         try nostrSDKClient.publishLegacyEvent(signedEvent)
@@ -297,7 +288,7 @@ class LiveActivityManager: ObservableObject {
 // MARK: - Errors
 
 enum LiveActivityError: Error, LocalizedError {
-    case noKeyPairAvailable
+    case noAuthManager
     case noActiveStream
     case missingStreamPubkey
     case eventCreationFailed
@@ -305,8 +296,8 @@ enum LiveActivityError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .noKeyPairAvailable:
-            return "No key pair available. Please generate or import keys first."
+        case .noAuthManager:
+            return "No authentication manager available. Please sign in with bunker."
         case .noActiveStream:
             return "No active stream to interact with."
         case .missingStreamPubkey:

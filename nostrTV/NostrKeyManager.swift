@@ -1,144 +1,33 @@
 import Foundation
 import Combine
 
-/// Manages Nostr key pairs for the application
-/// Handles ephemeral key generation and storage
+/// Manages ephemeral Nostr key pairs for bunker client communication only
+/// No persistence - keys are generated on-demand for bunker handshake
 class NostrKeyManager: ObservableObject {
     static let shared = NostrKeyManager()
 
     @Published private(set) var currentKeyPair: NostrKeyPair?
     @Published private(set) var isKeyGenerated: Bool = false
-    @Published private(set) var hasPublishedProfile: Bool = false
 
-    private let userDefaults = UserDefaults.standard
-    private let privateKeyKey = "nostr_ephemeral_private_key"
-    private let profilePublishedKey = "nostr_ephemeral_profile_published"
-
-    private init() {
-        loadStoredKey()
-        hasPublishedProfile = userDefaults.bool(forKey: profilePublishedKey)
-    }
+    private init() {}
 
     // MARK: - Key Generation
 
-    /// Generate a new ephemeral key pair
-    /// This will replace any existing key pair
+    /// Generate a new ephemeral key pair for bunker client communication
+    /// This is only used for the nostrconnect:// URI in bunker handshake
     func generateEphemeralKeyPair() throws {
         let keyPair = try NostrKeyPair.generate()
         self.currentKeyPair = keyPair
         self.isKeyGenerated = true
     }
 
-    /// Generate and save key pair to UserDefaults
-    /// - Parameter persist: If true, saves the key to UserDefaults
-    func generateAndSaveKeyPair(persist: Bool = true) throws {
-        try generateEphemeralKeyPair()
-
-        if persist, let keyPair = currentKeyPair {
-            saveKeyPair(keyPair)
-        }
-    }
-
-    // MARK: - Key Storage
-
-    /// Save key pair to UserDefaults
-    private func saveKeyPair(_ keyPair: NostrKeyPair) {
-        userDefaults.set(keyPair.privateKeyHex, forKey: privateKeyKey)
-    }
-
-    /// Load stored key pair from UserDefaults
-    private func loadStoredKey() {
-        guard let privateKeyHex = userDefaults.string(forKey: privateKeyKey) else {
-            do {
-                try generateAndSaveKeyPair(persist: true)
-            } catch {
-                // Failed to generate ephemeral key pair
-            }
-            return
-        }
-
-        do {
-            let keyPair = try NostrKeyPair(privateKeyHex: privateKeyHex)
-            self.currentKeyPair = keyPair
-            self.isKeyGenerated = true
-        } catch {
-            clearStoredKey()
-            // Try to generate a new one
-            do {
-                try generateAndSaveKeyPair(persist: true)
-            } catch {
-                // Failed to generate new key pair
-            }
-        }
-    }
-
-    /// Clear stored key pair
-    func clearStoredKey() {
-        userDefaults.removeObject(forKey: privateKeyKey)
+    /// Clear current key pair
+    func clearKeyPair() {
         self.currentKeyPair = nil
         self.isKeyGenerated = false
     }
 
-    // MARK: - Import Keys
-
-    /// Import key pair from nsec (bech32 private key)
-    func importKeyPair(nsec: String, persist: Bool = true) throws {
-        let keyPair = try NostrKeyPair(nsec: nsec)
-        self.currentKeyPair = keyPair
-        self.isKeyGenerated = true
-
-        if persist {
-            saveKeyPair(keyPair)
-        }
-    }
-
-    /// Import key pair from hex private key
-    func importKeyPair(privateKeyHex: String, persist: Bool = true) throws {
-        let keyPair = try NostrKeyPair(privateKeyHex: privateKeyHex)
-        self.currentKeyPair = keyPair
-        self.isKeyGenerated = true
-
-        if persist {
-            saveKeyPair(keyPair)
-        }
-    }
-
-    // MARK: - Signing
-
-    /// Sign a Nostr event with the current key pair
-    /// - Parameter eventData: The event data to sign (should be serialized JSON)
-    /// - Returns: Hex-encoded signature
-    func signEvent(_ eventData: Data) throws -> String {
-        guard let keyPair = currentKeyPair else {
-            throw NostrKeyError.invalidPrivateKey
-        }
-
-        // Hash the event data with SHA256
-        let messageHash = eventData.sha256()
-
-        // Sign with Schnorr
-        let signature = try keyPair.sign(messageHash: messageHash)
-
-        return signature.hexString
-    }
-
-    /// Sign a Nostr event JSON string
-    /// - Parameter eventJSON: JSON string representing the event to sign
-    /// - Returns: Hex-encoded signature
-    func signEvent(eventJSON: String) throws -> String {
-        guard let eventData = eventJSON.data(using: .utf8) else {
-            throw NostrKeyError.invalidMessageHash
-        }
-
-        return try signEvent(eventData)
-    }
-
     // MARK: - Key Info
-
-    /// Get current public key in npub format
-    var npub: String? {
-        return currentKeyPair?.npub
-    }
 
     /// Get current public key in hex format
     var publicKeyHex: String? {
@@ -148,84 +37,6 @@ class NostrKeyManager: ObservableObject {
     /// Check if a key pair is available
     var hasKeyPair: Bool {
         return currentKeyPair != nil
-    }
-
-    // MARK: - Profile Publishing
-
-    /// Publish a profile metadata event (kind 0) for this ephemeral key
-    /// - Parameter nostrClient: The NostrClient to use for publishing
-    func publishEphemeralProfile(using nostrClient: NostrClient) throws {
-        guard let keyPair = currentKeyPair else {
-            throw NostrKeyError.invalidPrivateKey
-        }
-
-        // Generate a random 4-letter suffix for the username
-        let letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        let randomSuffix = String((0..<4).map { _ in letters.randomElement()! })
-        let username = "nostrTVviewer\(randomSuffix)"
-
-        // Create profile metadata JSON
-        let profileMetadata: [String: Any] = [
-            "name": username,
-            "display_name": username,
-            "about": "nostrTV viewer",
-            "picture": "https://api.dicebear.com/7.x/bottts/svg?seed=\(keyPair.publicKeyHex)"
-        ]
-
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: profileMetadata),
-              let jsonString = String(data: jsonData, encoding: .utf8) else {
-            throw NostrKeyError.signingFailed
-        }
-
-        // Create and sign the profile event (kind 0)
-        let profileEvent = try nostrClient.createSignedEvent(
-            kind: 0,
-            content: jsonString,
-            tags: [],
-            using: keyPair
-        )
-
-        // Publish to relays
-        try nostrClient.publishEvent(profileEvent)
-
-        // Mark as published
-        userDefaults.set(true, forKey: profilePublishedKey)
-        hasPublishedProfile = true
-
-        // Immediately cache our own profile locally so it shows in chat
-        // This ensures our username appears instead of "Anonymous"
-        let ownProfile = Profile(
-            pubkey: keyPair.publicKeyHex,
-            name: username,
-            displayName: username,
-            about: "nostrTV viewer",
-            picture: "https://api.dicebear.com/7.x/bottts/svg?seed=\(keyPair.publicKeyHex)",
-            nip05: nil,
-            lud16: nil
-        )
-        nostrClient.cacheProfile(ownProfile, for: keyPair.publicKeyHex)
-
-        // Also request our profile back from relays as backup
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            let profileReq: [Any] = [
-                "REQ",
-                "own-profile-\(keyPair.publicKeyHex.prefix(8))",
-                ["kinds": [0], "authors": [keyPair.publicKeyHex], "limit": 1]
-            ]
-            try? nostrClient.sendRawRequest(profileReq)
-            print("🔄 Requested own profile back from relays for verification")
-        }
-
-        print("\n" + String(repeating: "=", count: 80))
-        print("📝 EPHEMERAL PROFILE PUBLISHED")
-        print(String(repeating: "=", count: 80))
-        print("Username:     \(username)")
-        print("About:        nostrTV viewer")
-        print("npub:         \(keyPair.npub)")
-        print("Pubkey (hex): \(keyPair.publicKeyHex)")
-        print("Profile JSON:")
-        print(jsonString)
-        print(String(repeating: "=", count: 80) + "\n")
     }
 }
 

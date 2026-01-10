@@ -347,8 +347,7 @@ struct StreamerSideMenu: View {
                     stream: stream,
                     amount: amount,
                     comment: "Sent from nostrTV",
-                    lud16: lud16,
-                    keyPair: nil
+                    lud16: lud16
                 )
 
                 let qrImage = await generateQRCode(from: uri)

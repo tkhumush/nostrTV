@@ -18,7 +18,6 @@ class NostrAuthManager: ObservableObject {
     @Published var authMethod: AuthMethod? = nil
     @Published var bunkerClient: NostrBunkerClient?
 
-    private let userDefaultsKey = "nostrUserNip05"
     private var nostrSDKClient: NostrSDKClient
     private let bunkerSessionManager = BunkerSessionManager()
 
@@ -30,7 +29,7 @@ class NostrAuthManager: ObservableObject {
             fatalError("Failed to initialize NostrSDKClient: \(error)")
         }
 
-        // Check for bunker session first
+        // Check for bunker session and restore if exists
         if let bunkerSession = bunkerSessionManager.loadSession(),
            let userPubkey = bunkerSession.userPubkey {
             // Restore bunker session
@@ -46,17 +45,6 @@ class NostrAuthManager: ObservableObject {
             Task { @MainActor in
                 await restoreBunkerSession(bunkerSession)
             }
-        }
-        // Fall back to NIP-05 login
-        else if let savedNip05 = UserDefaults.standard.string(forKey: userDefaultsKey),
-                let savedPubkey = UserDefaults.standard.string(forKey: "nostrUserPubkey") {
-            authMethod = .nip05(nip05: savedNip05, pubkey: savedPubkey)
-            currentUser = UserSession(nip05: savedNip05, hexPubkey: savedPubkey)
-            isAuthenticated = true
-
-            // Load cached profile data
-            loadCachedProfile()
-            isLoadingProfile = false
         }
     }
 
@@ -99,83 +87,6 @@ class NostrAuthManager: ObservableObject {
         } catch {
             // Failed to encode follow list
         }
-    }
-
-    func verifyNip05(_ nip05: String) {
-        errorMessage = nil
-        isLoadingProfile = true
-
-        // Validate NIP-05 format (name@domain.com)
-        let components = nip05.split(separator: "@")
-        guard components.count == 2 else {
-            errorMessage = "Invalid NIP-05 format. Use: name@domain.com"
-            isLoadingProfile = false
-            return
-        }
-
-        let name = String(components[0])
-        let domain = String(components[1])
-
-        // Fetch the .well-known/nostr.json file
-        guard let url = URL(string: "https://\(domain)/.well-known/nostr.json?name=\(name)") else {
-            errorMessage = "Invalid domain"
-            isLoadingProfile = false
-            return
-        }
-
-        let task = URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
-            guard let self = self else { return }
-
-            if let error = error {
-                DispatchQueue.main.async {
-                    self.errorMessage = "Failed to verify NIP-05: \(error.localizedDescription)"
-                    self.isLoadingProfile = false
-                }
-                return
-            }
-
-            guard let data = data else {
-                DispatchQueue.main.async {
-                    self.errorMessage = "No data received from NIP-05 verification"
-                    self.isLoadingProfile = false
-                }
-                return
-            }
-
-            // Parse the JSON response
-            do {
-                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let names = json["names"] as? [String: String],
-                   let pubkey = names[name] {
-
-                    // Successfully got pubkey from NIP-05
-                    DispatchQueue.main.async {
-                        // Save to UserDefaults
-                        UserDefaults.standard.set(nip05, forKey: self.userDefaultsKey)
-                        UserDefaults.standard.set(pubkey, forKey: "nostrUserPubkey")
-
-                        // Update state
-                        self.currentUser = UserSession(nip05: nip05, hexPubkey: pubkey)
-
-                        // Keep isLoadingProfile true and fetch profile data
-                        // Don't set isLoadingProfile to false here - let fetchUserData manage it
-                        self.fetchUserData(force: true)
-                    }
-                } else {
-                    DispatchQueue.main.async {
-                        self.errorMessage = "NIP-05 identifier not found"
-                        self.isLoadingProfile = false
-                    }
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.errorMessage = "Failed to parse NIP-05 response"
-                    self.isLoadingProfile = false
-                }
-            }
-        }
-
-        task.resume()
     }
 
     func fetchUserData(force: Bool = false) {
@@ -290,30 +201,18 @@ class NostrAuthManager: ObservableObject {
     }
 
     func logout() {
-        // Handle auth-method-specific cleanup
-        switch authMethod {
-        case .nip05:
-            // Clear NIP-05 UserDefaults
-            UserDefaults.standard.removeObject(forKey: userDefaultsKey)
-            UserDefaults.standard.removeObject(forKey: "nostrUserPubkey")
-
-        case .bunker:
-            // Disconnect bunker client
-            if let client = bunkerClient {
-                Task { @MainActor in
-                    client.disconnect()
-                }
+        // Disconnect bunker client
+        if let client = bunkerClient {
+            Task { @MainActor in
+                client.disconnect()
             }
-            bunkerClient = nil
-
-            // Clear bunker session
-            bunkerSessionManager.clearSession()
-
-        case .none:
-            break
         }
+        bunkerClient = nil
 
-        // Clear common UserDefaults
+        // Clear bunker session
+        bunkerSessionManager.clearSession()
+
+        // Clear UserDefaults
         UserDefaults.standard.removeObject(forKey: "nostrUserProfile")
         UserDefaults.standard.removeObject(forKey: "nostrUserFollowList")
 
@@ -331,32 +230,12 @@ class NostrAuthManager: ObservableObject {
 
     // MARK: - Event Signing
 
-    /// Sign a Nostr event using the current authentication method (bunker or local keys)
+    /// Sign a Nostr event using bunker (remote signing only)
     func signEvent(_ event: NostrEvent) async throws -> NostrEvent {
-        switch authMethod {
-        case .bunker:
-            // Use bunker for remote signing
-            guard let bunkerClient = bunkerClient else {
-                throw NostrAuthError.bunkerNotConnected
-            }
-            return try await bunkerClient.signEvent(event)
-
-        case .nip05:
-            // Use local keypair signing
-            guard let keyPair = NostrKeyManager.shared.currentKeyPair else {
-                throw NostrAuthError.noKeyPairAvailable
-            }
-            // Sign locally using NostrSDKClient
-            return try nostrSDKClient.createSignedEvent(
-                kind: event.kind,
-                content: event.content ?? "",
-                tags: event.tags,
-                using: keyPair
-            )
-
-        case .none:
-            throw NostrAuthError.notAuthenticated
+        guard let bunkerClient = bunkerClient else {
+            throw NostrAuthError.bunkerNotConnected
         }
+        return try await bunkerClient.signEvent(event)
     }
 }
 
@@ -364,15 +243,12 @@ class NostrAuthManager: ObservableObject {
 
 enum NostrAuthError: LocalizedError {
     case notAuthenticated
-    case noKeyPairAvailable
     case bunkerNotConnected
 
     var errorDescription: String? {
         switch self {
         case .notAuthenticated:
             return "User is not authenticated"
-        case .noKeyPairAvailable:
-            return "No key pair available for signing"
         case .bunkerNotConnected:
             return "Bunker client not connected"
         }
@@ -382,7 +258,6 @@ enum NostrAuthError: LocalizedError {
 // MARK: - Auth Method Enum
 
 enum AuthMethod {
-    case nip05(nip05: String, pubkey: String)
     case bunker(session: BunkerSession)
 }
 

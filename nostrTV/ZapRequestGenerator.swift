@@ -19,21 +19,25 @@ class ZapRequestGenerator {
     }
 
     /// Generate a zap request for a stream and return the lightning invoice URI
+    /// Uses authenticated user (bunker) for signing
     /// - Parameters:
     ///   - stream: The stream to zap
     ///   - amount: Amount in sats
     ///   - comment: Zap comment/message
     ///   - lud16: Lightning address of the recipient
-    ///   - keyPair: Optional keypair for anonymous zaps (defaults to authenticated user)
     /// - Returns: Lightning invoice URI for QR code generation
     func generateZapRequest(
         stream: Stream,
         amount: Int,
         comment: String,
-        lud16: String,
-        keyPair: NostrKeyPair? = nil
+        lud16: String
     ) async throws -> String {
         print("⚡️ Generating zap: \(amount) sats → \(stream.profile?.displayNameOrName ?? "streamer")")
+
+        // Ensure user is authenticated
+        guard let authManager = authManager, authManager.isAuthenticated else {
+            throw ZapRequestError.noSigningMethodAvailable
+        }
 
         // Build tags for the zap request following NIP-57 specification
         var tags: [[String]] = []
@@ -71,7 +75,7 @@ class ZapRequestGenerator {
             print("   Tags: \(tags)")
         }
 
-        // Create unsigned event first
+        // Create unsigned event
         let unsignedEvent = NostrEvent(
             kind: 9734,
             tags: tags,
@@ -82,24 +86,9 @@ class ZapRequestGenerator {
             sig: nil
         )
 
-        // Sign the event using authenticated user or provided keypair
-        let zapRequestEvent: NostrEvent
-        if let authManager = authManager, authManager.isAuthenticated {
-            // Use authenticated user's signature (bunker or local)
-            zapRequestEvent = try await authManager.signEvent(unsignedEvent)
-            print("   ✓ Signed with authenticated user")
-        } else if let keyPair = keyPair {
-            // Fallback to provided keypair (anonymous zaps)
-            zapRequestEvent = try nostrSDKClient.createSignedEvent(
-                kind: 9734,
-                content: comment,
-                tags: tags,
-                using: keyPair
-            )
-            print("   ✓ Signed with ephemeral keypair")
-        } else {
-            throw ZapRequestError.noSigningMethodAvailable
-        }
+        // Sign with bunker
+        let zapRequestEvent = try await authManager.signEvent(unsignedEvent)
+        print("   ✓ Signed with authenticated user")
 
         // Encode the zap request as JSON (without URL encoding - URLQueryItem will handle that)
         let eventDict: [String: Any] = [
