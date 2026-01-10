@@ -23,9 +23,10 @@ struct ProfileSettingsView: View {
                         .font(.system(size: 40))
                         .foregroundColor(.gray)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.standardTV)
                 .padding()
             }
+            .focusSection()  // Create a focus section for the close button
 
             // Title
             Text("Profile")
@@ -72,17 +73,21 @@ struct ProfileSettingsView: View {
                     }
 
                     // Logout button
-                    Button(action: {
-                        authManager.logout()
-                        isPresented = false
-                    }) {
-                        Text("Log Out")
-                            .font(.system(size: 28, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(width: 300, height: 70)
-                            .background(Color.red.opacity(0.8))
-                            .cornerRadius(10)
+                    VStack {
+                        Button(action: {
+                            authManager.logout()
+                            isPresented = false
+                        }) {
+                            Text("Log Out")
+                                .font(.system(size: 28, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 300, height: 70)
+                                .background(Color.red.opacity(0.8))
+                                .cornerRadius(10)
+                        }
+                        .buttonStyle(.standardTV)
                     }
+                    .focusSection()  // Create a focus section for the logout button
                     .padding(.top, 20)
                 }
             } else {
@@ -117,6 +122,7 @@ struct ProfileSettingsView: View {
                                 .background(Color.blue.opacity(0.8))
                                 .cornerRadius(10)
                         }
+                        .buttonStyle(.standardTV)
                         .padding(.top, 20)
                     }
                 }

@@ -23,38 +23,38 @@ struct ZapQRCodeView: View {
             Color.black.opacity(0.85)
                 .ignoresSafeArea()
 
-            VStack(spacing: 40) {
-                // Header
-                VStack(spacing: 12) {
+            VStack(spacing: 30) {
+                // Header - reduced spacing and font sizes
+                VStack(spacing: 10) {
                     Text(zapOption.emoji)
-                        .font(.system(size: 80))
+                        .font(.system(size: 70))
 
                     Text("Scan to Zap")
-                        .font(.system(size: 42, weight: .bold))
+                        .font(.system(size: 38, weight: .bold))
                         .foregroundColor(.white)
 
                     HStack(spacing: 8) {
                         Text("\(zapOption.displayAmount) sats")
-                            .font(.system(size: 36, weight: .bold))
+                            .font(.system(size: 32, weight: .bold))
                             .foregroundColor(.yellow)
 
                         Text("•")
-                            .font(.system(size: 36, weight: .bold))
+                            .font(.system(size: 32, weight: .bold))
                             .foregroundColor(.gray)
 
                         Text(zapOption.message)
-                            .font(.system(size: 28, weight: .medium))
+                            .font(.system(size: 24, weight: .medium))
                             .foregroundColor(.white.opacity(0.9))
                     }
                 }
 
-                // QR Code
+                // QR Code - reduced size
                 if let qrImage = qrImage {
                     Image(uiImage: qrImage)
                         .interpolation(.none)
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 500, height: 500)
+                        .frame(width: 450, height: 450)
                         .background(Color.white)
                         .cornerRadius(20)
                         .shadow(color: .yellow.opacity(0.3), radius: 20)
@@ -63,7 +63,7 @@ struct ZapQRCodeView: View {
                     ZStack {
                         Rectangle()
                             .fill(Color.white)
-                            .frame(width: 500, height: 500)
+                            .frame(width: 450, height: 450)
                             .cornerRadius(20)
                         ProgressView()
                             .scaleEffect(2.0)
@@ -72,7 +72,7 @@ struct ZapQRCodeView: View {
                 } else {
                     Rectangle()
                         .fill(Color.gray.opacity(0.3))
-                        .frame(width: 500, height: 500)
+                        .frame(width: 450, height: 450)
                         .cornerRadius(20)
                         .overlay(
                             Text("Failed to generate QR code")
@@ -80,26 +80,28 @@ struct ZapQRCodeView: View {
                         )
                 }
 
-                // Instructions
-                VStack(spacing: 12) {
+                // Instructions - reduced spacing
+                VStack(spacing: 8) {
                     Text("Scan with your Lightning wallet")
-                        .font(.system(size: 28, weight: .medium))
+                        .font(.system(size: 24, weight: .medium))
                         .foregroundColor(.white.opacity(0.8))
                 }
 
                 // Done button
                 Button(action: onDismiss) {
                     Text("Done")
-                        .font(.system(size: 32, weight: .semibold))
+                        .font(.system(size: 30, weight: .semibold))
                         .foregroundColor(.white)
-                        .padding(.horizontal, 80)
-                        .padding(.vertical, 20)
+                        .padding(.horizontal, 70)
+                        .padding(.vertical, 18)
                         .background(Color.yellow)
                         .cornerRadius(15)
                 }
-                .buttonStyle(.card)
+                .buttonStyle(.standardTV)
             }
-            .padding(60)
+            .padding(.horizontal, 60)
+            .padding(.top, 40)
+            .padding(.bottom, 50)
         }
         .onAppear {
             // Generate QR code on background thread to avoid blocking UI

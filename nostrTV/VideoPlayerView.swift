@@ -41,10 +41,8 @@ struct VideoPlayerView: View {
         self.zapManager = zapManager
         self.authManager = authManager
 
-        // Phase 2: Use shared NostrSDKClient for ChatManager
-        // This prevents creating multiple client instances
-        // TODO: Phase 3 will pass this from ContentView properly
-        _chatManager = StateObject(wrappedValue: ChatManager(nostrClient: NostrSDKClient.sharedForChat))
+        // Use the SDK client passed from ContentView
+        _chatManager = StateObject(wrappedValue: ChatManager(nostrClient: nostrSDKClient))
     }
 
     var body: some View {
@@ -126,66 +124,69 @@ struct VideoPlayerView: View {
                     .background(Color.black)
                 }
 
-                // Main content - Split between video and chat
+                // Row 2: Video player (90%) and Live chat (10%)
                 HStack(spacing: 0) {
-                    // Left side: Video player and controls
-                    VStack(spacing: 0) {
-                        // Video player takes most of the screen
-                        VideoPlayerContainer(
-                            player: player,
-                            stream: stream,
-                            nostrClient: nostrClient,
-                            onDismiss: { dismiss() }
-                        )
+                    // Video player (90%)
+                    VideoPlayerContainer(
+                        player: player,
+                        stream: stream,
+                        nostrClient: nostrClient,
+                        onDismiss: { dismiss() }
+                    )
+                    .frame(maxWidth: .infinity)
+                    .focusSection()  // Separate focus section for video
 
-                    // Bottom bar with zap chyron and chat button
-                    HStack(spacing: 0) {
-                        // Zap chyron
-                        if let stream = stream, let zapManager = zapManager {
-                            ZapChyronWrapper(zapManager: zapManager, stream: stream, nostrSDKClient: nostrSDKClient)
-                                .frame(height: 102)
-                        } else {
-                            Spacer()
-                                .frame(height: 102)
-                        }
-                    }
-                    .background(Color.black.opacity(0.3))
-                }
-                .focusSection()  // Separate focus section for video
-
-                // Right side: Live chat
-                if let stream = stream {
-                    VStack(spacing: 0) {
+                    // Live chat column (10% - fixed width)
+                    if let stream = stream {
                         LiveChatView(
                             chatManager: chatManager,
                             stream: stream,
-                            nostrClient: NostrSDKClient.sharedForChat
+                            nostrClient: nostrSDKClient
                         )
-
-                        // Chat input area
-                        if showChatInput {
-                            ChatInputView(
-                                message: $chatMessage,
-                                onSend: {
-                                    sendChatMessage()
-                                },
-                                onDismiss: {
-                                    showChatInput = false
-                                    chatMessage = ""
-                                }
-                            )
-                            .frame(height: 90)
-                        } else {
-                            // Show "Type a message" button when not typing - matching Send/Cancel style
-                            TypeMessageButton(action: { showChatInput = true })
-                                .frame(maxWidth: .infinity)
-                        }
+                        .frame(width: 225)  // 10% of typical 1920px width (~192px) + padding
+                        .background(Color.black)
                     }
-                    .frame(width: 425)  // Fixed width for chat column (reduced by 15%)
-                    .background(Color.black)
-                    .focusSection()  // Separate focus section for chat
                 }
-            }
+
+                // Row 3: Zap chyron (90%) and Comment button (10%)
+                HStack(spacing: 0) {
+                    // Zap chyron (90%)
+                    if let stream = stream, let zapManager = zapManager {
+                        ZapChyronWrapper(zapManager: zapManager, stream: stream, nostrSDKClient: nostrSDKClient)
+                            .frame(height: 102)
+                            .frame(maxWidth: .infinity)
+                            .background(Color.black.opacity(0.3))
+                    } else {
+                        Spacer()
+                            .frame(height: 102)
+                            .frame(maxWidth: .infinity)
+                    }
+
+                    // Comment button (10% - fixed width)
+                    if let stream = stream {
+                        VStack(spacing: 0) {
+                            if showChatInput {
+                                ChatInputView(
+                                    message: $chatMessage,
+                                    onSend: {
+                                        sendChatMessage()
+                                    },
+                                    onDismiss: {
+                                        showChatInput = false
+                                        chatMessage = ""
+                                    }
+                                )
+                                .frame(height: 102)
+                            } else {
+                                TypeMessageButton(action: { showChatInput = true })
+                                    .frame(height: 102)
+                            }
+                        }
+                        .frame(width: 225)  // Match chat column width
+                        .background(Color.black)
+                        .focusSection()  // Separate focus section for chat input
+                    }
+                }
             }  // Close VStack wrapper for banner + content
 
             // QR code overlay (only shown when payment is being made)
@@ -453,18 +454,7 @@ struct ZapChyronWrapper: View {
     }
 }
 
-/// Custom button style that mimics .card but with sharp corners
-private struct SquareCardButtonStyle: ButtonStyle {
-    @Environment(\.isFocused) var isFocused: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(isFocused ? 1.1 : 1.0) // Lift effect when focused
-            .shadow(color: .black.opacity(0.3), radius: isFocused ? 10 : 0, x: 0, y: isFocused ? 5 : 0)
-            .animation(.easeInOut(duration: 0.2), value: isFocused)
-            .clipShape(Rectangle()) // Force sharp corners
-    }
-}
+// Note: SquareCardButtonStyle is now defined in StandardButtonStyles.swift
 
 /// Chat input view for sending messages
 struct ChatInputView: View {
@@ -542,7 +532,7 @@ private struct ChatActionButton: View {
                             .foregroundColor(.white)
                     )
             }
-            .buttonStyle(SquareCardButtonStyle())
+            .buttonStyle(.squareCard)
         }
     }
 }
@@ -585,7 +575,7 @@ private struct TypeMessageButton: View {
                         .foregroundColor(.white)
                     )
             }
-            .buttonStyle(SquareCardButtonStyle())
+            .buttonStyle(.squareCard)
         }
     }
 }

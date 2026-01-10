@@ -75,7 +75,7 @@ struct StreamerSideMenu: View {
                             .font(.system(size: 40))
                             .foregroundColor(.gray)
                     }
-                    .buttonStyle(.card)
+                    .buttonStyle(.standardTV)
                 }
                 .padding(.horizontal, 30)
                 .padding(.top, 30)
@@ -275,7 +275,7 @@ struct StreamerSideMenu: View {
                                     .frame(width: 180, height: 50)
                                     .background(Color.blue)
                                     .cornerRadius(10)
-                                    .buttonStyle(.card)
+                                    .buttonStyle(.standardTV)
                                 }
                             } else if let qrImage = qrCodeImage {
                                 Image(uiImage: qrImage)
@@ -307,7 +307,7 @@ struct StreamerSideMenu: View {
                                         .background(Color.gray)
                                         .cornerRadius(10)
                                 }
-                                .buttonStyle(.card)
+                                .buttonStyle(.standardTV)
                             }
                         }
                         .frame(maxWidth: .infinity)
@@ -510,13 +510,9 @@ struct ZapAmountButton: View {
             }
             .padding(20)
             .frame(maxWidth: .infinity)
-            .background(isFocused ? Color.yellow.opacity(0.4) : (isSelected ? Color.yellow.opacity(0.2) : Color.gray.opacity(0.3)))
+            .background(isSelected ? Color.yellow.opacity(0.2) : Color.gray.opacity(0.3))
             .cornerRadius(12)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(isFocused ? Color.yellow : (isSelected ? Color.yellow.opacity(0.5) : Color.clear), lineWidth: isFocused ? 4 : 3)
-            )
         }
-        .buttonStyle(.card)
+        .buttonStyle(.standardTV)
     }
 }
