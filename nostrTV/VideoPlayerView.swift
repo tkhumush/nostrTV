@@ -124,9 +124,9 @@ struct VideoPlayerView: View {
                     .background(Color.black)
                 }
 
-                // Row 2: Video player (90%) and Live chat (10%)
+                // Row 2: Video player (83%) and Live chat (17%)
                 HStack(spacing: 0) {
-                    // Video player (90%)
+                    // Video player (83%)
                     VideoPlayerContainer(
                         player: player,
                         stream: stream,
@@ -136,21 +136,21 @@ struct VideoPlayerView: View {
                     .frame(maxWidth: .infinity)
                     .focusSection()  // Separate focus section for video
 
-                    // Live chat column (10% - fixed width)
+                    // Live chat column (17% - fixed width)
                     if let stream = stream {
                         LiveChatView(
                             chatManager: chatManager,
                             stream: stream,
                             nostrClient: nostrSDKClient
                         )
-                        .frame(width: 225)  // 10% of typical 1920px width (~192px) + padding
+                        .frame(width: 375)  // 17% of typical 1920px width (~326px) + padding
                         .background(Color.black)
                     }
                 }
 
-                // Row 3: Zap chyron (90%) and Comment button (10%)
+                // Row 3: Zap chyron (83%) and Comment button (17%)
                 HStack(spacing: 0) {
-                    // Zap chyron (90%)
+                    // Zap chyron (83%)
                     if let stream = stream, let zapManager = zapManager {
                         ZapChyronWrapper(zapManager: zapManager, stream: stream, nostrSDKClient: nostrSDKClient)
                             .frame(height: 102)
@@ -162,7 +162,7 @@ struct VideoPlayerView: View {
                             .frame(maxWidth: .infinity)
                     }
 
-                    // Comment button (10% - fixed width)
+                    // Comment button (17% - fixed width)
                     if let stream = stream {
                         VStack(spacing: 0) {
                             if showChatInput {
@@ -182,7 +182,7 @@ struct VideoPlayerView: View {
                                     .frame(height: 102)
                             }
                         }
-                        .frame(width: 225)  // Match chat column width
+                        .frame(width: 375)  // Match chat column width
                         .background(Color.black)
                         .focusSection()  // Separate focus section for chat input
                     }
