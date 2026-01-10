@@ -67,15 +67,14 @@ struct StreamerSideMenu: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
-                // Close button
+                // Close button - native Liquid Glass style
                 HStack {
                     Spacer()
                     Button(action: onClose) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 40))
-                            .foregroundColor(.gray)
                     }
-                    .buttonStyle(.standardTV)
+                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 30)
                 .padding(.top, 30)
@@ -270,12 +269,10 @@ struct StreamerSideMenu: View {
                                             handleAmountSelection(amount)
                                         }
                                     }
+                                    .buttonStyle(.borderedProminent)
+                                    .tint(.blue)
                                     .font(.system(size: 20))
-                                    .foregroundColor(.white)
-                                    .frame(width: 180, height: 50)
-                                    .background(Color.blue)
-                                    .cornerRadius(10)
-                                    .buttonStyle(.standardTV)
+                                    .controlSize(.large)
                                 }
                             } else if let qrImage = qrCodeImage {
                                 Image(uiImage: qrImage)
@@ -297,17 +294,12 @@ struct StreamerSideMenu: View {
 
                             // Back button (hide when zap received - will auto-dismiss)
                             if errorMessage == nil && !zapReceived {
-                                Button(action: {
+                                Button("Back", action: {
                                     cleanupZapState()
-                                }) {
-                                    Text("Back")
-                                        .font(.system(size: 20))
-                                        .foregroundColor(.white)
-                                        .frame(width: 180, height: 50)
-                                        .background(Color.gray)
-                                        .cornerRadius(10)
-                                }
-                                .buttonStyle(.standardTV)
+                                })
+                                .buttonStyle(.bordered)
+                                .font(.system(size: 20))
+                                .controlSize(.large)
                             }
                         }
                         .frame(maxWidth: .infinity)
@@ -489,8 +481,6 @@ struct ZapAmountButton: View {
     let isSelected: Bool
     let action: () -> Void
 
-    @Environment(\.isFocused) var isFocused
-
     var body: some View {
         Button(action: action) {
             HStack(spacing: 15) {
@@ -500,19 +490,16 @@ struct ZapAmountButton: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(amount) sats")
                         .font(.system(size: 28, weight: .bold))
-                        .foregroundColor(.white)
                     Text(label)
                         .font(.system(size: 20))
-                        .foregroundColor(.gray)
+                        .foregroundColor(.secondary)
                 }
 
                 Spacer()
             }
-            .padding(20)
-            .frame(maxWidth: .infinity)
-            .background(isSelected ? Color.yellow.opacity(0.2) : Color.gray.opacity(0.3))
-            .cornerRadius(12)
         }
-        .buttonStyle(.standardTV)
+        .buttonStyle(.bordered)
+        .tint(isSelected ? .yellow : .gray)
+        .controlSize(.large)
     }
 }

@@ -115,54 +115,25 @@ struct ZapMenuOptionsView: View {
     }
 }
 
-/// Individual inline zap option button with custom focus effect
+/// Individual inline zap option button with native Liquid Glass style
 private struct ZapMenuOptionButton: View {
     let option: ZapOption
     let onTap: () -> Void
 
-    @Environment(\.isFocused) var isFocused: Bool
-
     var body: some View {
-        ZStack {
-            // Background glow indicator when focused
-            if isFocused {
-                Rectangle()
-                    .fill(Color.white.opacity(0.3))
-                    .frame(width: 140, height: 140)
-                    .blur(radius: 20)
+        Button(action: onTap) {
+            VStack(spacing: 4) {
+                Text(option.emoji)
+                    .font(.system(size: 40))
+                Text("\(option.displayAmount)")
+                    .font(.system(size: 18, weight: .bold))
             }
-
-            // Focus indicator - 5% larger square with yellow border
-            if isFocused {
-                Rectangle()
-                    .strokeBorder(Color.yellow, lineWidth: 6)
-                    .frame(width: 126, height: 126) // 120 * 1.05 = 126
-            }
-
-            // Button
-            Button(action: onTap) {
-                Rectangle()
-                    .fill(Color.gray)
-                    .frame(width: 120, height: 120)
-                    .overlay(
-                        VStack(spacing: 4) {
-                            // Emoji
-                            Text(option.emoji)
-                                .font(.system(size: 40))
-
-                            // Amount
-                            Text("\(option.displayAmount)")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(.white)
-                        }
-                    )
-            }
-            .buttonStyle(.squareCard)
+            .frame(width: 120, height: 120)
         }
+        .buttonStyle(.borderedProminent)
+        .tint(.gray)
     }
 }
-
-// Note: SquareCardButtonStyle is now defined in StandardButtonStyles.swift
 
 #Preview {
     ZapMenuView(

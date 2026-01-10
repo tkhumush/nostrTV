@@ -13,7 +13,7 @@ struct ProfileSettingsView: View {
 
     var body: some View {
         VStack(spacing: 50) {
-            // Close button
+            // Close button - native Liquid Glass style
             HStack {
                 Spacer()
                 Button(action: {
@@ -21,9 +21,8 @@ struct ProfileSettingsView: View {
                 }) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 40))
-                        .foregroundColor(.gray)
                 }
-                .buttonStyle(.standardTV)
+                .buttonStyle(.plain)
                 .padding()
             }
             .focusSection()  // Create a focus section for the close button
@@ -72,20 +71,16 @@ struct ProfileSettingsView: View {
                             .foregroundColor(.gray)
                     }
 
-                    // Logout button
+                    // Logout button - native Liquid Glass style
                     VStack {
-                        Button(action: {
+                        Button("Log Out", action: {
                             authManager.logout()
                             isPresented = false
-                        }) {
-                            Text("Log Out")
-                                .font(.system(size: 28, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 300, height: 70)
-                                .background(Color.red.opacity(0.8))
-                                .cornerRadius(10)
-                        }
-                        .buttonStyle(.standardTV)
+                        })
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                        .font(.system(size: 28, weight: .semibold))
+                        .controlSize(.large)
                     }
                     .focusSection()  // Create a focus section for the logout button
                     .padding(.top, 20)
@@ -112,17 +107,13 @@ struct ProfileSettingsView: View {
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 40)
 
-                        Button(action: {
+                        Button("Retry", action: {
                             authManager.fetchUserData()
-                        }) {
-                            Text("Retry")
-                                .font(.system(size: 28, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 200, height: 60)
-                                .background(Color.blue.opacity(0.8))
-                                .cornerRadius(10)
-                        }
-                        .buttonStyle(.standardTV)
+                        })
+                        .buttonStyle(.borderedProminent)
+                        .tint(.blue)
+                        .font(.system(size: 28, weight: .semibold))
+                        .controlSize(.large)
                         .padding(.top, 20)
                     }
                 }

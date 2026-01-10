@@ -87,17 +87,12 @@ struct ZapQRCodeView: View {
                         .foregroundColor(.white.opacity(0.8))
                 }
 
-                // Done button
-                Button(action: onDismiss) {
-                    Text("Done")
-                        .font(.system(size: 30, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 70)
-                        .padding(.vertical, 18)
-                        .background(Color.yellow)
-                        .cornerRadius(15)
-                }
-                .buttonStyle(.standardTV)
+                // Done button - native Liquid Glass style
+                Button("Done", action: onDismiss)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.yellow)
+                    .font(.system(size: 30, weight: .semibold))
+                    .controlSize(.large)
             }
             .padding(.horizontal, 60)
             .padding(.top, 40)

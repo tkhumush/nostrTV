@@ -454,8 +454,6 @@ struct ZapChyronWrapper: View {
     }
 }
 
-// Note: SquareCardButtonStyle is now defined in StandardButtonStyles.swift
-
 /// Chat input view for sending messages
 struct ChatInputView: View {
     @Binding var message: String
@@ -497,85 +495,39 @@ struct ChatInputView: View {
 }
 
 /// Individual chat action button matching the square zap menu style
+/// Chat action button with native Liquid Glass style
 private struct ChatActionButton: View {
     let label: String
     let color: Color
     let action: () -> Void
 
-    @Environment(\.isFocused) var isFocused: Bool
-
     var body: some View {
-        ZStack {
-            // Background glow indicator when focused
-            if isFocused {
-                Rectangle()
-                    .fill(Color.white.opacity(0.3))
-                    .frame(width: 105, height: 105)
-                    .blur(radius: 20)
-            }
-
-            // Focus indicator - 5% larger square with yellow border
-            if isFocused {
-                Rectangle()
-                    .strokeBorder(Color.yellow, lineWidth: 4)
-                    .frame(width: 95, height: 95) // 90 * 1.05 = 94.5
-            }
-
-            // Button
-            Button(action: action) {
-                Rectangle()
-                    .fill(color)
-                    .frame(width: 90, height: 90)
-                    .overlay(
-                        Text(label)
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(.white)
-                    )
-            }
-            .buttonStyle(.squareCard)
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 18, weight: .bold))
+                .frame(width: 90, height: 90)
         }
+        .buttonStyle(.borderedProminent)
+        .tint(color)
     }
 }
 
-/// Type message button matching the square chat action button style
+/// Type message button with native Liquid Glass style
 private struct TypeMessageButton: View {
     let action: () -> Void
 
-    @Environment(\.isFocused) var isFocused: Bool
-
     var body: some View {
-        ZStack {
-            // Background glow indicator when focused
-            if isFocused {
-                Rectangle()
-                    .fill(Color.white.opacity(0.3))
-                    .frame(height: 70)
-                    .blur(radius: 20)
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "bubble.left.fill")
+                    .font(.system(size: 18))
+                Text("Comment")
+                    .font(.system(size: 18, weight: .bold))
             }
-
-            // Focus indicator - 5% larger square with yellow border
-            if isFocused {
-                Rectangle()
-                    .strokeBorder(Color.yellow, lineWidth: 4)
-                    .frame(height: 63) // 60 * 1.05 = 63
-            }
-
-            // Button
-            Button(action: action) {
-                Rectangle()
-                    .fill(Color.purple)
-                    .frame(height: 60)
-                    .overlay(
-                        HStack(spacing: 8) {
-                            Image(systemName: "bubble.left.fill")
-                                .font(.system(size: 18))
-                            Text("Comment")
-                                .font(.system(size: 18, weight: .bold))
-                        }
-                        .foregroundColor(.white)
-                    )
-            }
-            .buttonStyle(.squareCard)
+            .frame(height: 60)
+            .frame(maxWidth: .infinity)
         }
+        .buttonStyle(.borderedProminent)
+        .tint(.purple)
     }
 }
