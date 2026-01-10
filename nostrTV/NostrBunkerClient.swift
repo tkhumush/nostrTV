@@ -23,9 +23,16 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
     private var expectedSecret: String?  // For nostrconnect:// flow validation
     private var connectContinuation: CheckedContinuation<Void, Error>?  // For waiting on connect response
 
+    /// Get the client's private key (for session persistence)
+    var clientPrivateKeyHex: String? {
+        return clientKeyPair?.privateKeyHex
+    }
+
     private var pendingRequests: [String: PendingRequest] = [:]
 
     private var subscriptionId: String?
+    private var healthCheckTimer: Timer?
+    private var isReconnecting: Bool = false
 
     // MARK: - Initialization
 
@@ -113,8 +120,10 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
     }
 
     /// Connect to a bunker using a bunker:// URI (traditional flow for session restoration)
-    /// - Parameter bunkerURI: The bunker URI (bunker://<signer-pubkey>?relay=<url>...)
-    func connect(bunkerURI: String) async throws {
+    /// - Parameters:
+    ///   - bunkerURI: The bunker URI (bunker://<signer-pubkey>?relay=<url>...)
+    ///   - clientPrivateKeyHex: Optional saved client private key for session restoration
+    func connect(bunkerURI: String, clientPrivateKeyHex: String? = nil) async throws {
         connectionState = .connecting
 
         // Parse bunker URI
@@ -124,9 +133,20 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
         bunkerPubkey = components.clientPubkey  // This is actually signer pubkey in bunker://
         bunkerRelay = components.relay
 
-        // Generate ephemeral keypair for this bunker session if not already set
-        if clientKeyPair == nil {
+        // Restore saved client keypair if provided, otherwise generate new one
+        if let savedPrivateKeyHex = clientPrivateKeyHex {
+            // Restore the client keypair from saved session
+            do {
+                clientKeyPair = try NostrKeyPair(privateKeyHex: savedPrivateKeyHex)
+                print("✅ Restored client keypair from session")
+            } catch {
+                print("⚠️ Failed to restore client keypair, generating new one: \(error.localizedDescription)")
+                clientKeyPair = try NostrKeyPair.generate()
+            }
+        } else if clientKeyPair == nil {
+            // Generate ephemeral keypair for this bunker session if not already set
             clientKeyPair = try NostrKeyPair.generate()
+            print("✅ Generated new client keypair")
         }
 
         // Connect to the bunker relay
@@ -136,6 +156,9 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
         try await subscribeToMessages()
 
         connectionState = .waitingForApproval
+
+        // Start health check timer for persistent connection monitoring
+        startHealthCheck()
 
         print("📡 Connected to bunker (traditional flow)")
     }
@@ -231,6 +254,9 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
 
     /// Disconnect from bunker
     func disconnect() {
+        // Stop health check
+        stopHealthCheck()
+
         // Cancel all pending requests
         for (_, pending) in pendingRequests {
             pending.timeoutTask.cancel()
@@ -521,6 +547,78 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
             }
         } else {
             pending.continuation.resume(throwing: BunkerError.invalidResponse)
+        }
+    }
+
+    // MARK: - Connection Health Monitoring
+
+    /// Start periodic health check (ping every 60 seconds)
+    private func startHealthCheck() {
+        // Cancel any existing timer
+        healthCheckTimer?.invalidate()
+
+        // Create new timer for health checks (60 second interval)
+        healthCheckTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                await self?.performHealthCheck()
+            }
+        }
+
+        print("🏥 Health check timer started (60s interval)")
+    }
+
+    /// Stop health check timer
+    private func stopHealthCheck() {
+        healthCheckTimer?.invalidate()
+        healthCheckTimer = nil
+        print("🏥 Health check timer stopped")
+    }
+
+    /// Perform a health check by pinging the bunker
+    private func performHealthCheck() async {
+        // Don't ping if already reconnecting or not connected
+        guard !isReconnecting,
+              bunkerPubkey != nil,
+              case .connected = connectionState else {
+            return
+        }
+
+        do {
+            try await ping()
+            print("💚 Health check passed")
+        } catch {
+            print("❌ Health check failed: \(error.localizedDescription)")
+            // Attempt to reconnect
+            await attemptReconnect()
+        }
+    }
+
+    /// Attempt to reconnect to bunker
+    private func attemptReconnect() async {
+        guard !isReconnecting,
+              let relay = bunkerRelay,
+              bunkerPubkey != nil,
+              clientKeyPair != nil else {
+            print("⚠️ Cannot reconnect - missing connection info")
+            return
+        }
+
+        isReconnecting = true
+        print("🔄 Attempting to reconnect to bunker...")
+
+        do {
+            // Recreate NostrSDKClient connection
+            try await connectToRelay(relay)
+
+            // Resubscribe to messages
+            try await subscribeToMessages()
+
+            print("✅ Reconnected to bunker successfully")
+            isReconnecting = false
+        } catch {
+            print("❌ Reconnection failed: \(error.localizedDescription)")
+            isReconnecting = false
+            connectionState = .error("Connection lost. Please sign in again.")
         }
     }
 }

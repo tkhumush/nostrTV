@@ -32,16 +32,18 @@ struct BunkerResponse: Codable {
 
 /// Represents a persisted bunker session
 struct BunkerSession: Codable {
-    let bunkerPubkey: String      // Remote signer's public key
-    let relay: String              // Relay URL for communication
-    var userPubkey: String?        // User's actual Nostr public key (after connect)
+    let bunkerPubkey: String       // Remote signer's public key
+    let relay: String               // Relay URL for communication
+    var userPubkey: String?         // User's actual Nostr public key (after connect)
+    let clientPrivateKeyHex: String // Client's ephemeral private key for this session (hex)
     let createdAt: Date
     var lastUsed: Date
 
-    init(bunkerPubkey: String, relay: String, userPubkey: String? = nil, createdAt: Date = Date(), lastUsed: Date = Date()) {
+    init(bunkerPubkey: String, relay: String, userPubkey: String? = nil, clientPrivateKeyHex: String, createdAt: Date = Date(), lastUsed: Date = Date()) {
         self.bunkerPubkey = bunkerPubkey
         self.relay = relay
         self.userPubkey = userPubkey
+        self.clientPrivateKeyHex = clientPrivateKeyHex
         self.createdAt = createdAt
         self.lastUsed = lastUsed
     }

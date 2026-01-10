@@ -142,16 +142,18 @@ class NostrAuthManager: ObservableObject {
         self.bunkerClient = bunkerClient
 
         guard let bunkerPubkey = bunkerClient.bunkerPubkey,
-              let relay = bunkerClient.bunkerRelay else {
+              let relay = bunkerClient.bunkerRelay,
+              let clientPrivateKeyHex = bunkerClient.clientPrivateKeyHex else {
             errorMessage = "Invalid bunker configuration"
             return
         }
 
-        // Create and save session
+        // Create and save session with client keypair for persistence
         let session = BunkerSession(
             bunkerPubkey: bunkerPubkey,
             relay: relay,
             userPubkey: userPubkey,
+            clientPrivateKeyHex: clientPrivateKeyHex,
             createdAt: Date(),
             lastUsed: Date()
         )
@@ -177,7 +179,7 @@ class NostrAuthManager: ObservableObject {
             // Recreate bunker client
             let client = NostrBunkerClient(keyManager: NostrKeyManager.shared)
 
-            // Attempt to reconnect
+            // Attempt to reconnect with saved client keypair
             let uri = BunkerURIComponents(
                 clientPubkey: session.bunkerPubkey,
                 relay: session.relay,
@@ -185,14 +187,15 @@ class NostrAuthManager: ObservableObject {
                 metadata: nil
             ).toURI()
 
-            try await client.connect(bunkerURI: uri)
+            // Pass the saved client private key for session restoration
+            try await client.connect(bunkerURI: uri, clientPrivateKeyHex: session.clientPrivateKeyHex)
 
             // Update session last used
             bunkerSessionManager.updateLastUsed()
 
             self.bunkerClient = client
 
-            print("✅ Bunker session restored successfully")
+            print("✅ Bunker session restored successfully with saved keypair")
 
         } catch {
             print("⚠️ Failed to restore bunker session: \(error.localizedDescription)")
