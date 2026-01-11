@@ -29,11 +29,6 @@ struct ZapChyronView: View {
 
     private var content: some View {
         ZStack {
-            // Solid black background
-            Rectangle()
-                .fill(Color.black)
-                .frame(height: 120)
-
             // Display current zap or placeholder
             if !zapComments.isEmpty {
                 let displayZaps = Array(zapComments.prefix(maxZapsToShow))

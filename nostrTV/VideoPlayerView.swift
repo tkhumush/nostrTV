@@ -50,19 +50,19 @@ struct VideoPlayerView: View {
             VStack(spacing: 0) {
                 // Unified banner across entire top
                 if let stream = stream {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 16) {
                         // nostrTV logo
                         Text("nostrTV")
-                            .font(.system(size: 22, weight: .bold))
+                            .font(.system(size: 26, weight: .bold))
                             .foregroundColor(.white)
 
                         Text("|")
-                            .font(.system(size: 22))
-                            .foregroundColor(.gray)
+                            .font(.system(size: 26))
+                            .foregroundColor(.gray.opacity(0.6))
 
                         // Stream info: profile pic + username + stream name + viewer count (clickable)
                         Button(action: { showStreamerProfile = true }) {
-                            HStack(spacing: 8) {
+                            HStack(spacing: 12) {
                                 // Profile picture
                                 if let profile = stream.profile, let pictureURL = profile.picture, let url = URL(string: pictureURL) {
                                     AsyncImage(url: url) { phase in
@@ -71,57 +71,64 @@ struct VideoPlayerView: View {
                                             image
                                                 .resizable()
                                                 .aspectRatio(contentMode: .fill)
-                                                .frame(width: 48, height: 48)
+                                                .frame(width: 52, height: 52)
                                                 .clipShape(Circle())
                                         case .failure(_), .empty:
                                             Circle()
-                                                .fill(Color.gray)
-                                                .frame(width: 48, height: 48)
+                                                .fill(Color.gray.opacity(0.5))
+                                                .frame(width: 52, height: 52)
                                         @unknown default:
                                             Circle()
-                                                .fill(Color.gray)
-                                                .frame(width: 48, height: 48)
+                                                .fill(Color.gray.opacity(0.5))
+                                                .frame(width: 52, height: 52)
                                         }
                                     }
                                 } else {
                                     Circle()
-                                        .fill(Color.gray)
-                                        .frame(width: 48, height: 48)
+                                        .fill(Color.gray.opacity(0.5))
+                                        .frame(width: 52, height: 52)
                                 }
 
-                                // Username
-                                Text(stream.profile?.displayName ?? stream.profile?.name ?? "Anonymous")
-                                    .font(.system(size: 19, weight: .semibold))
-                                    .foregroundColor(.white)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    // Username
+                                    Text(stream.profile?.displayName ?? stream.profile?.name ?? "Anonymous")
+                                        .font(.system(size: 22, weight: .semibold))
+                                        .foregroundColor(.white)
 
-                                // Stream name
-                                Text(stream.title)
-                                    .font(.system(size: 19))
-                                    .foregroundColor(.white.opacity(0.8))
-                                    .lineLimit(1)
+                                    // Stream name
+                                    Text(stream.title)
+                                        .font(.system(size: 18))
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .lineLimit(1)
+                                }
 
-                                // Viewer count
-                                Text("|")
-                                    .font(.system(size: 22))
-                                    .foregroundColor(.gray)
+                                // Viewer count badge
+                                HStack(spacing: 6) {
+                                    Image(systemName: "eye.fill")
+                                        .font(.system(size: 18))
+                                        .foregroundColor(.white.opacity(0.8))
 
-                                Image(systemName: "eye.fill")
-                                    .font(.system(size: 19))
-                                    .foregroundColor(.white)
-
-                                Text("\(stream.viewerCount)")
-                                    .font(.system(size: 22, weight: .bold))
-                                    .foregroundColor(.white)
+                                    Text("\(stream.viewerCount)")
+                                        .font(.system(size: 20, weight: .bold))
+                                        .foregroundColor(.white)
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(.ultraThinMaterial)
+                                .cornerRadius(8)
                             }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.card)
 
                         Spacer()
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 15)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 18)
                     .frame(maxWidth: .infinity)
-                    .background(Color.black)
+                    .background(.ultraThinMaterial)
+                    .focusSection()
                 }
 
                 // Row 2: Video player (83%) and Live chat (17%)
@@ -134,7 +141,6 @@ struct VideoPlayerView: View {
                         onDismiss: { dismiss() }
                     )
                     .frame(maxWidth: .infinity)
-                    .focusSection()  // Separate focus section for video
 
                     // Live chat column (17% - fixed width)
                     if let stream = stream {
@@ -153,12 +159,11 @@ struct VideoPlayerView: View {
                     // Zap chyron (83%)
                     if let stream = stream, let zapManager = zapManager {
                         ZapChyronWrapper(zapManager: zapManager, stream: stream, nostrSDKClient: nostrSDKClient)
-                            .frame(height: 102)
+                            .frame(height: 110)
                             .frame(maxWidth: .infinity)
-                            .background(Color.black.opacity(0.3))
                     } else {
                         Spacer()
-                            .frame(height: 102)
+                            .frame(height: 110)
                             .frame(maxWidth: .infinity)
                     }
 
@@ -176,17 +181,19 @@ struct VideoPlayerView: View {
                                         chatMessage = ""
                                     }
                                 )
-                                .frame(height: 102)
+                                .frame(height: 110)
+                                .padding(.horizontal, 16)
                             } else {
                                 TypeMessageButton(action: { showChatInput = true })
-                                    .frame(height: 102)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 16)
                             }
                         }
                         .frame(width: 375)  // Match chat column width
-                        .background(Color.black)
-                        .focusSection()  // Separate focus section for chat input
                     }
                 }
+                .background(.ultraThinMaterial)
+                .focusSection()
             }  // Close VStack wrapper for banner + content
 
             // QR code overlay (only shown when payment is being made)
@@ -518,16 +525,17 @@ private struct TypeMessageButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 Image(systemName: "bubble.left.fill")
-                    .font(.system(size: 18))
+                    .font(.system(size: 19))
+                    .foregroundColor(.purple)
                 Text("Comment")
-                    .font(.system(size: 18, weight: .bold))
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundColor(.white)
             }
-            .frame(height: 60)
             .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
         }
-        .buttonStyle(.borderedProminent)
-        .tint(.purple)
+        .buttonStyle(.card)
     }
 }
