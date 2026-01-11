@@ -55,16 +55,11 @@ struct FollowingEmptyStateView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
 
-            Button(action: onLoginTap) {
-                Text("Log In")
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 40)
-                    .padding(.vertical, 15)
-                    .background(Color.blue)
-                    .cornerRadius(10)
-            }
-            .buttonStyle(.plain)
+            Button("Log In", action: onLoginTap)
+                .buttonStyle(.borderedProminent)
+                .tint(.blue)
+                .font(.headline)
+                .controlSize(.large)
 
             Spacer()
         }
@@ -230,7 +225,7 @@ struct FeaturedStreamCardView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.card)
     }
 }
 
@@ -396,6 +391,7 @@ struct StreamRowView: View {
                 Spacer()
             }
         }
+        .buttonStyle(.card)
         .opacity(stream.isLive ? 1.0 : 0.6) // Dim ended streams
     }
 }
