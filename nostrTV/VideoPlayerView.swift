@@ -140,8 +140,9 @@ struct VideoPlayerView: View {
                                 isChatVisible: $isChatVisible,
                                 action: { isChatVisible.toggle() }
                             )
-                            Spacer()
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 20)
                         .frame(width: 375)
                         .background(.ultraThinMaterial)
                         .focusSection()
@@ -610,6 +611,6 @@ private struct ToggleChatButton: View {
                 .foregroundColor(isChatVisible ? .orange : .green)
                 .frame(width: 58, height: 58)
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.card)
     }
 }
