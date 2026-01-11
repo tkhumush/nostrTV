@@ -30,6 +30,7 @@ struct VideoPlayerView: View {
     @StateObject private var chatManager: ChatManager
     @State private var showChatInput = false
     @State private var chatMessage = ""
+    @State private var isChatVisible = true  // Track chat visibility
     @Environment(\.dismiss) private var dismiss
 
     init(player: AVPlayer, lightningAddress: String?, stream: Stream?, nostrClient: NostrClient, nostrSDKClient: NostrSDKClient, zapManager: ZapManager?, authManager: NostrAuthManager) {
@@ -48,87 +49,103 @@ struct VideoPlayerView: View {
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
-                // Unified banner across entire top
+                // Row 1: Banner (83%) and Chat toggle (17%)
                 if let stream = stream {
-                    HStack(spacing: 16) {
-                        // nostrTV logo
-                        Text("nostrTV")
-                            .font(.system(size: 26, weight: .bold))
-                            .foregroundColor(.white)
+                    HStack(spacing: 0) {
+                        // Banner section (83%)
+                        HStack(spacing: 16) {
+                            // nostrTV logo
+                            Text("nostrTV")
+                                .font(.system(size: 26, weight: .bold))
+                                .foregroundColor(.white)
 
-                        Text("|")
-                            .font(.system(size: 26))
-                            .foregroundColor(.gray.opacity(0.6))
+                            Text("|")
+                                .font(.system(size: 26))
+                                .foregroundColor(.gray.opacity(0.6))
 
-                        // Stream info: profile pic + username + stream name + viewer count (clickable)
-                        Button(action: { showStreamerProfile = true }) {
-                            HStack(spacing: 12) {
-                                // Profile picture
-                                if let profile = stream.profile, let pictureURL = profile.picture, let url = URL(string: pictureURL) {
-                                    AsyncImage(url: url) { phase in
-                                        switch phase {
-                                        case .success(let image):
-                                            image
-                                                .resizable()
-                                                .aspectRatio(contentMode: .fill)
-                                                .frame(width: 52, height: 52)
-                                                .clipShape(Circle())
-                                        case .failure(_), .empty:
-                                            Circle()
-                                                .fill(Color.gray.opacity(0.5))
-                                                .frame(width: 52, height: 52)
-                                        @unknown default:
-                                            Circle()
-                                                .fill(Color.gray.opacity(0.5))
-                                                .frame(width: 52, height: 52)
+                            // Stream info: profile pic + username + stream name + viewer count (clickable)
+                            Button(action: { showStreamerProfile = true }) {
+                                HStack(spacing: 12) {
+                                    // Profile picture
+                                    if let profile = stream.profile, let pictureURL = profile.picture, let url = URL(string: pictureURL) {
+                                        AsyncImage(url: url) { phase in
+                                            switch phase {
+                                            case .success(let image):
+                                                image
+                                                    .resizable()
+                                                    .aspectRatio(contentMode: .fill)
+                                                    .frame(width: 52, height: 52)
+                                                    .clipShape(Circle())
+                                            case .failure(_), .empty:
+                                                Circle()
+                                                    .fill(Color.gray.opacity(0.5))
+                                                    .frame(width: 52, height: 52)
+                                            @unknown default:
+                                                Circle()
+                                                    .fill(Color.gray.opacity(0.5))
+                                                    .frame(width: 52, height: 52)
+                                            }
                                         }
+                                    } else {
+                                        Circle()
+                                            .fill(Color.gray.opacity(0.5))
+                                            .frame(width: 52, height: 52)
                                     }
-                                } else {
-                                    Circle()
-                                        .fill(Color.gray.opacity(0.5))
-                                        .frame(width: 52, height: 52)
-                                }
 
-                                VStack(alignment: .leading, spacing: 4) {
-                                    // Username
-                                    Text(stream.profile?.displayName ?? stream.profile?.name ?? "Anonymous")
-                                        .font(.system(size: 22, weight: .semibold))
-                                        .foregroundColor(.white)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        // Username
+                                        Text(stream.profile?.displayName ?? stream.profile?.name ?? "Anonymous")
+                                            .font(.system(size: 22, weight: .semibold))
+                                            .foregroundColor(.white)
 
-                                    // Stream name
-                                    Text(stream.title)
-                                        .font(.system(size: 18))
-                                        .foregroundColor(.white.opacity(0.7))
-                                        .lineLimit(1)
-                                }
+                                        // Stream name
+                                        Text(stream.title)
+                                            .font(.system(size: 18))
+                                            .foregroundColor(.white.opacity(0.7))
+                                            .lineLimit(1)
+                                    }
 
-                                // Viewer count badge
-                                HStack(spacing: 6) {
-                                    Image(systemName: "eye.fill")
-                                        .font(.system(size: 18))
-                                        .foregroundColor(.white.opacity(0.8))
+                                    // Viewer count badge
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "eye.fill")
+                                            .font(.system(size: 18))
+                                            .foregroundColor(.white.opacity(0.8))
 
-                                    Text("\(stream.viewerCount)")
-                                        .font(.system(size: 20, weight: .bold))
-                                        .foregroundColor(.white)
+                                        Text("\(stream.viewerCount)")
+                                            .font(.system(size: 20, weight: .bold))
+                                            .foregroundColor(.white)
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(.ultraThinMaterial)
+                                    .cornerRadius(8)
                                 }
                                 .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(.ultraThinMaterial)
-                                .cornerRadius(8)
+                                .padding(.vertical, 8)
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                        }
-                        .buttonStyle(.card)
+                            .buttonStyle(.card)
 
-                        Spacer()
+                            Spacer()
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 18)
+                        .frame(maxWidth: .infinity)
+                        .background(.ultraThinMaterial)
+                        .focusSection()
+
+                        // Chat toggle button (17%)
+                        HStack {
+                            Spacer()
+                            ToggleChatButton(
+                                isChatVisible: $isChatVisible,
+                                action: { isChatVisible.toggle() }
+                            )
+                            Spacer()
+                        }
+                        .frame(width: 375)
+                        .background(.ultraThinMaterial)
+                        .focusSection()
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 18)
-                    .frame(maxWidth: .infinity)
-                    .background(.ultraThinMaterial)
-                    .focusSection()
                 }
 
                 // Row 2: Video player (83%) and Live chat (17%)
@@ -142,8 +159,8 @@ struct VideoPlayerView: View {
                     )
                     .frame(maxWidth: .infinity)
 
-                    // Live chat column (17% - fixed width)
-                    if let stream = stream {
+                    // Live chat column (17% - fixed width, conditionally visible)
+                    if isChatVisible, let stream = stream {
                         LiveChatView(
                             chatManager: chatManager,
                             stream: stream,
@@ -167,7 +184,7 @@ struct VideoPlayerView: View {
                             .frame(maxWidth: .infinity)
                     }
 
-                    // Comment button (17% - fixed width)
+                    // Comment button (17% - fixed width, always visible)
                     if let stream = stream {
                         VStack(spacing: 0) {
                             if showChatInput {
@@ -578,5 +595,21 @@ private struct RefreshChatButton: View {
                 .frame(width: 58, height: 58)
         }
         .buttonStyle(.card)
+    }
+}
+
+/// Toggle chat visibility button
+private struct ToggleChatButton: View {
+    @Binding var isChatVisible: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: isChatVisible ? "eye.slash.fill" : "eye.fill")
+                .font(.system(size: 22))
+                .foregroundColor(isChatVisible ? .orange : .green)
+                .frame(width: 58, height: 58)
+        }
+        .buttonStyle(.bordered)
     }
 }
