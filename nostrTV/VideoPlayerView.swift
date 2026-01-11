@@ -181,12 +181,16 @@ struct VideoPlayerView: View {
                                         chatMessage = ""
                                     }
                                 )
-                                .frame(height: 110)
-                                .padding(.horizontal, 16)
+                                .padding(.horizontal, 0)
+                                .padding(.vertical, 16)
                             } else {
-                                TypeMessageButton(action: { showChatInput = true })
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 16)
+                                HStack(spacing: 8) {
+                                    TypeMessageButton(action: { showChatInput = true })
+
+                                    RefreshChatButton(action: { refreshChatMessages() })
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 16)
                             }
                         }
                         .frame(width: 375)  // Match chat column width
@@ -385,6 +389,16 @@ struct VideoPlayerView: View {
             }
         }
     }
+
+    private func refreshChatMessages() {
+        guard let stream = stream, let eventID = stream.eventID, let authorPubkey = stream.eventAuthorPubkey else {
+            print("⚠️ Cannot refresh chat - missing stream data")
+            return
+        }
+
+        print("🔄 Refreshing chat messages...")
+        chatManager.fetchChatMessagesForStream(eventID, pubkey: authorPubkey, dTag: stream.streamID)
+    }
 }
 
 /// Container for the AVPlayerViewController
@@ -469,52 +483,57 @@ struct ChatInputView: View {
     @FocusState private var isTextFieldFocused: Bool
 
     var body: some View {
-        HStack(spacing: 0) {
-            // Text field container - reduced size
+        HStack(spacing: 9) {
+            // Text field container
             ZStack {
-                Rectangle()
-                    .fill(Color.gray)
-                    .frame(width: 245, height: 90)
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(.ultraThinMaterial)
+                    .frame(width: 241, height: 58)
 
-                TextField("Type your message...", text: $message)
-                    .padding(12)
+                TextField("Type message...", text: $message)
+                    .font(.system(size: 18))
+                    .padding(.horizontal, 12)
                     .foregroundColor(.white)
                     .focused($isTextFieldFocused)
-                    .frame(width: 225)
+                    .frame(width: 221)
             }
-            .frame(width: 245, height: 90)
+            .frame(width: 241, height: 58)
+            .onAppear {
+                isTextFieldFocused = true
+            }
 
-            // Send button - reduced size
+            // Send button - icon only
             ChatActionButton(
-                label: "Send",
+                icon: "paperplane.fill",
                 color: .green,
                 action: onSend
             )
 
-            // Cancel button - reduced size
+            // Cancel button - icon only
             ChatActionButton(
-                label: "Cancel",
-                color: .gray,
+                icon: "xmark",
+                color: .red,
                 action: onDismiss
             )
         }
+        .padding(.horizontal, 0)
     }
 }
 
-/// Individual chat action button matching the square zap menu style
-/// Chat action button with native Liquid Glass style
+/// Chat action button with icon and Liquid Glass style
 private struct ChatActionButton: View {
-    let label: String
+    let icon: String
     let color: Color
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Text(label)
-                .font(.system(size: 18, weight: .bold))
-                .frame(width: 90, height: 90)
+            Image(systemName: icon)
+                .font(.system(size: 21, weight: .bold))
+                .foregroundColor(.white)
+                .frame(width: 58, height: 58)
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(.card)
         .tint(color)
     }
 }
@@ -535,6 +554,21 @@ private struct TypeMessageButton: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
+        }
+        .buttonStyle(.card)
+    }
+}
+
+/// Refresh chat button with native Liquid Glass style
+private struct RefreshChatButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "arrow.clockwise")
+                .font(.system(size: 22))
+                .foregroundColor(.blue)
+                .frame(width: 58, height: 58)
         }
         .buttonStyle(.card)
     }
