@@ -32,8 +32,6 @@ class ZapRequestGenerator {
         comment: String,
         lud16: String
     ) async throws -> String {
-        print("⚡️ Generating zap: \(amount) sats → \(stream.profile?.displayNameOrName ?? "streamer")")
-
         // Ensure user is authenticated
         guard let authManager = authManager, authManager.isAuthenticated else {
             throw ZapRequestError.noSigningMethodAvailable

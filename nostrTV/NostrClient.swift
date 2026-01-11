@@ -114,7 +114,6 @@ class NostrClient {
 
             self.profileCache[pubkey] = entry
         }
-        print("✅ Cached profile for \(pubkey.prefix(8))... - \(profile.displayName ?? profile.name ?? "Unknown")")
     }
 
     /// Evict expired and least recently used profiles when cache is full

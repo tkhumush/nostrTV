@@ -141,9 +141,6 @@ class NostrSDKClient {
     private func handleRelayEvent(_ relayEvent: RelayEvent) {
         let event = relayEvent.event
 
-        // Log all events for debugging
-        print("📨 NostrSDKClient: Received event kind \(event.kind.rawValue) from relay")
-
         // Route by event kind
         switch event.kind.rawValue {
         case 0:
@@ -159,7 +156,6 @@ class NostrSDKClient {
         case 24133:
             handleBunkerMessageEvent(event)
         case 30311:
-            print("🎥 NostrSDKClient: Processing live stream event")
             handleLiveStreamEvent(event)
         default:
             break
@@ -214,7 +210,6 @@ class NostrSDKClient {
         // Wait for connections to establish
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             guard let self = self else { return }
-            print("🔧 NostrSDKClient: Requesting profile and follow list...")
             self.requestProfile(for: pubkey)
             self.requestFollowList(for: pubkey)
         }
@@ -607,9 +602,7 @@ class NostrSDKClient {
             viewerCount: viewerCount
         )
 
-
         // Notify callback
-        print("📢 NostrSDKClient: Calling onStreamReceived for stream: \(stream.title)")
         DispatchQueue.main.async { [weak self] in
             self?.onStreamReceived?(stream)
         }

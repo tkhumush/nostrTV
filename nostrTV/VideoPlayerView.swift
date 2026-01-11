@@ -392,12 +392,19 @@ struct VideoPlayerView: View {
 
     private func refreshChatMessages() {
         guard let stream = stream, let eventID = stream.eventID, let authorPubkey = stream.eventAuthorPubkey else {
-            print("⚠️ Cannot refresh chat - missing stream data")
             return
         }
 
-        print("🔄 Refreshing chat messages...")
-        chatManager.fetchChatMessagesForStream(eventID, pubkey: authorPubkey, dTag: stream.streamID)
+        // Clear existing messages and close subscription
+        chatManager.clearMessagesForStream(eventID)
+
+        // Ensure NostrSDKClient is connected before subscribing
+        nostrSDKClient.connect()
+
+        // Wait for connection, then fetch fresh messages
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            chatManager.fetchChatMessagesForStream(eventID, pubkey: authorPubkey, dTag: stream.streamID)
+        }
     }
 }
 
