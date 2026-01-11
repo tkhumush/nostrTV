@@ -319,8 +319,8 @@ struct StreamRowView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(stream.title)
                         .font(.headline)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(2)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
 
                     // Status indicator and tags
                     HStack(spacing: 8) {
@@ -386,10 +386,11 @@ struct StreamRowView: View {
                         .foregroundColor(.secondary)
                     }
                 }
-                .padding(.vertical, 6)
 
                 Spacer()
             }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 6)
         }
         .buttonStyle(.card)
         .opacity(stream.isLive ? 1.0 : 0.6) // Dim ended streams
