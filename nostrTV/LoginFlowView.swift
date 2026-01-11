@@ -18,8 +18,8 @@ struct LoginFlowView: View {
                 // User has entered NIP-05, show profile confirmation
                 ProfileConfirmationView(authManager: authManager)
             } else {
-                // No user yet, show NIP-05 entry
-                WelcomeView(authManager: authManager)
+                // No user yet, show bunker login directly
+                BunkerLoginView(authManager: authManager)
             }
         }
     }

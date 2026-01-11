@@ -51,18 +51,14 @@ struct BunkerLoginView: View {
                         .frame(height: 200)
 
                     // Cancel Button
-                    Button(action: {
+                    Button("Cancel", action: {
                         bunkerClient.disconnect()
                         dismiss()
-                    }) {
-                        Text("Cancel")
-                            .font(.system(size: 28))
-                            .foregroundColor(.white)
-                            .frame(width: 300, height: 70)
-                            .background(Color.gray)
-                            .cornerRadius(10)
-                    }
-                    .buttonStyle(.plain)
+                    })
+                    .buttonStyle(.bordered)
+                    .tint(.gray)
+                    .font(.system(size: 28))
+                    .controlSize(.large)
 
                     Spacer()
                 }

@@ -545,14 +545,30 @@ struct ContentView: View {
             Button(action: {
                 showProfilePage = true
             }) {
-                HStack(spacing: 8) {
+                // Show actual profile picture if logged in, otherwise generic icon
+                if authManager.isAuthenticated, let profile = authManager.currentProfile, let pictureURL = profile.picture {
+                    AsyncImage(url: URL(string: pictureURL)) { image in
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 48, height: 48)
+                            .clipShape(Circle())
+                    } placeholder: {
+                        Circle()
+                            .fill(Color.gray.opacity(0.3))
+                            .frame(width: 48, height: 48)
+                            .overlay(
+                                Image(systemName: "person.fill")
+                                    .font(.system(size: 24))
+                                    .foregroundColor(.white)
+                            )
+                    }
+                } else {
                     Image(systemName: "person.circle.fill")
-                        .font(.system(size: 32))
-                    Image(systemName: "gear")
-                        .font(.system(size: 20))
+                        .font(.system(size: 48))
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.card)
             .padding(.top, 60)
             .padding(.trailing, 40)
         }
