@@ -78,6 +78,7 @@ struct LiveChatView: View {
                         .padding(.top, 8)
                         .padding(.bottom, 8)  // Ensure last message has space
                     }
+                    .focusable(false)  // Prevent ScrollView from capturing focus
                     .background(Color.black)
                     .onChange(of: uniqueMessages.count) { oldValue, newValue in
                         // Only auto-scroll when new messages arrive AND user is at bottom

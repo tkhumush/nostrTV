@@ -32,6 +32,19 @@ struct VideoPlayerView: View {
     @State private var isChatVisible = true  // Track chat visibility
     @Environment(\.dismiss) private var dismiss
 
+    // Focus management for tvOS
+    @FocusState private var focusedField: FocusableField?
+    @Namespace private var focusNamespace
+
+    enum FocusableField: Hashable {
+        case profileButton
+        case refreshButton
+        case toggleChatButton
+        case textField
+        case sendButton
+        case cancelButton
+    }
+
     init(player: AVPlayer, lightningAddress: String?, stream: Stream?, nostrClient: NostrClient, nostrSDKClient: NostrSDKClient, zapManager: ZapManager?, authManager: NostrAuthManager) {
         self.player = player
         self.lightningAddress = lightningAddress
@@ -123,6 +136,7 @@ struct VideoPlayerView: View {
                                 .padding(.vertical, 8)
                             }
                             .buttonStyle(.card)
+                            .focused($focusedField, equals: .profileButton)
 
                             Spacer()
                         }
@@ -136,10 +150,12 @@ struct VideoPlayerView: View {
                         HStack(spacing: 8) {
                             Spacer()
                             RefreshChatButton(action: { refreshChatMessages() })
+                                .focused($focusedField, equals: .refreshButton)
                             ToggleChatButton(
                                 isChatVisible: $isChatVisible,
                                 action: { isChatVisible.toggle() }
                             )
+                                .focused($focusedField, equals: .toggleChatButton)
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 23)
@@ -160,14 +176,16 @@ struct VideoPlayerView: View {
                     )
                     .frame(maxWidth: .infinity)
 
-                    // Live chat column (17% - fixed width, conditionally visible)
-                    if isChatVisible, let stream = stream {
+                    // Live chat column (17% - always present for focus stability)
+                    if let stream = stream {
                         LiveChatView(
                             chatManager: chatManager,
                             stream: stream,
                             nostrClient: nostrSDKClient
                         )
-                        .frame(width: 375)  // 17% of typical 1920px width (~326px) + padding
+                        .frame(width: isChatVisible ? 375 : 0)  // Collapse width when hidden
+                        .opacity(isChatVisible ? 1 : 0)  // Hide visually
+                        .allowsHitTesting(isChatVisible)  // Disable interaction when hidden
                         .background(Color.black)
                     }
                 }
@@ -189,6 +207,7 @@ struct VideoPlayerView: View {
                     if let stream = stream {
                         ChatInputView(
                             message: $chatMessage,
+                            focusedField: $focusedField,
                             onSend: {
                                 sendChatMessage()
                             },
@@ -264,6 +283,30 @@ struct VideoPlayerView: View {
                 // IMPORTANT: Use eventAuthorPubkey (not host pubkey) for a-tag coordinate
                 // Chat messages reference: "30311:<event-author-pubkey>:<d-tag>"
                 chatManager.fetchChatMessagesForStream(eventID, pubkey: authorPubkey, dTag: stream.streamID)
+            }
+
+            // Set default focus after layout settles
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                focusedField = .profileButton
+            }
+        }
+        .onChange(of: isChatVisible) { oldValue, newValue in
+            // Restore focus when chat visibility changes
+            if !newValue {
+                // Chat hidden - move focus to toggle button
+                focusedField = .toggleChatButton
+            }
+        }
+        .onChange(of: showZapQR) { oldValue, newValue in
+            // Restore focus when QR dismissed
+            if !newValue && oldValue {
+                focusedField = .profileButton
+            }
+        }
+        .onChange(of: showStreamerProfile) { oldValue, newValue in
+            // Restore focus when profile dismissed
+            if !newValue && oldValue {
+                focusedField = .profileButton
             }
         }
         .onDisappear {
@@ -489,9 +532,9 @@ struct ZapChyronWrapper: View {
 /// Chat input view for sending messages
 struct ChatInputView: View {
     @Binding var message: String
+    @FocusState.Binding var focusedField: VideoPlayerView.FocusableField?
     let onSend: () -> Void
     let onDismiss: () -> Void
-    @FocusState private var isTextFieldFocused: Bool
 
     var body: some View {
         HStack(spacing: 9) {
@@ -500,11 +543,8 @@ struct ChatInputView: View {
                 .font(.system(size: 18))
                 .padding(.horizontal, 12)
                 .foregroundColor(.white)
-                .focused($isTextFieldFocused)
+                .focused($focusedField, equals: .textField)
                 .frame(width: 241, height: 58)
-                .onAppear {
-                    isTextFieldFocused = true
-                }
 
             // Send button - icon only
             ChatActionButton(
@@ -512,6 +552,7 @@ struct ChatInputView: View {
                 color: .green,
                 action: onSend
             )
+            .focused($focusedField, equals: .sendButton)
 
             // Cancel button - icon only
             ChatActionButton(
@@ -519,6 +560,7 @@ struct ChatInputView: View {
                 color: .red,
                 action: onDismiss
             )
+            .focused($focusedField, equals: .cancelButton)
         }
         .padding(.horizontal, 0)
     }
