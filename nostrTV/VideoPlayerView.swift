@@ -28,7 +28,6 @@ struct VideoPlayerView: View {
     @State private var liveActivityManager: LiveActivityManager?
     @State private var showStreamerProfile = false
     @StateObject private var chatManager: ChatManager
-    @State private var showChatInput = false
     @State private var chatMessage = ""
     @State private var isChatVisible = true  // Track chat visibility
     @Environment(\.dismiss) private var dismiss
@@ -133,16 +132,17 @@ struct VideoPlayerView: View {
                         .background(.ultraThinMaterial)
                         .focusSection()
 
-                        // Chat toggle button (17%)
-                        HStack {
+                        // Chat controls (17%)
+                        HStack(spacing: 8) {
                             Spacer()
+                            RefreshChatButton(action: { refreshChatMessages() })
                             ToggleChatButton(
                                 isChatVisible: $isChatVisible,
                                 action: { isChatVisible.toggle() }
                             )
                         }
                         .padding(.horizontal, 16)
-                        .padding(.vertical, 20)
+                        .padding(.vertical, 23)
                         .frame(width: 375)
                         .background(.ultraThinMaterial)
                         .focusSection()
@@ -185,32 +185,19 @@ struct VideoPlayerView: View {
                             .frame(maxWidth: .infinity)
                     }
 
-                    // Comment button (17% - fixed width, always visible)
+                    // Chat input (17% - fixed width, always visible)
                     if let stream = stream {
-                        VStack(spacing: 0) {
-                            if showChatInput {
-                                ChatInputView(
-                                    message: $chatMessage,
-                                    onSend: {
-                                        sendChatMessage()
-                                    },
-                                    onDismiss: {
-                                        showChatInput = false
-                                        chatMessage = ""
-                                    }
-                                )
-                                .padding(.horizontal, 0)
-                                .padding(.vertical, 16)
-                            } else {
-                                HStack(spacing: 8) {
-                                    TypeMessageButton(action: { showChatInput = true })
-
-                                    RefreshChatButton(action: { refreshChatMessages() })
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 16)
+                        ChatInputView(
+                            message: $chatMessage,
+                            onSend: {
+                                sendChatMessage()
+                            },
+                            onDismiss: {
+                                chatMessage = ""
                             }
-                        }
+                        )
+                        .padding(.horizontal, 0)
+                        .padding(.vertical, 16)
                         .frame(width: 375)  // Match chat column width
                     }
                 }
@@ -398,9 +385,8 @@ struct VideoPlayerView: View {
                 try await liveActivityManager.sendChatMessage(chatMessage)
 
                 await MainActor.run {
-                    // Clear input and hide keyboard
+                    // Clear input
                     chatMessage = ""
-                    showChatInput = false
                 }
             } catch {
                 print("❌ Failed to send chat message: \(error)")
@@ -509,23 +495,16 @@ struct ChatInputView: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            // Text field container
-            ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(.ultraThinMaterial)
-                    .frame(width: 241, height: 58)
-
-                TextField("Type message...", text: $message)
-                    .font(.system(size: 18))
-                    .padding(.horizontal, 12)
-                    .foregroundColor(.white)
-                    .focused($isTextFieldFocused)
-                    .frame(width: 221)
-            }
-            .frame(width: 241, height: 58)
-            .onAppear {
-                isTextFieldFocused = true
-            }
+            // Text field
+            TextField("Type message...", text: $message)
+                .font(.system(size: 18))
+                .padding(.horizontal, 12)
+                .foregroundColor(.white)
+                .focused($isTextFieldFocused)
+                .frame(width: 241, height: 58)
+                .onAppear {
+                    isTextFieldFocused = true
+                }
 
             // Send button - icon only
             ChatActionButton(
