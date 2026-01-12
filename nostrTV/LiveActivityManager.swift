@@ -85,12 +85,12 @@ class LiveActivityManager: ObservableObject {
         // Publish to relays
         try nostrSDKClient.publishLegacyEvent(signedEvent)
 
-        // Also send a chat message announcing we're watching
-        do {
-            try await sendJoinChatMessage(stream: stream, aTag: aTag)
-        } catch {
-            print("⚠️ Failed to send join chat message: \(error.localizedDescription)")
-        }
+        // REMOVED: Automatic join chat message - users send messages manually via send button
+        // do {
+        //     try await sendJoinChatMessage(stream: stream, aTag: aTag)
+        // } catch {
+        //     print("⚠️ Failed to send join chat message: \(error.localizedDescription)")
+        // }
     }
 
     // MARK: - Leave Stream
