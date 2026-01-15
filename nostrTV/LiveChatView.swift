@@ -98,6 +98,19 @@ struct LiveChatView: View {
             }
         }
         .background(Color.black)
+        .onAppear {
+            print("🔍 LiveChatView: Fetching messages")
+            print("   streamId (eventID ?? streamID): \(streamId)")
+            print("   aTag: \(aTag ?? "nil")")
+            print("   eventID: \(stream.eventID ?? "nil")")
+            print("   streamID: \(stream.streamID)")
+            print("   eventAuthorPubkey: \(stream.eventAuthorPubkey ?? "nil")")
+        }
+        .onChange(of: chatManager.messageUpdateTrigger) { oldValue, newValue in
+            print("🔍 LiveChatView: messageUpdateTrigger changed: \(oldValue) -> \(newValue)")
+            print("   Total messages for streamId '\(streamId)': \(chatManager.getMessagesForStream(streamId).count)")
+            print("   Total messages for aTag '\(aTag ?? "")': \(chatManager.getMessagesForStream(aTag ?? "").count)")
+        }
     }
 }
 

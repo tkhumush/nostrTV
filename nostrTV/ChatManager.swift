@@ -45,6 +45,12 @@ class ChatManager: ObservableObject {
         // Build the "a" tag reference for the stream
         let aTag = "30311:\(pubkey.lowercased()):\(dTag)"
 
+        print("🔍 ChatManager: Subscribing to chat")
+        print("   streamEventId: \(streamEventId)")
+        print("   pubkey: \(pubkey)")
+        print("   dTag: \(dTag)")
+        print("   aTag: \(aTag)")
+
         // Create SDK Filter for kind 1311 (live chat) events
         guard let filter = Filter(
             kinds: [1311],
@@ -72,8 +78,14 @@ class ChatManager: ObservableObject {
     /// Handle incoming chat message
     private func handleChatMessage(_ zapComment: ZapComment) {
         guard let streamId = zapComment.streamEventId else {
+            print("⚠️ ChatManager: Received chat message with nil streamEventId - DROPPING")
             return
         }
+
+        print("💬 ChatManager: Received chat message")
+        print("   Message ID: \(zapComment.id)")
+        print("   Storing under key: \(streamId)")
+        print("   Message: \(zapComment.comment)")
 
         // Convert ZapComment to ChatMessage (don't store senderName, fetch it dynamically)
         let chatMessage = ChatMessage(
@@ -107,8 +119,13 @@ class ChatManager: ObservableObject {
             // Reassign to trigger @Published notification
             messagesByStream[streamId] = messages
 
+            print("✅ ChatManager: Message stored! Total messages for this stream: \(messages.count)")
+            print("   All storage keys: \(Array(messagesByStream.keys))")
+
             // Trigger UI update
             messageUpdateTrigger += 1
+        } else {
+            print("⚠️ ChatManager: Duplicate message, skipping")
         }
     }
 

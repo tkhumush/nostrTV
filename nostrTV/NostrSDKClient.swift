@@ -403,6 +403,11 @@ class NostrSDKClient {
         // Extract "a" tag (stream reference)
         let aTag = event.tags.first { $0.name == "a" }?.value
 
+        print("📨 NostrSDKClient: Received kind 1311 chat event")
+        print("   Event ID: \(chatEventId)")
+        print("   Content: \(content)")
+        print("   aTag from event: \(aTag ?? "nil")")
+
 
         // Get sender's profile name if cached
         let senderName = getProfile(for: senderPubkey)?.displayName ?? getProfile(for: senderPubkey)?.name
