@@ -19,7 +19,7 @@ class ChatManager: ObservableObject {
     @Published var messageUpdateTrigger: Int = 0  // Triggers UI updates when messages change
 
     private let nostrClient: NostrSDKClient
-    private var subscriptionIDs: [String: String] = [:]  // streamID -> subscriptionID
+    private var subscriptionIDs: [String: String] = [:]  // aTag -> subscriptionID (use aTag for consistent key management)
 
     init(nostrClient: NostrSDKClient) {
         self.nostrClient = nostrClient
@@ -42,14 +42,17 @@ class ChatManager: ObservableObject {
 
     /// Fetch chat messages for a specific stream
     func fetchChatMessagesForStream(_ streamEventId: String, pubkey: String, dTag: String) {
-        // Build the "a" tag reference for the stream
+        // Build the "a" tag reference for the stream (normalized to lowercase)
+        // IMPORTANT: Use aTag as the canonical key for subscriptions and storage
         let aTag = "30311:\(pubkey.lowercased()):\(dTag)"
 
-        print("🔍 ChatManager: Subscribing to chat")
-        print("   streamEventId: \(streamEventId)")
-        print("   pubkey: \(pubkey)")
-        print("   dTag: \(dTag)")
-        print("   aTag: \(aTag)")
+        print("🔍 ChatManager: Subscribing to chat for \(dTag)")
+
+        // Close any existing subscription for this stream to prevent conflicts
+        if let existingSubscriptionId = subscriptionIDs[aTag] {
+            nostrClient.closeSubscription(existingSubscriptionId)
+            subscriptionIDs.removeValue(forKey: aTag)
+        }
 
         // Create SDK Filter for kind 1311 (live chat) events
         guard let filter = Filter(
@@ -61,9 +64,11 @@ class ChatManager: ObservableObject {
             return
         }
 
-        // IMPORTANT: Wait for relays to connect before subscribing
-        // The SDK needs time to establish WebSocket connections
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+        // Ensure relays are connected
+        nostrClient.connect()
+
+        // Subscribe with a short delay to allow connection
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self = self else { return }
 
             let subscriptionId = self.nostrClient.subscribe(
@@ -71,21 +76,23 @@ class ChatManager: ObservableObject {
                 purpose: "chat-\(streamEventId.prefix(8))"
             )
 
-            self.subscriptionIDs[streamEventId] = subscriptionId
+            // Store under aTag key for consistent lookup
+            self.subscriptionIDs[aTag] = subscriptionId
         }
     }
 
     /// Handle incoming chat message
     private func handleChatMessage(_ zapComment: ZapComment) {
-        guard let streamId = zapComment.streamEventId else {
+        guard let rawStreamId = zapComment.streamEventId else {
             print("⚠️ ChatManager: Received chat message with nil streamEventId - DROPPING")
             return
         }
 
-        print("💬 ChatManager: Received chat message")
-        print("   Message ID: \(zapComment.id)")
-        print("   Storing under key: \(streamId)")
-        print("   Message: \(zapComment.comment)")
+        // Normalize the storage key to ensure consistent lookup
+        // The aTag format is "30311:<pubkey>:<d-tag>" - normalize pubkey to lowercase
+        let streamId = normalizeATag(rawStreamId)
+
+        print("💬 ChatManager: Received message: \(zapComment.comment.prefix(40))...")
 
         // Convert ZapComment to ChatMessage (don't store senderName, fetch it dynamically)
         let chatMessage = ChatMessage(
@@ -119,14 +126,29 @@ class ChatManager: ObservableObject {
             // Reassign to trigger @Published notification
             messagesByStream[streamId] = messages
 
-            print("✅ ChatManager: Message stored! Total messages for this stream: \(messages.count)")
-            print("   All storage keys: \(Array(messagesByStream.keys))")
+            print("✅ ChatManager: Message stored. Total: \(messages.count)")
 
             // Trigger UI update
             messageUpdateTrigger += 1
         } else {
             print("⚠️ ChatManager: Duplicate message, skipping")
         }
+    }
+
+    /// Normalize aTag to ensure consistent lookup
+    /// Converts the pubkey portion to lowercase: "30311:PUBKEY:dtag" -> "30311:pubkey:dtag"
+    private func normalizeATag(_ aTag: String) -> String {
+        let parts = aTag.split(separator: ":", maxSplits: 2)
+        guard parts.count >= 3 else {
+            // Not a valid aTag format, return as-is (lowercased for safety)
+            return aTag.lowercased()
+        }
+
+        let kind = parts[0]
+        let pubkey = parts[1].lowercased()
+        let dTag = parts[2]
+
+        return "\(kind):\(pubkey):\(dTag)"
     }
 
     /// Get chat messages for a specific stream
