@@ -38,7 +38,6 @@ struct VideoPlayerView: View {
 
     enum FocusableField: Hashable {
         case profileButton
-        case refreshButton
         case toggleChatButton
         case textField
         case sendButton
@@ -149,8 +148,6 @@ struct VideoPlayerView: View {
                         // Chat controls (17%)
                         HStack(spacing: 8) {
                             Spacer()
-                            RefreshChatButton(action: { refreshChatMessages() })
-                                .focused($focusedField, equals: .refreshButton)
                             ToggleChatButton(
                                 isChatVisible: $isChatVisible,
                                 action: { isChatVisible.toggle() }
@@ -436,23 +433,6 @@ struct VideoPlayerView: View {
             }
         }
     }
-
-    private func refreshChatMessages() {
-        guard let stream = stream, let eventID = stream.eventID, let authorPubkey = stream.eventAuthorPubkey else {
-            return
-        }
-
-        // Clear existing messages and close subscription
-        chatManager.clearMessagesForStream(eventID)
-
-        // Ensure NostrSDKClient is connected before subscribing
-        nostrSDKClient.connect()
-
-        // Wait for connection, then fetch fresh messages
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            chatManager.fetchChatMessagesForStream(eventID, pubkey: authorPubkey, dTag: stream.streamID)
-        }
-    }
 }
 
 /// Container for the AVPlayerViewController
@@ -600,21 +580,6 @@ private struct TypeMessageButton: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
-        }
-        .buttonStyle(.card)
-    }
-}
-
-/// Refresh chat button with native Liquid Glass style
-private struct RefreshChatButton: View {
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "arrow.clockwise")
-                .font(.system(size: 22))
-                .foregroundColor(.blue)
-                .frame(width: 58, height: 58)
         }
         .buttonStyle(.card)
     }

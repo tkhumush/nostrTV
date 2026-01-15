@@ -89,21 +89,23 @@ class ChatManager: ObservableObject {
         }
 
         // Add to messages array for this stream
-        if messagesByStream[streamId] == nil {
-            messagesByStream[streamId] = []
-        }
+        // Use copy-modify-reassign pattern to trigger @Published updates
+        var messages = messagesByStream[streamId] ?? []
 
         // Check if message already exists (prevent duplicates)
-        if !messagesByStream[streamId]!.contains(where: { $0.id == chatMessage.id }) {
-            messagesByStream[streamId]!.append(chatMessage)
+        if !messages.contains(where: { $0.id == chatMessage.id }) {
+            messages.append(chatMessage)
 
             // Sort by timestamp (oldest first, newest at bottom)
-            messagesByStream[streamId]!.sort { $0.timestamp < $1.timestamp }
+            messages.sort { $0.timestamp < $1.timestamp }
 
             // Keep only last 15 messages
-            if messagesByStream[streamId]!.count > 15 {
-                messagesByStream[streamId]!.removeFirst()
+            if messages.count > 15 {
+                messages.removeFirst()
             }
+
+            // Reassign to trigger @Published notification
+            messagesByStream[streamId] = messages
 
             // Trigger UI update
             messageUpdateTrigger += 1
