@@ -83,6 +83,9 @@ class StreamViewModel: ObservableObject {
             fatalError("Failed to initialize NostrSDKClient: \(error)")
         }
 
+        // Note: ChatManager now configures callbacks directly (like ZapManager)
+        // No need for ChatConnectionManager singleton configuration
+
         nostrSDKClient.onStreamReceived = { [weak self] stream in
             DispatchQueue.main.async {
                 guard let self = self else { return }

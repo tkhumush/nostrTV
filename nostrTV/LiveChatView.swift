@@ -17,17 +17,9 @@ struct LiveChatView: View {
     @State private var shouldAutoScroll = true
 
     var body: some View {
-        let streamId = stream.eventID ?? stream.streamID
-        // IMPORTANT: Use eventAuthorPubkey (not host pubkey) for a-tag lookup
-        // Messages are stored under: "30311:<event-author-pubkey>:<d-tag>"
-        let aTag = stream.eventAuthorPubkey.map { "30311:\($0.lowercased()):\(stream.streamID)" }
-        let messages = chatManager.getMessagesForStream(streamId)
-            + chatManager.getMessagesForStream(aTag ?? "")
-
-        // Deduplicate and sort messages (computed directly in body)
-        let uniqueMessages = Dictionary(grouping: messages, by: { $0.id })
-            .compactMap { $0.value.first }
-            .sorted { $0.timestamp < $1.timestamp }
+        // ChatManager now stores messages directly for the stream it's listening to
+        // No need for getMessagesForStream lookups - messages are already filtered
+        let messages = chatManager.messages
 
         // Force view refresh when profiles change OR messages change
         let _ = chatManager.profileUpdateTrigger
@@ -35,7 +27,7 @@ struct LiveChatView: View {
 
         VStack(spacing: 0) {
             // Messages
-            if uniqueMessages.isEmpty {
+            if messages.isEmpty {
                 // Empty state
                 VStack(spacing: 12) {
                     Text("💭")
@@ -53,7 +45,7 @@ struct LiveChatView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 8) {
-                            ForEach(uniqueMessages) { message in
+                            ForEach(messages) { message in
                                 ChatMessageRow(
                                     message: message,
                                     nostrClient: nostrClient,
@@ -62,13 +54,13 @@ struct LiveChatView: View {
                                 .id(message.id)
                                 .onAppear {
                                     // Re-enable auto-scroll when user scrolls back to bottom
-                                    if message.id == uniqueMessages.last?.id {
+                                    if message.id == messages.last?.id {
                                         shouldAutoScroll = true
                                     }
                                 }
                                 .onDisappear {
                                     // Disable auto-scroll when user scrolls up (last message goes off screen)
-                                    if message.id == uniqueMessages.last?.id {
+                                    if message.id == messages.last?.id {
                                         shouldAutoScroll = false
                                     }
                                 }
@@ -80,9 +72,9 @@ struct LiveChatView: View {
                     }
                     .focusable(false)  // Prevent ScrollView from capturing focus
                     .background(Color.black)
-                    .onChange(of: uniqueMessages.count) { oldValue, newValue in
+                    .onChange(of: messages.count) { oldValue, newValue in
                         // Only auto-scroll when new messages arrive AND user is at bottom
-                        if newValue > oldValue, shouldAutoScroll, let lastMessage = uniqueMessages.last {
+                        if newValue > oldValue, shouldAutoScroll, let lastMessage = messages.last {
                             withAnimation {
                                 proxy.scrollTo(lastMessage.id, anchor: .bottom)
                             }
@@ -90,7 +82,7 @@ struct LiveChatView: View {
                     }
                     .onAppear {
                         // Scroll to bottom on initial appear
-                        if let lastMessage = uniqueMessages.last {
+                        if let lastMessage = messages.last {
                             proxy.scrollTo(lastMessage.id, anchor: .bottom)
                         }
                     }
@@ -99,17 +91,13 @@ struct LiveChatView: View {
         }
         .background(Color.black)
         .onAppear {
-            print("🔍 LiveChatView: Fetching messages")
-            print("   streamId (eventID ?? streamID): \(streamId)")
-            print("   aTag: \(aTag ?? "nil")")
-            print("   eventID: \(stream.eventID ?? "nil")")
-            print("   streamID: \(stream.streamID)")
+            print("🔍 LiveChatView: Displaying chat for stream: \(stream.streamID)")
             print("   eventAuthorPubkey: \(stream.eventAuthorPubkey ?? "nil")")
+            print("   Current message count: \(messages.count)")
         }
         .onChange(of: chatManager.messageUpdateTrigger) { oldValue, newValue in
             print("🔍 LiveChatView: messageUpdateTrigger changed: \(oldValue) -> \(newValue)")
-            print("   Total messages for streamId '\(streamId)': \(chatManager.getMessagesForStream(streamId).count)")
-            print("   Total messages for aTag '\(aTag ?? "")': \(chatManager.getMessagesForStream(aTag ?? "").count)")
+            print("   Total messages: \(chatManager.messages.count)")
         }
     }
 }
@@ -203,9 +191,8 @@ private struct ChatMessageRow: View {
 
 #Preview {
     let nostrClient = try! NostrSDKClient()
-    let chatManager = ChatManager(nostrClient: nostrClient)
+    let chatManager = ChatManager()
 
-    // Add some sample messages
     let stream = Stream(
         streamID: "test-stream",
         eventID: "test-event",

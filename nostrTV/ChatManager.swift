@@ -3,7 +3,7 @@
 //  nostrTV
 //
 //  Created by Claude Code
-//  Refactored: 2026-01-07 to use NostrSDK
+//  Refactored: 2026-01-15 to match ZapManager's simple, reliable pattern
 //
 
 import Foundation
@@ -11,136 +11,179 @@ import Combine
 import NostrSDK
 
 /// Manages live chat messages for streams
-/// Subscribes to kind 1311 (live chat) events using NostrSDK
+/// Follows the same simple pattern as ZapManager - direct raw requests, no complex routing
 @MainActor
 class ChatManager: ObservableObject {
-    @Published private(set) var messagesByStream: [String: [ChatMessage]] = [:]
-    @Published var profileUpdateTrigger: Int = 0  // Triggers UI updates when profiles change
-    @Published var messageUpdateTrigger: Int = 0  // Triggers UI updates when messages change
+    @Published private(set) var messages: [ChatMessage] = []
+    @Published var profileUpdateTrigger: Int = 0
+    @Published var messageUpdateTrigger: Int = 0
 
-    private let nostrClient: NostrSDKClient
-    private var subscriptionIDs: [String: String] = [:]  // aTag -> subscriptionID (use aTag for consistent key management)
+    private var nostrClient: NostrSDKClient?
+    private var subscriptionId: String?
+    private var currentStreamATag: String?
 
-    init(nostrClient: NostrSDKClient) {
-        self.nostrClient = nostrClient
+    /// Maximum messages to keep
+    private let maxMessages = 50
 
-        // Set up callback to receive chat messages (kind 1311)
-        nostrClient.onChatReceived = { [weak self] chatComment in
+    init() {
+        print("💬 ChatManager: Initialized")
+    }
+
+    deinit {
+        print("💬 ChatManager: Deallocating")
+    }
+
+    // MARK: - Public Methods
+
+    /// Start listening for chat messages for a stream
+    /// - Parameters:
+    ///   - stream: The stream to listen for
+    ///   - client: The NostrSDKClient for profile lookups and requests
+    func startListening(for stream: Stream, using client: NostrSDKClient) {
+        guard let authorPubkey = stream.eventAuthorPubkey else {
+            print("💬 ChatManager: Cannot start - stream has no eventAuthorPubkey")
+            return
+        }
+
+        self.nostrClient = client
+        self.currentStreamATag = "30311:\(authorPubkey.lowercased()):\(stream.streamID)"
+
+        // Close any existing subscription first
+        closeSubscription()
+
+        // Set up callback DIRECTLY on the client (same pattern as ZapManager)
+        client.onChatReceived = { [weak self] chatComment in
             Task { @MainActor in
-                self?.handleChatMessage(chatComment)
+                self?.handleChatReceived(chatComment)
             }
         }
 
-        // Set up callback to detect profile updates
-        nostrClient.addProfileReceivedCallback { [weak self] profile in
+        // Set up profile update callback
+        client.addProfileReceivedCallback { [weak self] _ in
             Task { @MainActor in
-                // Increment trigger to force UI refresh when any profile is received
                 self?.profileUpdateTrigger += 1
             }
         }
-    }
 
-    /// Fetch chat messages for a specific stream
-    func fetchChatMessagesForStream(_ streamEventId: String, pubkey: String, dTag: String) {
-        // Build the "a" tag reference for the stream (normalized to lowercase)
-        // IMPORTANT: Use aTag as the canonical key for subscriptions and storage
-        let aTag = "30311:\(pubkey.lowercased()):\(dTag)"
+        // Create subscription ID
+        subscriptionId = "chat-\(stream.streamID.prefix(8))-\(UUID().uuidString.prefix(4))"
 
-        print("🔍 ChatManager: Subscribing to chat for \(dTag)")
+        print("💬 ChatManager: Starting to listen for \(stream.streamID)")
+        print("   aTag: \(currentStreamATag ?? "nil")")
+        print("   subscriptionId: \(subscriptionId ?? "nil")")
 
-        // Close any existing subscription for this stream to prevent conflicts
-        if let existingSubscriptionId = subscriptionIDs[aTag] {
-            nostrClient.closeSubscription(existingSubscriptionId)
-            subscriptionIDs.removeValue(forKey: aTag)
-        }
+        // Build filter for kind 1311 (live chat messages)
+        // Filter by "a" tag to get messages for this specific stream
+        let filter: [String: Any] = [
+            "kinds": [1311],
+            "#a": [currentStreamATag!],
+            "limit": 50
+        ]
 
-        // Create SDK Filter for kind 1311 (live chat) events
-        guard let filter = Filter(
-            kinds: [1311],
-            tags: ["a": [aTag]],
-            limit: 15  // Get last 15 messages
-        ) else {
-            print("❌ ChatManager: Failed to create chat filter")
-            return
-        }
+        let chatReq: [Any] = ["REQ", subscriptionId!, filter]
 
-        // Ensure relays are connected
-        nostrClient.connect()
+        print("   Chat filter:")
+        print("     kinds: [1311]")
+        print("     #a: [\(currentStreamATag!)]")
+        print("     limit: 50")
 
-        // Subscribe with a short delay to allow connection
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self = self else { return }
-
-            let subscriptionId = self.nostrClient.subscribe(
-                with: filter,
-                purpose: "chat-\(streamEventId.prefix(8))"
-            )
-
-            // Store under aTag key for consistent lookup
-            self.subscriptionIDs[aTag] = subscriptionId
+        // Send request via raw request (same as ZapManager)
+        do {
+            try client.sendRawRequest(chatReq)
+            print("   ✓ Chat request sent to relays")
+        } catch {
+            print("   ❌ Failed to send chat request: \(error)")
         }
     }
 
-    /// Handle incoming chat message
-    private func handleChatMessage(_ zapComment: ZapComment) {
-        guard let rawStreamId = zapComment.streamEventId else {
-            print("⚠️ ChatManager: Received chat message with nil streamEventId - DROPPING")
+    /// Stop listening - explicitly closes the subscription
+    func stopListening() {
+        print("💬 ChatManager: Stopping")
+        closeSubscription()
+        messages = []
+        currentStreamATag = nil
+    }
+
+    /// Get messages for the current stream (for compatibility)
+    func getMessagesForStream(_ streamId: String) -> [ChatMessage] {
+        return messages
+    }
+
+    // MARK: - Private Methods
+
+    /// Close the current subscription
+    private func closeSubscription() {
+        guard let subId = subscriptionId, let client = nostrClient else {
             return
         }
 
-        // Normalize the storage key to ensure consistent lookup
-        // The aTag format is "30311:<pubkey>:<d-tag>" - normalize pubkey to lowercase
-        let streamId = normalizeATag(rawStreamId)
+        // Send CLOSE message (same pattern as ZapManager)
+        let closeReq: [Any] = ["CLOSE", subId]
+        do {
+            try client.sendRawRequest(closeReq)
+            print("📪 Closed chat subscription: \(subId)")
+        } catch {
+            print("❌ Failed to close chat subscription: \(error)")
+        }
 
-        print("💬 ChatManager: Received message: \(zapComment.comment.prefix(40))...")
+        subscriptionId = nil
+    }
 
-        // Convert ZapComment to ChatMessage (don't store senderName, fetch it dynamically)
-        let chatMessage = ChatMessage(
-            id: zapComment.id,
-            senderPubkey: zapComment.senderPubkey,
-            message: zapComment.comment,
-            timestamp: zapComment.timestamp
+    /// Handle a received chat message (kind 1311)
+    private func handleChatReceived(_ chatComment: ZapComment) {
+        // Validate the message is for our stream
+        guard let messageATag = chatComment.streamEventId else {
+            print("💬 ChatManager: Message has no streamEventId, ignoring")
+            return
+        }
+
+        // Check if this message is for our current stream
+        let normalizedMessageATag = normalizeATag(messageATag)
+        guard let ourATag = currentStreamATag, normalizedMessageATag == ourATag else {
+            // Message is for a different stream, ignore
+            return
+        }
+
+        print("💬 ChatManager: Received message for our stream: \(chatComment.comment.prefix(30))...")
+
+        // Convert to ChatMessage
+        let message = ChatMessage(
+            id: chatComment.id,
+            senderPubkey: chatComment.senderPubkey,
+            message: chatComment.comment,
+            timestamp: chatComment.timestamp
         )
 
-        // Request profile for this sender if we don't have it yet
-        if nostrClient.getProfile(for: zapComment.senderPubkey) == nil {
-            nostrClient.requestProfile(for: zapComment.senderPubkey)
+        // Request profile if not cached
+        if let client = nostrClient, client.getProfile(for: chatComment.senderPubkey) == nil {
+            client.requestProfile(for: chatComment.senderPubkey)
         }
 
-        // Add to messages array for this stream
-        // Use copy-modify-reassign pattern to trigger @Published updates
-        var messages = messagesByStream[streamId] ?? []
-
-        // Check if message already exists (prevent duplicates)
-        if !messages.contains(where: { $0.id == chatMessage.id }) {
-            messages.append(chatMessage)
-
-            // Sort by timestamp (oldest first, newest at bottom)
-            messages.sort { $0.timestamp < $1.timestamp }
-
-            // Keep only last 15 messages
-            if messages.count > 15 {
-                messages.removeFirst()
-            }
-
-            // Reassign to trigger @Published notification
-            messagesByStream[streamId] = messages
-
-            print("✅ ChatManager: Message stored. Total: \(messages.count)")
-
-            // Trigger UI update
-            messageUpdateTrigger += 1
-        } else {
-            print("⚠️ ChatManager: Duplicate message, skipping")
+        // Check for duplicates
+        guard !messages.contains(where: { $0.id == message.id }) else {
+            print("💬 ChatManager: Duplicate message, skipping")
+            return
         }
+
+        // Add and sort
+        messages.append(message)
+        messages.sort { $0.timestamp < $1.timestamp }
+
+        // Trim to max
+        if messages.count > maxMessages {
+            messages.removeFirst(messages.count - maxMessages)
+        }
+
+        print("💬 ChatManager: Message stored. Total: \(messages.count)")
+
+        // Trigger UI update
+        messageUpdateTrigger += 1
     }
 
-    /// Normalize aTag to ensure consistent lookup
-    /// Converts the pubkey portion to lowercase: "30311:PUBKEY:dtag" -> "30311:pubkey:dtag"
+    /// Normalize aTag for consistent comparison
     private func normalizeATag(_ aTag: String) -> String {
         let parts = aTag.split(separator: ":", maxSplits: 2)
         guard parts.count >= 3 else {
-            // Not a valid aTag format, return as-is (lowercased for safety)
             return aTag.lowercased()
         }
 
@@ -149,22 +192,6 @@ class ChatManager: ObservableObject {
         let dTag = parts[2]
 
         return "\(kind):\(pubkey):\(dTag)"
-    }
-
-    /// Get chat messages for a specific stream
-    func getMessagesForStream(_ streamId: String) -> [ChatMessage] {
-        return messagesByStream[streamId] ?? []
-    }
-
-    /// Clear chat messages for a stream and unsubscribe
-    func clearMessagesForStream(_ streamId: String) {
-        messagesByStream.removeValue(forKey: streamId)
-
-        // Unsubscribe from chat messages using NostrSDKClient
-        if let subscriptionId = subscriptionIDs[streamId] {
-            nostrClient.closeSubscription(subscriptionId)
-            subscriptionIDs.removeValue(forKey: streamId)
-        }
     }
 }
 

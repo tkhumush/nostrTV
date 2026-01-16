@@ -53,8 +53,8 @@ struct VideoPlayerView: View {
         self.zapManager = zapManager
         self.authManager = authManager
 
-        // Use the SDK client passed from ContentView
-        _chatManager = StateObject(wrappedValue: ChatManager(nostrClient: nostrSDKClient))
+        // Create lightweight per-view ChatManager (delegates to singleton ChatConnectionManager)
+        _chatManager = StateObject(wrappedValue: ChatManager())
     }
 
     var body: some View {
@@ -275,11 +275,10 @@ struct VideoPlayerView: View {
                 startPresenceTimer()
             }
 
-            // Fetch chat messages for this stream
-            if let stream = stream, let eventID = stream.eventID, let authorPubkey = stream.eventAuthorPubkey {
-                // IMPORTANT: Use eventAuthorPubkey (not host pubkey) for a-tag coordinate
-                // Chat messages reference: "30311:<event-author-pubkey>:<d-tag>"
-                chatManager.fetchChatMessagesForStream(eventID, pubkey: authorPubkey, dTag: stream.streamID)
+            // Start listening for chat messages via the singleton ChatConnectionManager
+            // The ChatManager handles subscription lifecycle automatically via RAII
+            if let stream = stream {
+                chatManager.startListening(for: stream, using: nostrSDKClient)
             }
 
             // Set default focus after layout settles
@@ -307,6 +306,10 @@ struct VideoPlayerView: View {
             }
         }
         .onDisappear {
+            // CRITICAL: Stop chat subscription FIRST for reliable cleanup
+            // This must happen before other cleanup to ensure CLOSE is sent to relays
+            chatManager.stopListening()
+
             // Leave the stream
             if let activityManager = liveActivityManager {
                 Task {
