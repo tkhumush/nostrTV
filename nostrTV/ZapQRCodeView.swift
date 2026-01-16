@@ -23,48 +23,49 @@ struct ZapQRCodeView: View {
             Color.black.opacity(0.85)
                 .ignoresSafeArea()
 
-            VStack(spacing: 30) {
-                // Header - reduced spacing and font sizes
-                VStack(spacing: 10) {
+            VStack(spacing: 20) {
+                // Compact header - emoji and amount on same line
+                HStack(spacing: 16) {
                     Text(zapOption.emoji)
-                        .font(.system(size: 70))
+                        .font(.system(size: 50))
 
-                    Text("Scan to Zap")
-                        .font(.system(size: 38, weight: .bold))
-                        .foregroundColor(.white)
-
-                    HStack(spacing: 8) {
-                        Text("\(zapOption.displayAmount) sats")
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Scan to Zap")
                             .font(.system(size: 32, weight: .bold))
-                            .foregroundColor(.yellow)
+                            .foregroundColor(.white)
 
-                        Text("•")
-                            .font(.system(size: 32, weight: .bold))
-                            .foregroundColor(.gray)
+                        HStack(spacing: 8) {
+                            Text("\(zapOption.displayAmount) sats")
+                                .font(.system(size: 26, weight: .bold))
+                                .foregroundColor(.yellow)
 
-                        Text(zapOption.message)
-                            .font(.system(size: 24, weight: .medium))
-                            .foregroundColor(.white.opacity(0.9))
+                            Text("•")
+                                .font(.system(size: 26))
+                                .foregroundColor(.gray)
+
+                            Text(zapOption.message)
+                                .font(.system(size: 20, weight: .medium))
+                                .foregroundColor(.white.opacity(0.9))
+                        }
                     }
                 }
 
-                // QR Code - reduced size
+                // QR Code
                 if let qrImage = qrImage {
                     Image(uiImage: qrImage)
                         .interpolation(.none)
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 450, height: 450)
+                        .frame(width: 420, height: 420)
                         .background(Color.white)
-                        .cornerRadius(20)
+                        .cornerRadius(16)
                         .shadow(color: .yellow.opacity(0.3), radius: 20)
                 } else if isGenerating {
-                    // Loading indicator while generating
                     ZStack {
                         Rectangle()
                             .fill(Color.white)
-                            .frame(width: 450, height: 450)
-                            .cornerRadius(20)
+                            .frame(width: 420, height: 420)
+                            .cornerRadius(16)
                         ProgressView()
                             .scaleEffect(2.0)
                             .tint(.gray)
@@ -72,31 +73,32 @@ struct ZapQRCodeView: View {
                 } else {
                     Rectangle()
                         .fill(Color.gray.opacity(0.3))
-                        .frame(width: 450, height: 450)
-                        .cornerRadius(20)
+                        .frame(width: 420, height: 420)
+                        .cornerRadius(16)
                         .overlay(
                             Text("Failed to generate QR code")
                                 .foregroundColor(.white)
                         )
                 }
 
-                // Instructions - reduced spacing
-                VStack(spacing: 8) {
+                // Instructions and Done button inline
+                HStack {
                     Text("Scan with your Lightning wallet")
-                        .font(.system(size: 24, weight: .medium))
+                        .font(.system(size: 22, weight: .medium))
                         .foregroundColor(.white.opacity(0.8))
-                }
 
-                // Done button - native Liquid Glass style
-                Button("Done", action: onDismiss)
-                    .buttonStyle(.borderedProminent)
-                    .tint(.yellow)
-                    .font(.system(size: 30, weight: .semibold))
-                    .controlSize(.large)
+                    Spacer()
+
+                    Button("Done", action: onDismiss)
+                        .buttonStyle(.borderedProminent)
+                        .tint(.yellow)
+                        .font(.system(size: 26, weight: .semibold))
+                }
+                .padding(.horizontal, 20)
             }
+            .frame(maxHeight: .infinity, alignment: .top)
             .padding(.horizontal, 60)
-            .padding(.top, 40)
-            .padding(.bottom, 50)
+            .padding(.top, 60)
         }
         .onAppear {
             // Generate QR code on background thread to avoid blocking UI

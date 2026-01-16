@@ -134,8 +134,8 @@ struct StreamerSideMenu: View {
                             }
                         }
 
-                        // Bio/About
-                        if let about = profile.about, !about.isEmpty {
+                        // Bio/About - hidden when QR code is showing to make room
+                        if let about = profile.about, !about.isEmpty, !showQRCode {
                             Text(about)
                                 .font(.system(size: 18))
                                 .foregroundColor(.white.opacity(0.8))
