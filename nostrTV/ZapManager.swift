@@ -9,6 +9,7 @@ import Foundation
 
 /// Manages zap comments for streams
 /// Fetches and stores the latest zap receipts for each stream
+@MainActor
 class ZapManager: ObservableObject {
     @Published var zapComments: [String: [ZapComment]] = [:] // streamEventId -> [ZapComment]
     @Published var profileUpdateTrigger: Int = 0  // Triggers UI updates when profiles change
@@ -23,7 +24,9 @@ class ZapManager: ObservableObject {
 
         // Set up callback to receive zap receipts
         nostrSDKClient.onZapReceived = { [weak self] zapComment in
-            self?.handleZapReceived(zapComment)
+            Task { @MainActor in
+                self?.handleZapReceived(zapComment)
+            }
         }
 
         // Set up callback to detect profile updates

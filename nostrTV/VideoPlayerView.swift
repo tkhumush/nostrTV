@@ -38,7 +38,6 @@ struct VideoPlayerView: View {
 
     enum FocusableField: Hashable {
         case profileButton
-        case refreshButton
         case toggleChatButton
         case textField
         case sendButton
@@ -54,8 +53,8 @@ struct VideoPlayerView: View {
         self.zapManager = zapManager
         self.authManager = authManager
 
-        // Use the SDK client passed from ContentView
-        _chatManager = StateObject(wrappedValue: ChatManager(nostrClient: nostrSDKClient))
+        // Create lightweight per-view ChatManager (delegates to singleton ChatConnectionManager)
+        _chatManager = StateObject(wrappedValue: ChatManager())
     }
 
     var body: some View {
@@ -149,8 +148,6 @@ struct VideoPlayerView: View {
                         // Chat controls (17%)
                         HStack(spacing: 8) {
                             Spacer()
-                            RefreshChatButton(action: { refreshChatMessages() })
-                                .focused($focusedField, equals: .refreshButton)
                             ToggleChatButton(
                                 isChatVisible: $isChatVisible,
                                 action: { isChatVisible.toggle() }
@@ -278,11 +275,10 @@ struct VideoPlayerView: View {
                 startPresenceTimer()
             }
 
-            // Fetch chat messages for this stream
-            if let stream = stream, let eventID = stream.eventID, let authorPubkey = stream.eventAuthorPubkey {
-                // IMPORTANT: Use eventAuthorPubkey (not host pubkey) for a-tag coordinate
-                // Chat messages reference: "30311:<event-author-pubkey>:<d-tag>"
-                chatManager.fetchChatMessagesForStream(eventID, pubkey: authorPubkey, dTag: stream.streamID)
+            // Start listening for chat messages via the singleton ChatConnectionManager
+            // The ChatManager handles subscription lifecycle automatically via RAII
+            if let stream = stream {
+                chatManager.startListening(for: stream, using: nostrSDKClient)
             }
 
             // Set default focus after layout settles
@@ -310,6 +306,10 @@ struct VideoPlayerView: View {
             }
         }
         .onDisappear {
+            // CRITICAL: Stop chat subscription FIRST for reliable cleanup
+            // This must happen before other cleanup to ensure CLOSE is sent to relays
+            chatManager.stopListening()
+
             // Leave the stream
             if let activityManager = liveActivityManager {
                 Task {
@@ -434,23 +434,6 @@ struct VideoPlayerView: View {
             } catch {
                 print("❌ Failed to send chat message: \(error)")
             }
-        }
-    }
-
-    private func refreshChatMessages() {
-        guard let stream = stream, let eventID = stream.eventID, let authorPubkey = stream.eventAuthorPubkey else {
-            return
-        }
-
-        // Clear existing messages and close subscription
-        chatManager.clearMessagesForStream(eventID)
-
-        // Ensure NostrSDKClient is connected before subscribing
-        nostrSDKClient.connect()
-
-        // Wait for connection, then fetch fresh messages
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            chatManager.fetchChatMessagesForStream(eventID, pubkey: authorPubkey, dTag: stream.streamID)
         }
     }
 }
@@ -600,21 +583,6 @@ private struct TypeMessageButton: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
-        }
-        .buttonStyle(.card)
-    }
-}
-
-/// Refresh chat button with native Liquid Glass style
-private struct RefreshChatButton: View {
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "arrow.clockwise")
-                .font(.system(size: 22))
-                .foregroundColor(.blue)
-                .frame(width: 58, height: 58)
         }
         .buttonStyle(.card)
     }
