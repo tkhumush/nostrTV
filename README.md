@@ -22,9 +22,9 @@ nostrTV brings decentralized live streaming to your living room. The app connect
 - **10-foot UI** - Optimized interface for TV viewing with Apple TV remote navigation
 
 ## Screenshots
+<img width="3840" height="2160" alt="Simulator Screenshot - Apple TV 4K (3rd generation) - 2026-01-19 at 18 52 05" src="https://github.com/user-attachments/assets/7f29e3a7-93a0-48cc-b101-0dcad6ef7c1a" />
+<img width="3840" height="2160" alt="Simulator Screenshot - Apple TV 4K (3rd generation) - 2026-01-19 at 18 52 13" src="https://github.com/user-attachments/assets/de93ab87-5eab-40f6-8db9-f9fbb33dcb8d" />
 
-<!-- Add screenshots here -->
-*Coming soon*
 
 ## Requirements
 
