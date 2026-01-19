@@ -27,7 +27,7 @@ class StreamViewModel: ObservableObject {
     private let maxStreamCount = 200
 
     // Primary admin pubkey for curated Discover feed
-    private let adminPubkey = "a4a9df1630ef1b2f22b3c5ba56a14773c2b99f7a9eafaca30d7d6f90767acd9f"
+    private let adminPubkey = "f67a7093fdd829fae5796250cf0932482b1d7f40900110d0d932b5a7fb37755d"
 
     /// Expose the NostrSDKClient for use by other components
     var sdkClient: NostrSDKClient {
