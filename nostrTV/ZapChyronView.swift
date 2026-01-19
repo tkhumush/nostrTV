@@ -12,7 +12,7 @@ import SwiftUI
 struct ZapChyronView: View {
     let zapComments: [ZapComment]
     let nostrSDKClient: NostrSDKClient
-    @ObservedObject var zapManager: ZapManager
+    @ObservedObject var activityManager: StreamActivityManager
 
     @State private var currentIndex: Int = 0
     @State private var timer: Timer?
@@ -21,8 +21,8 @@ struct ZapChyronView: View {
     private let maxZapsToShow: Int = 10
 
     var body: some View {
-        // Use profileUpdateTrigger to force view refresh when profiles change
-        let _ = zapManager.profileUpdateTrigger
+        // Use updateTrigger to force view refresh when activity changes
+        let _ = activityManager.updateTrigger
 
         return content
     }
@@ -140,7 +140,7 @@ private struct ZapDisplayView: View {
 
 #Preview {
     let nostrSDKClient = try! NostrSDKClient()
-    let zapManager = ZapManager(nostrSDKClient: nostrSDKClient)
+    let activityManager = StreamActivityManager()
 
     ZStack {
         Color.blue
@@ -180,7 +180,7 @@ private struct ZapDisplayView: View {
                 )
             ],
                 nostrSDKClient: nostrSDKClient,
-                zapManager: zapManager
+                activityManager: activityManager
             )
             .padding(.bottom, 40)
         }

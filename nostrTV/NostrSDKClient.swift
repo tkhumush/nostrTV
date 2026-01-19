@@ -201,6 +201,71 @@ class NostrSDKClient {
         subscribe(with: filter, purpose: "follow-list-\(pubkey.prefix(8))")
     }
 
+    /// Subscribe to follow list for a specific user (kind 3), returns subscription ID
+    /// - Parameter pubkey: The user's public key
+    /// - Returns: Subscription ID for later closing, or nil if filter creation failed
+    func subscribeToFollowList(for pubkey: String) -> String? {
+        guard let filter = Filter(authors: [pubkey], kinds: [3], limit: 1) else {
+            print("❌ NostrSDKClient: Failed to create follow list filter")
+            return nil
+        }
+        return subscribe(with: filter, purpose: "follow-list-\(pubkey.prefix(8))")
+    }
+
+    /// Subscribe to profiles (kind 0) from specific authors
+    /// - Parameter authors: Array of pubkeys to get profiles from
+    /// - Returns: Subscription ID for later closing, or nil if filter creation failed
+    func subscribeToProfiles(authors: [String]) -> String? {
+        guard !authors.isEmpty else {
+            print("⚠️ NostrSDKClient: Cannot subscribe with empty author list")
+            return nil
+        }
+        guard let filter = Filter(authors: authors, kinds: [0], limit: 30) else {
+            print("❌ NostrSDKClient: Failed to create profiles filter")
+            return nil
+        }
+        let subId = subscribe(with: filter, purpose: "profiles")
+        print("✅ NostrSDKClient: Subscribed to profiles for \(authors.count) authors (limit: 30): \(subId.prefix(8))...")
+        return subId
+    }
+
+    /// Subscribe to live streams (kind 30311)
+    /// - Parameter limit: Maximum number of events to fetch
+    /// - Returns: Subscription ID for later closing, or nil if filter creation failed
+    func subscribeToStreams(limit: Int = 50) -> String? {
+        guard let filter = Filter(kinds: [30311], limit: limit) else {
+            print("❌ NostrSDKClient: Failed to create streams filter")
+            return nil
+        }
+        let subId = subscribe(with: filter, purpose: "streams")
+        print("✅ NostrSDKClient: Subscribed to streams (limit: \(limit)): \(subId.prefix(8))...")
+        return subId
+    }
+
+    /// Subscribe to chat (kind 1311) and zaps (kind 9735) for a specific stream by a-tag
+    /// - Parameter aTag: The stream's a-tag (format: "30311:<pubkey>:<d-tag>")
+    /// - Returns: Subscription ID for later closing, or nil if filter creation failed
+    func subscribeToChatAndZaps(aTag: String) -> String? {
+        guard let filter = Filter(kinds: [1311, 9735], tags: ["a": [aTag]], limit: 100) else {
+            print("❌ NostrSDKClient: Failed to create chat+zaps filter")
+            return nil
+        }
+        let subId = subscribe(with: filter, purpose: "chat-zaps-\(aTag.suffix(16))")
+        print("✅ NostrSDKClient: Subscribed to chat+zaps for \(aTag.suffix(20))...: \(subId.prefix(8))...")
+        return subId
+    }
+
+    /// Subscribe to user profile (kind 0) and follow list (kind 3)
+    /// - Parameter pubkey: The user's public key
+    /// - Returns: Subscription ID for later closing, or nil if filter creation failed
+    func subscribeToUserData(pubkey: String) -> String? {
+        guard let filter = Filter(authors: [pubkey], kinds: [0, 3], limit: 2) else {
+            print("❌ NostrSDKClient: Failed to create user data filter")
+            return nil
+        }
+        return subscribe(with: filter, purpose: "user-data-\(pubkey.prefix(8))")
+    }
+
     /// Convenience method: Connect to relays and fetch user profile + follow list
     /// - Parameter pubkey: The user's public key
     func connectAndFetchUserData(pubkey: String) {
@@ -367,11 +432,14 @@ class NostrSDKClient {
 
     /// Handle kind 3 (follow list) events
     private func handleFollowListEvent(_ event: NostrSDK.NostrEvent) {
+        print("📋 NostrSDKClient: Received kind 3 follow list from \(event.pubkey.prefix(16))...")
+
         // Extract p tags (followed pubkeys)
         let follows = event.tags
             .filter { $0.name == "p" }
             .compactMap { $0.value }
 
+        print("📋 NostrSDKClient: Extracted \(follows.count) follows from kind 3 event")
 
         DispatchQueue.main.async { [weak self] in
             self?.onFollowListReceived?(follows)

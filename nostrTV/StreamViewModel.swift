@@ -12,32 +12,26 @@ class StreamViewModel: ObservableObject {
     @Published var allCategorizedStreams: [StreamCategory] = []  // Discover streams (filtered by admin follow list)
     @Published var isLoadingAdminFollowList: Bool = true // Track if we're loading the admin follow list
     @Published var isInitialLoad: Bool = true // Track if this is the initial load (no streams received yet)
+
     private var nostrSDKClient: NostrSDKClient
-    private var legacyNostrClient = NostrClient() // Temporary: for ZapManager until it's migrated
-    private var refreshTimer: Timer?
     private var followList: Set<String> = [] // User follow list - Use Set for O(1) lookups
     private var adminFollowList: Set<String> = [] // Admin follow list for Discover tab
     private var validationTasks: Set<String> = [] // Track ongoing validations
-    private var adminFollowFetchState = (combined: Set<String>(), count: 0) // Track admin follow list fetching
+
+    // Active subscription tracking
+    private var adminFollowSubscriptionId: String?
+    private var profilesSubscriptionId: String? // kind 0 - filtered by authors, limit 30
+    private var streamsSubscriptionId: String?  // kind 30311 - no author filter, limit 50
 
     // Stream collection size limit to prevent unbounded memory growth
     private let maxStreamCount = 200
 
-    // Hardcoded admin pubkeys for curated Discover feed (primary + backup)
-    private let adminPubkeys = [
-        "f67a7093fdd829fae5796250cf0932482b1d7f40900110d0d932b5a7fb37755d", // nostrTVadmin (primary)
-        "9cb3545c36940d9a2ef86d50d5c7a8fab90310cc898c4344bcfc4c822ff47bca"  // tkay@bitcoindistrict.org (backup)
-    ]
+    // Primary admin pubkey for curated Discover feed
+    private let adminPubkey = "a4a9df1630ef1b2f22b3c5ba56a14773c2b99f7a9eafaca30d7d6f90767acd9f"
 
     /// Expose the NostrSDKClient for use by other components
     var sdkClient: NostrSDKClient {
         return nostrSDKClient
-    }
-
-    /// Expose the legacy NostrClient for backward compatibility (temporary)
-    /// TODO: Remove once ZapManager is migrated to NostrSDKClient
-    var client: NostrClient {
-        return legacyNostrClient
     }
 
     /// Get the featured stream (live stream with most viewers)
@@ -83,9 +77,23 @@ class StreamViewModel: ObservableObject {
             fatalError("Failed to initialize NostrSDKClient: \(error)")
         }
 
-        // Note: ChatManager now configures callbacks directly (like ZapManager)
-        // No need for ChatConnectionManager singleton configuration
+        setupCallbacks()
 
+        print("🔧 StreamViewModel init - isLoadingAdminFollowList: \(isLoadingAdminFollowList)")
+
+        // Load cached admin follow list immediately
+        loadCachedAdminFollowList()
+
+        print("🔧 After loadCachedAdminFollowList - isLoadingAdminFollowList: \(isLoadingAdminFollowList)")
+
+        // Connect and start subscriptions
+        startSubscriptions()
+    }
+
+    // MARK: - Callback Setup
+
+    private func setupCallbacks() {
+        // Handle incoming streams
         nostrSDKClient.onStreamReceived = { [weak self] stream in
             DispatchQueue.main.async {
                 guard let self = self else { return }
@@ -96,107 +104,199 @@ class StreamViewModel: ObservableObject {
                     print("✅ First stream received, ending initial load state")
                 }
 
-                // Always remove exact duplicates by streamID first
-                self.streams.removeAll { existingStream in
-                    existingStream.streamID == stream.streamID
+                // Filter to only show live streams (client-side filter since SDK doesn't support multi-char tag filters)
+                guard stream.isLive else {
+                    print("⏭️ Skipping ended stream: \(stream.streamID) (status: \(stream.status))")
+                    return
                 }
 
-                // For live streams, prevent duplicates from the same pubkey
-                // Only remove other LIVE streams from the same pubkey, not ended ones
-                if stream.isLive, let pubkey = stream.pubkey {
-                    self.streams.removeAll { existingStream in
-                        existingStream.pubkey == pubkey && existingStream.isLive
+                guard let pubkey = stream.pubkey else {
+                    print("⚠️ Stream has no pubkey, skipping: \(stream.streamID)")
+                    return
+                }
+
+                // Check if we already have a stream from this pubkey
+                if let existingIndex = self.streams.firstIndex(where: { $0.pubkey == pubkey }) {
+                    let existingStream = self.streams[existingIndex]
+
+                    // Compare dates - keep only the most recent stream per pubkey
+                    let newDate = stream.createdAt ?? Date.distantPast
+                    let existingDate = existingStream.createdAt ?? Date.distantPast
+
+                    if newDate > existingDate {
+                        // New stream is more recent - replace the old one
+                        self.streams.remove(at: existingIndex)
+                        self.streams.append(stream)
+                        self.validateStreamURL(stream)
                     }
+                    // If existing stream is newer, ignore this one
+                } else {
+                    // No existing stream from this pubkey - add it
+                    self.streams.append(stream)
+                    self.validateStreamURL(stream)
                 }
-
-                self.streams.append(stream)
 
                 // Evict old streams if we exceed the limit
                 self.evictOldStreamsIfNeeded()
 
                 self.updateCategorizedStreams()
-
-                // Validate stream URL in background
-                self.validateStreamURL(stream)
             }
         }
 
-        print("🔧 StreamViewModel init - isLoadingAdminFollowList: \(isLoadingAdminFollowList)")
-
-        // Load cached admin follow list immediately
-        loadCachedAdminFollowList()
-
-        print("🔧 After loadCachedAdminFollowList - isLoadingAdminFollowList: \(isLoadingAdminFollowList)")
-
-        // Only fetch fresh admin follow list if cache is missing or old
-        let shouldFetchFresh = adminFollowList.isEmpty || shouldRefreshAdminCache()
-        if shouldFetchFresh {
-            print("🔧 Fetching fresh admin follow list...")
-            fetchAdminFollowList()
-        } else {
-            print("✅ Using cached admin follow list, skipping network fetch")
+        // Handle follow list received (for admin follow list fetch)
+        nostrSDKClient.onFollowListReceived = { [weak self] follows in
+            DispatchQueue.main.async {
+                self?.handleAdminFollowListReceived(follows)
+            }
         }
-
-        startAutoRefresh()
     }
 
+    // MARK: - Subscription Management
+
+    private func startSubscriptions() {
+        print("🔧 StreamViewModel: Starting subscriptions...")
+        nostrSDKClient.connect()
+
+        // Wait for relay connections to establish
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self = self else { return }
+
+            // Start streams subscription immediately (no author filter, filter client-side)
+            self.createStreamsSubscription()
+
+            // If we have cached admin follow list, create profiles subscription
+            if !self.adminFollowList.isEmpty {
+                print("✅ Using cached admin follow list, creating profiles subscription...")
+                self.createProfilesSubscription(authors: Array(self.adminFollowList))
+            }
+
+            // Only fetch fresh admin follow list if cache is missing or old
+            let shouldFetchFresh = self.adminFollowList.isEmpty || self.shouldRefreshAdminCache()
+            if shouldFetchFresh {
+                print("🔧 Fetching fresh admin follow list...")
+                self.fetchAdminFollowList()
+            } else {
+                print("✅ Using cached admin follow list, skipping network fetch")
+            }
+        }
+    }
+
+    /// Create streams subscription (kind 30311) - no author filter, filter client-side
+    private func createStreamsSubscription() {
+        // Close existing subscription if any
+        if let existingSubId = streamsSubscriptionId {
+            print("📪 Closing existing streams subscription: \(existingSubId.prefix(8))...")
+            nostrSDKClient.closeSubscription(existingSubId)
+            streamsSubscriptionId = nil
+        }
+
+        // Subscribe to all streams, filter by admin follow list client-side
+        streamsSubscriptionId = nostrSDKClient.subscribeToStreams(limit: 50)
+        print("✅ Created streams subscription: \(streamsSubscriptionId?.prefix(8) ?? "nil")")
+    }
+
+    /// Create profiles subscription (kind 0) filtered by author list
+    private func createProfilesSubscription(authors: [String]) {
+        guard !authors.isEmpty else {
+            print("⚠️ Cannot create profiles subscription with empty author list")
+            return
+        }
+
+        // Close existing subscription if any
+        if let existingSubId = profilesSubscriptionId {
+            print("📪 Closing existing profiles subscription: \(existingSubId.prefix(8))...")
+            nostrSDKClient.closeSubscription(existingSubId)
+            profilesSubscriptionId = nil
+        }
+
+        // Profiles subscription - limit 30
+        profilesSubscriptionId = nostrSDKClient.subscribeToProfiles(authors: authors)
+        print("✅ Created profiles subscription for \(authors.count) authors: \(profilesSubscriptionId?.prefix(8) ?? "nil")")
+    }
+
+    /// Fetch admin follow list (kind 3) - fetch once then close
+    private func fetchAdminFollowList() {
+        print("🔧 Fetching admin follow list from primary admin...")
+
+        // Subscribe to admin's follow list
+        adminFollowSubscriptionId = nostrSDKClient.subscribeToFollowList(for: adminPubkey)
+        print("✅ Subscribed to admin follow list: \(adminFollowSubscriptionId?.prefix(8) ?? "nil")")
+
+        // Set a timeout to stop loading after 30 seconds if fetch fails
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30.0) { [weak self] in
+            guard let self = self else { return }
+            if self.isLoadingAdminFollowList {
+                print("⚠️ Admin follow list fetch timeout - stopping loading state")
+                self.isLoadingAdminFollowList = false
+            }
+        }
+    }
+
+    /// Handle received admin follow list
+    private func handleAdminFollowListReceived(_ follows: [String]) {
+        print("🔧 Admin follow list received! Count: \(follows.count)")
+
+        // Close the admin follow list subscription - we only need it once
+        if let subId = adminFollowSubscriptionId {
+            print("📪 Closing admin follow list subscription (received data): \(subId.prefix(8))...")
+            nostrSDKClient.closeSubscription(subId)
+            adminFollowSubscriptionId = nil
+        }
+
+        // Update admin follow list
+        adminFollowList = Set(follows)
+        isLoadingAdminFollowList = false
+        saveAdminFollowListToCache(follows)
+
+        // Create/update profiles subscription with the follow list
+        let combinedAuthors = getCombinedAuthorList()
+        createProfilesSubscription(authors: combinedAuthors)
+
+        updateCategorizedStreams()
+        print("✅ Admin follow list processed: \(follows.count) users")
+    }
+
+    // MARK: - User Follow List Updates
+
+    /// Update user follow list (called when user logs in)
     func updateFollowList(_ newFollowList: [String]) {
-        followList = Set(newFollowList) // Convert to Set for O(1) lookups
+        let previousFollowList = followList
+        followList = Set(newFollowList)
+
+        print("🔧 User follow list updated: \(newFollowList.count) users")
+
+        // If follow list actually changed, recreate profiles subscription with combined authors
+        if followList != previousFollowList && !followList.isEmpty {
+            let combinedAuthors = getCombinedAuthorList()
+            createProfilesSubscription(authors: combinedAuthors)
+        }
+
         // Re-categorize streams with new follow filter
         updateCategorizedStreams()
     }
 
+    /// Get combined author list (admin follows + user follows, deduplicated)
+    private func getCombinedAuthorList() -> [String] {
+        var combined = adminFollowList
+        combined.formUnion(followList)
+        return Array(combined)
+    }
+
     deinit {
-        stopAutoRefresh()
+        // Close all active subscriptions
+        if let subId = profilesSubscriptionId {
+            nostrSDKClient.closeSubscription(subId)
+        }
+        if let subId = streamsSubscriptionId {
+            nostrSDKClient.closeSubscription(subId)
+        }
+        if let subId = adminFollowSubscriptionId {
+            nostrSDKClient.closeSubscription(subId)
+        }
         nostrSDKClient.disconnect()
-        legacyNostrClient.disconnect()
     }
 
-    private func startAutoRefresh() {
-        print("🔧 StreamViewModel: Starting auto-refresh...")
-        // Initial connection and stream request
-        print("🔧 StreamViewModel: Calling nostrSDKClient.connect()...")
-        nostrSDKClient.connect()
-
-        // Wait for relay connections to establish before subscribing
-        print("⏳ StreamViewModel: Waiting 2 seconds for relay connections...")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            guard let self = self else { return }
-            print("🔧 StreamViewModel: Calling nostrSDKClient.requestLiveStreams(limit: 50)...")
-            self.nostrSDKClient.requestLiveStreams(limit: 50)
-        }
-
-        // Also connect legacy client for ZapManager (temporary)
-        print("🔧 StreamViewModel: Connecting legacy client...")
-        legacyNostrClient.connect()
-
-        // Set up timer for automatic refresh every 30 seconds
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
-            self?.refreshStreams()
-        }
-        print("✅ StreamViewModel: Auto-refresh started")
-    }
-
-    private func stopAutoRefresh() {
-        refreshTimer?.invalidate()
-        refreshTimer = nil
-    }
-
-    func refreshStreams() {
-        // Don't clear existing streams immediately - let new data come in and replace
-        nostrSDKClient.disconnect()
-        nostrSDKClient.connect()
-
-        // Wait for relay connections to establish before subscribing
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            guard let self = self else { return }
-            self.nostrSDKClient.requestLiveStreams(limit: 50)
-        }
-
-        // Also refresh legacy client
-        legacyNostrClient.disconnect()
-        legacyNostrClient.connect()
-    }
+    // MARK: - Stream Management
 
     /// Evict oldest ended streams when collection exceeds size limit
     private func evictOldStreamsIfNeeded() {
@@ -327,6 +427,8 @@ class StreamViewModel: ObservableObject {
         return categories
     }
 
+    // MARK: - Stream URL Validation
+
     private func validateStreamURL(_ stream: Stream) {
         // Skip if already validating this stream
         guard !validationTasks.contains(stream.streamID) else { return }
@@ -340,7 +442,6 @@ class StreamViewModel: ObservableObject {
         }
 
         validationTasks.insert(stream.streamID)
-        // Validating stream (removed verbose logging)
 
         // Use AVAsset to validate if the URL is actually a playable stream
         Task {
@@ -355,15 +456,12 @@ class StreamViewModel: ObservableObject {
                 await MainActor.run {
                     self.validationTasks.remove(stream.streamID)
                     if !isPlayable {
-                        // Stream not playable (removed verbose logging)
                         self.removeInvalidStream(stream)
                     }
-                    // Stream validated (removed verbose logging)
                 }
             } catch {
                 await MainActor.run {
                     self.validationTasks.remove(stream.streamID)
-                    // Stream validation failed (removed verbose logging)
                     self.removeInvalidStream(stream)
                 }
             }
@@ -391,6 +489,8 @@ class StreamViewModel: ObservableObject {
         streams.removeAll { $0.streamID == stream.streamID }
         updateCategorizedStreams()
     }
+
+    // MARK: - Cache Management
 
     private func shouldRefreshAdminCache() -> Bool {
         guard let cacheDate = UserDefaults.standard.object(forKey: "adminFollowListCacheDate") as? Date else {
@@ -435,50 +535,6 @@ class StreamViewModel: ObservableObject {
             print("✅ Saved admin follow list to cache (\(follows.count) users)")
         } catch {
             print("❌ Failed to encode admin follow list for caching")
-        }
-    }
-
-    private func fetchAdminFollowList() {
-        print("🔧 Fetching admin follow lists from \(adminPubkeys.count) admin accounts...")
-
-        // Reset fetch state
-        adminFollowFetchState = (Set<String>(), 0)
-
-        // Setup callback for admin follow list
-        nostrSDKClient.onFollowListReceived = { [weak self] follows in
-            print("🔧 Admin follow list received! Count: \(follows.count)")
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-
-                // Combine follows from all admin accounts
-                self.adminFollowFetchState.combined.formUnion(follows)
-                self.adminFollowFetchState.count += 1
-
-                // If we've received all follow lists, save and update
-                if self.adminFollowFetchState.count >= self.adminPubkeys.count {
-                    let allFollows = Array(self.adminFollowFetchState.combined)
-                    self.adminFollowList = self.adminFollowFetchState.combined
-                    self.isLoadingAdminFollowList = false
-                    self.saveAdminFollowListToCache(allFollows)
-                    self.updateCategorizedStreams()
-                    print("✅ Combined \(allFollows.count) unique follows from \(self.adminPubkeys.count) admin accounts")
-                }
-            }
-        }
-
-        // Set a timeout to stop loading after 30 seconds if fetch fails
-        DispatchQueue.main.asyncAfter(deadline: .now() + 30.0) { [weak self] in
-            guard let self = self else { return }
-            if self.isLoadingAdminFollowList {
-                print("⚠️ Admin follow list fetch timeout - stopping loading state")
-                self.isLoadingAdminFollowList = false
-            }
-        }
-
-        // Fetch the admin follow lists from all pubkeys
-        for pubkey in adminPubkeys {
-            print("🔧 Fetching from admin: \(pubkey.prefix(16))...")
-            nostrSDKClient.requestFollowList(for: pubkey)
         }
     }
 }

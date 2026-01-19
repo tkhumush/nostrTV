@@ -14,20 +14,17 @@ struct VideoPlayerView: View {
     let player: AVPlayer
     let lightningAddress: String?
     let stream: Stream?
-    let nostrClient: NostrClient
     let nostrSDKClient: NostrSDKClient
-    let zapManager: ZapManager?
     let authManager: NostrAuthManager
 
     @State private var showZapMenu = false
     @State private var showZapQR = false
     @State private var selectedZapOption: ZapOption?
     @State private var invoiceURI: String?
-    @State private var zapRefreshTimer: Timer?
     @State private var presenceTimer: Timer?
     @State private var liveActivityManager: LiveActivityManager?
     @State private var showStreamerProfile = false
-    @StateObject private var chatManager: ChatManager
+    @StateObject private var activityManager: StreamActivityManager
     @State private var chatMessage = ""
     @State private var isChatVisible = true  // Track chat visibility
     @Environment(\.dismiss) private var dismiss
@@ -44,17 +41,15 @@ struct VideoPlayerView: View {
         case cancelButton
     }
 
-    init(player: AVPlayer, lightningAddress: String?, stream: Stream?, nostrClient: NostrClient, nostrSDKClient: NostrSDKClient, zapManager: ZapManager?, authManager: NostrAuthManager) {
+    init(player: AVPlayer, lightningAddress: String?, stream: Stream?, nostrSDKClient: NostrSDKClient, authManager: NostrAuthManager) {
         self.player = player
         self.lightningAddress = lightningAddress
         self.stream = stream
-        self.nostrClient = nostrClient
         self.nostrSDKClient = nostrSDKClient
-        self.zapManager = zapManager
         self.authManager = authManager
 
-        // Create lightweight per-view ChatManager (delegates to singleton ChatConnectionManager)
-        _chatManager = StateObject(wrappedValue: ChatManager())
+        // Create StreamActivityManager for combined chat + zaps subscription
+        _activityManager = StateObject(wrappedValue: StreamActivityManager())
     }
 
     var body: some View {
@@ -168,7 +163,6 @@ struct VideoPlayerView: View {
                     VideoPlayerContainer(
                         player: player,
                         stream: stream,
-                        nostrClient: nostrClient,
                         onDismiss: { dismiss() }
                     )
                     .frame(maxWidth: .infinity)
@@ -176,7 +170,7 @@ struct VideoPlayerView: View {
                     // Live chat column (17% - always present for focus stability)
                     if let stream = stream {
                         LiveChatView(
-                            chatManager: chatManager,
+                            activityManager: activityManager,
                             stream: stream,
                             nostrClient: nostrSDKClient
                         )
@@ -190,8 +184,8 @@ struct VideoPlayerView: View {
                 // Row 3: Zap chyron (83%) and Comment button (17%)
                 HStack(spacing: 0) {
                     // Zap chyron (83%)
-                    if let stream = stream, let zapManager = zapManager {
-                        ZapChyronWrapper(zapManager: zapManager, stream: stream, nostrSDKClient: nostrSDKClient)
+                    if let stream = stream {
+                        ZapChyronWrapper(activityManager: activityManager, stream: stream, nostrSDKClient: nostrSDKClient)
                             .frame(height: 110)
                             .frame(maxWidth: .infinity)
                     } else {
@@ -261,24 +255,14 @@ struct VideoPlayerView: View {
                 }
             }
 
-            // Fetch zaps for this stream when view appears
-            if let stream = stream, let eventID = stream.eventID, let zapManager = zapManager, let pubkey = stream.pubkey {
-                // Fetch zap receipts (kind 9735)
-                zapManager.fetchZapsForStream(eventID, pubkey: pubkey, dTag: stream.streamID)
-
-                // Start periodic refresh every 30 seconds
-                startZapRefreshTimer()
+            // Start listening for chat and zaps (combined subscription)
+            if let stream = stream {
+                activityManager.startListening(for: stream, using: nostrSDKClient)
             }
 
             // Start presence updates for bunker-authenticated users
             if authManager.authMethod != nil, case .bunker = authManager.authMethod {
                 startPresenceTimer()
-            }
-
-            // Start listening for chat messages via the singleton ChatConnectionManager
-            // The ChatManager handles subscription lifecycle automatically via RAII
-            if let stream = stream {
-                chatManager.startListening(for: stream, using: nostrSDKClient)
             }
 
             // Set default focus after layout settles
@@ -306,31 +290,23 @@ struct VideoPlayerView: View {
             }
         }
         .onDisappear {
-            // CRITICAL: Stop chat subscription FIRST for reliable cleanup
-            // This must happen before other cleanup to ensure CLOSE is sent to relays
-            chatManager.stopListening()
+            // Stop the combined chat+zaps subscription
+            activityManager.stopListening()
 
-            // Leave the stream
-            if let activityManager = liveActivityManager {
+            // Leave the stream (live activity presence)
+            if let liveManager = liveActivityManager {
                 Task {
                     do {
-                        try await activityManager.leaveCurrentStream()
+                        try await liveManager.leaveCurrentStream()
                     } catch {
                         print("❌ Error leaving stream: \(error)")
                     }
                 }
             }
 
-            // Stop refresh timers
-            zapRefreshTimer?.invalidate()
-            zapRefreshTimer = nil
+            // Stop presence timer
             presenceTimer?.invalidate()
             presenceTimer = nil
-
-            // Clear zap subscriptions when view disappears
-            if let stream = stream, let eventID = stream.eventID, let zapManager = zapManager {
-                zapManager.clearZapsForStream(eventID)
-            }
         }
     }
 
@@ -359,34 +335,9 @@ struct VideoPlayerView: View {
                     invoiceURI = uri
                     showZapQR = true
                 }
-
-                // Wait 30 seconds and query for our zap receipt
-                print("⏱️ Waiting 30 seconds to check for zap receipt...")
-                try await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds
-
-                await MainActor.run {
-                    queryForOurZapReceipt()
-                }
+                // Zap receipts will arrive automatically via the persistent subscription
             } catch {
                 print("❌ Failed to generate zap request: \(error)")
-            }
-        }
-    }
-
-    private func queryForOurZapReceipt() {
-        guard let stream = stream, let zapManager = zapManager else { return }
-
-        // Refresh the zap request for this stream
-        if let eventID = stream.eventID {
-            zapManager.fetchZapsForStream(eventID, pubkey: stream.pubkey, dTag: stream.streamID)
-        }
-    }
-
-    private func startZapRefreshTimer() {
-        // Refresh zaps every 30 seconds
-        zapRefreshTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [self] _ in
-            if let stream = stream, let eventID = stream.eventID, let zapManager = zapManager {
-                zapManager.fetchZapsForStream(eventID, pubkey: stream.pubkey, dTag: stream.streamID)
             }
         }
     }
@@ -442,14 +393,12 @@ struct VideoPlayerView: View {
 struct VideoPlayerContainer: UIViewControllerRepresentable {
     let player: AVPlayer
     let stream: Stream?
-    let nostrClient: NostrClient
     let onDismiss: () -> Void
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = CustomAVPlayerViewController()
         controller.player = player
         controller.stream = stream
-        controller.nostrClient = nostrClient
         controller.onDismiss = onDismiss
         controller.player?.play()
         return controller
@@ -461,7 +410,6 @@ struct VideoPlayerContainer: UIViewControllerRepresentable {
 // Custom controller that disables the idle timer
 class CustomAVPlayerViewController: AVPlayerViewController {
     var stream: Stream?  // Stream being watched (for reference)
-    var nostrClient: NostrClient?  // Legacy NostrClient (for reference)
     var onDismiss: (() -> Void)?  // Closure to dismiss the view
 
     override func viewDidAppear(_ animated: Bool) {
@@ -491,24 +439,20 @@ class CustomAVPlayerViewController: AVPlayerViewController {
     }
 }
 
-// Wrapper view to observe zapManager and pass zap comments to the chyron
+// Wrapper view to observe activityManager and pass zap comments to the chyron
 struct ZapChyronWrapper: View {
-    @ObservedObject var zapManager: ZapManager
+    @ObservedObject var activityManager: StreamActivityManager
     let stream: Stream
     let nostrSDKClient: NostrSDKClient
 
     var body: some View {
-        // Try both eventID and a-tag format for lookup
-        let eventId = stream.eventID ?? stream.streamID
-        var zaps = zapManager.getZapsForStream(eventId)
+        // Force update when activity changes
+        let _ = activityManager.updateTrigger
 
-        // If no zaps found with eventID, try a-tag format
-        if zaps.isEmpty, let pubkey = stream.pubkey {
-            let aTag = "30311:\(pubkey.lowercased()):\(stream.streamID)"
-            zaps = zapManager.getZapsForStream(aTag)
-        }
+        // Get zaps from the activity manager
+        let zaps = activityManager.zapComments
 
-        return ZapChyronView(zapComments: zaps, nostrSDKClient: nostrSDKClient, zapManager: zapManager)
+        return ZapChyronView(zapComments: zaps, nostrSDKClient: nostrSDKClient, activityManager: activityManager)
     }
 }
 

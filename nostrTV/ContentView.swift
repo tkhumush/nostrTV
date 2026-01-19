@@ -435,7 +435,6 @@ struct StreamListView: View {
 
 struct ContentView: View {
     @StateObject private var viewModel: StreamViewModel
-    @StateObject private var zapManager: ZapManager
     @EnvironmentObject var authManager: NostrAuthManager
     @State private var selectedStreamURL: URL?
     @State private var showPlayer = false
@@ -448,7 +447,6 @@ struct ContentView: View {
     init() {
         let vm = StreamViewModel()
         _viewModel = StateObject(wrappedValue: vm)
-        _zapManager = StateObject(wrappedValue: ZapManager(nostrSDKClient: vm.sdkClient))
     }
 
     var body: some View {
@@ -575,7 +573,7 @@ struct ContentView: View {
         .ignoresSafeArea()
         .fullScreenCover(isPresented: $showPlayer) {
             if let player = player {
-                VideoPlayerView(player: player, lightningAddress: selectedLightningAddress, stream: selectedStream, nostrClient: viewModel.client, nostrSDKClient: viewModel.sdkClient, zapManager: zapManager, authManager: authManager)
+                VideoPlayerView(player: player, lightningAddress: selectedLightningAddress, stream: selectedStream, nostrSDKClient: viewModel.sdkClient, authManager: authManager)
                     .ignoresSafeArea()
             }
         }
