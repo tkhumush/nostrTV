@@ -10,20 +10,18 @@ import SwiftUI
 /// Vertical live chat view similar to Twitch/YouTube chat
 /// Displays chat messages in chronological order with auto-scroll
 struct LiveChatView: View {
-    @ObservedObject var chatManager: ChatManager
+    @ObservedObject var activityManager: StreamActivityManager
     let stream: Stream
     let nostrClient: NostrSDKClient
 
     @State private var shouldAutoScroll = true
 
     var body: some View {
-        // ChatManager now stores messages directly for the stream it's listening to
-        // No need for getMessagesForStream lookups - messages are already filtered
-        let messages = chatManager.messages
+        // StreamActivityManager stores chat messages for the stream it's listening to
+        let messages = activityManager.chatMessages
 
-        // Force view refresh when profiles change OR messages change
-        let _ = chatManager.profileUpdateTrigger
-        let _ = chatManager.messageUpdateTrigger
+        // Force view refresh when activity changes
+        let _ = activityManager.updateTrigger
 
         VStack(spacing: 0) {
             // Messages
@@ -49,7 +47,7 @@ struct LiveChatView: View {
                                 ChatMessageRow(
                                     message: message,
                                     nostrClient: nostrClient,
-                                    profileUpdateTrigger: chatManager.profileUpdateTrigger
+                                    updateTrigger: activityManager.updateTrigger
                                 )
                                 .id(message.id)
                                 .onAppear {
@@ -95,9 +93,9 @@ struct LiveChatView: View {
             print("   eventAuthorPubkey: \(stream.eventAuthorPubkey ?? "nil")")
             print("   Current message count: \(messages.count)")
         }
-        .onChange(of: chatManager.messageUpdateTrigger) { oldValue, newValue in
-            print("🔍 LiveChatView: messageUpdateTrigger changed: \(oldValue) -> \(newValue)")
-            print("   Total messages: \(chatManager.messages.count)")
+        .onChange(of: activityManager.updateTrigger) { oldValue, newValue in
+            print("🔍 LiveChatView: updateTrigger changed: \(oldValue) -> \(newValue)")
+            print("   Total messages: \(activityManager.chatMessages.count)")
         }
     }
 }
@@ -106,7 +104,7 @@ struct LiveChatView: View {
 private struct ChatMessageRow: View {
     let message: ChatMessage
     let nostrClient: NostrSDKClient
-    let profileUpdateTrigger: Int  // Forces re-render when profiles update
+    let updateTrigger: Int  // Forces re-render when activity updates
 
     var body: some View {
         // Dynamically fetch profile name from NostrSDKClient
@@ -115,7 +113,7 @@ private struct ChatMessageRow: View {
         let pictureURL = profile?.picture
 
         // Use the trigger to force re-computation (SwiftUI dependency tracking)
-        let _ = profileUpdateTrigger
+        let _ = updateTrigger
 
         HStack(alignment: .top, spacing: 8) {
             // Profile picture (circular, 32x32)
@@ -191,7 +189,7 @@ private struct ChatMessageRow: View {
 
 #Preview {
     let nostrClient = try! NostrSDKClient()
-    let chatManager = ChatManager()
+    let activityManager = StreamActivityManager()
 
     let stream = Stream(
         streamID: "test-stream",
@@ -208,6 +206,6 @@ private struct ChatMessageRow: View {
         viewerCount: 42
     )
 
-    LiveChatView(chatManager: chatManager, stream: stream, nostrClient: nostrClient)
+    LiveChatView(activityManager: activityManager, stream: stream, nostrClient: nostrClient)
         .frame(width: 400)
 }
