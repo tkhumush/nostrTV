@@ -26,8 +26,10 @@ class StreamViewModel: ObservableObject {
     // Stream collection size limit to prevent unbounded memory growth
     private let maxStreamCount = 200
 
-    // Primary admin pubkey for curated Discover feed
-    private let adminPubkey = "f67a7093fdd829fae5796250cf0932482b1d7f40900110d0d932b5a7fb37755d"
+    // Use AdminConfig for curated Discover feed (supports multi-admin)
+    private var adminPubkey: String {
+        return AdminConfig.primaryAdmin
+    }
 
     /// Expose the NostrSDKClient for use by other components
     var sdkClient: NostrSDKClient {

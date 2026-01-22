@@ -40,6 +40,9 @@ class NostrSDKClient {
     /// Active subscription IDs mapped to their purpose
     private var activeSubscriptions: [String: String] = [:] // subscriptionId -> purpose
 
+    /// Lock for thread-safe access to activeSubscriptions
+    private let subscriptionsLock = NSLock()
+
     /// Combine cancellables storage
     private var cancellables = Set<AnyCancellable>()
 
@@ -52,6 +55,62 @@ class NostrSDKClient {
     /// Pending profile requests (deduplication)
     private var pendingProfileRequests: Set<String> = []
     private let pendingRequestsQueue = DispatchQueue(label: "com.nostrtv.sdk.pendingRequests")
+
+    /// Rate limiter for relay requests
+    private let rateLimiter = RelayRateLimiter()
+
+    /// Batch size for profile requests
+    private let profileBatchSize = 30
+
+    // MARK: - Connection State
+
+    /// Last time a message was received from any relay
+    private var _lastMessageTime: Date = Date()
+    private let lastMessageTimeLock = NSLock()
+
+    /// Thread-safe accessor for lastMessageTime
+    private var lastMessageTime: Date {
+        get {
+            lastMessageTimeLock.lock()
+            defer { lastMessageTimeLock.unlock() }
+            return _lastMessageTime
+        }
+        set {
+            lastMessageTimeLock.lock()
+            defer { lastMessageTimeLock.unlock() }
+            _lastMessageTime = newValue
+        }
+    }
+
+    /// Heartbeat timer for connection monitoring
+    private var heartbeatTimer: Timer?
+
+    /// Current reconnection delay (exponential backoff)
+    private var _reconnectDelay: TimeInterval = 1
+    private let reconnectDelayLock = NSLock()
+
+    /// Thread-safe accessor for reconnectDelay
+    private var reconnectDelay: TimeInterval {
+        get {
+            reconnectDelayLock.lock()
+            defer { reconnectDelayLock.unlock() }
+            return _reconnectDelay
+        }
+        set {
+            reconnectDelayLock.lock()
+            defer { reconnectDelayLock.unlock() }
+            _reconnectDelay = newValue
+        }
+    }
+
+    /// Maximum reconnection delay
+    private let maxReconnectDelay: TimeInterval = 30
+
+    /// Whether we're currently attempting to reconnect
+    private var isReconnecting: Bool = false
+
+    /// Silence threshold before considering connection dead
+    private let connectionSilenceThreshold: TimeInterval = 60
 
     // MARK: - Callbacks (matching NostrClient interface)
 
@@ -117,13 +176,108 @@ class NostrSDKClient {
     func connect() {
         print("🔌 NostrSDKClient: Connecting to relays...")
         relayPool.connect()
+        startHeartbeat()
+        reconnectDelay = 1  // Reset backoff on successful connect
+        lastMessageTime = Date()
     }
 
     /// Disconnect from all relays
     func disconnect() {
+        stopHeartbeat()
         relayPool.disconnect()
         cancellables.removeAll()
+        subscriptionsLock.lock()
         activeSubscriptions.removeAll()
+        subscriptionsLock.unlock()
+    }
+
+    // MARK: - Heartbeat Monitoring
+
+    /// Start heartbeat timer to monitor connection health
+    private func startHeartbeat() {
+        // Ensure we're on the main thread for timer scheduling
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+
+            self.stopHeartbeat()  // Ensure no duplicate timers
+
+            self.heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
+                self?.checkConnectionHealth()
+            }
+            self.heartbeatTimer?.tolerance = 2.0  // Allow some tolerance for battery efficiency
+        }
+    }
+
+    /// Stop heartbeat timer
+    private func stopHeartbeat() {
+        heartbeatTimer?.invalidate()
+        heartbeatTimer = nil
+    }
+
+    /// Check connection health and reconnect if needed
+    private func checkConnectionHealth() {
+        let silenceDuration = Date().timeIntervalSince(lastMessageTime)
+
+        if silenceDuration > connectionSilenceThreshold {
+            print("⚠️ NostrSDKClient: Connection appears dead (silence: \(Int(silenceDuration))s)")
+            attemptReconnection()
+        }
+    }
+
+    /// Attempt to reconnect with exponential backoff
+    private func attemptReconnection() {
+        guard !isReconnecting else { return }
+        isReconnecting = true
+
+        print("🔄 NostrSDKClient: Attempting reconnection (delay: \(reconnectDelay)s)...")
+
+        // Disconnect cleanly first
+        relayPool.disconnect()
+
+        // Wait for backoff delay then reconnect
+        DispatchQueue.main.asyncAfter(deadline: .now() + reconnectDelay) { [weak self] in
+            guard let self = self else { return }
+
+            self.relayPool.connect()
+            self.lastMessageTime = Date()
+
+            // Resubscribe to all active subscriptions
+            self.resubscribeAll()
+
+            // Increase backoff for next attempt (capped)
+            self.reconnectDelay = min(self.reconnectDelay * 2, self.maxReconnectDelay)
+            self.isReconnecting = false
+
+            print("✅ NostrSDKClient: Reconnection attempt complete")
+        }
+    }
+
+    /// Resubscribe to all previously active subscriptions
+    private func resubscribeAll() {
+        // Store current subscriptions before clearing (thread-safe)
+        subscriptionsLock.lock()
+        let subscriptionsToRestore = activeSubscriptions
+        activeSubscriptions.removeAll()
+        subscriptionsLock.unlock()
+
+        // Recreate subscriptions based on purpose
+        for (_, purpose) in subscriptionsToRestore {
+            print("🔄 NostrSDKClient: Resubscribing: \(purpose)")
+
+            if purpose == "streams" {
+                subscribeToStreams(limit: 50)
+            } else if purpose == "streams-filtered" {
+                // Will need to be re-triggered by StreamViewModel
+                print("   ⚠️ Filtered streams subscription needs external re-trigger")
+            } else if purpose.hasPrefix("chat-zaps-") {
+                let aTag = String(purpose.dropFirst("chat-zaps-".count))
+                subscribeToChatAndZaps(aTag: aTag)
+            } else if purpose.hasPrefix("follow-list-") {
+                let pubkeyPrefix = String(purpose.dropFirst("follow-list-".count))
+                print("   ⚠️ Follow list subscription \(pubkeyPrefix) needs external re-trigger")
+            }
+            // Other subscriptions may need external re-triggering
+        }
     }
 
     // MARK: - Event Stream Setup
@@ -140,6 +294,24 @@ class NostrSDKClient {
     /// Route incoming relay events to appropriate handlers based on event kind
     private func handleRelayEvent(_ relayEvent: RelayEvent) {
         let event = relayEvent.event
+
+        // Update last message time for connection health monitoring
+        lastMessageTime = Date()
+
+        // Reset reconnect delay on successful message (connection is healthy)
+        if reconnectDelay > 1 {
+            reconnectDelay = 1
+        }
+
+        // Validate event before processing (without full signature verification for performance)
+        // Signature verification is expensive; relays typically verify signatures
+        // Enable full verification for high-security events if needed
+        do {
+            try NostrEventValidator.validateWithoutSignature(event)
+        } catch {
+            print("⚠️ NostrSDKClient: Event validation failed: \(error.localizedDescription)")
+            return  // Skip invalid events
+        }
 
         // Route by event kind
         switch event.kind.rawValue {
@@ -170,7 +342,9 @@ class NostrSDKClient {
     @discardableResult
     func subscribe(with filter: Filter, purpose: String = "custom") -> String {
         let subscriptionId = relayPool.subscribe(with: filter)
+        subscriptionsLock.lock()
         activeSubscriptions[subscriptionId] = purpose
+        subscriptionsLock.unlock()
         return subscriptionId
     }
 
@@ -178,7 +352,9 @@ class NostrSDKClient {
     /// - Parameter subscriptionId: The subscription ID to close
     func closeSubscription(_ subscriptionId: String) {
         relayPool.closeSubscription(with: subscriptionId)
+        subscriptionsLock.lock()
         activeSubscriptions.removeValue(forKey: subscriptionId)
+        subscriptionsLock.unlock()
     }
 
     /// Request live streams (kind 30311)
@@ -239,6 +415,26 @@ class NostrSDKClient {
         }
         let subId = subscribe(with: filter, purpose: "streams")
         print("✅ NostrSDKClient: Subscribed to streams (limit: \(limit)): \(subId.prefix(8))...")
+        return subId
+    }
+
+    /// Subscribe to live streams (kind 30311) filtered by specific authors
+    /// This is more efficient than client-side filtering as it reduces bandwidth
+    /// - Parameters:
+    ///   - authors: Array of pubkeys to filter by (only streams from these authors)
+    ///   - limit: Maximum number of events to fetch
+    /// - Returns: Subscription ID for later closing, or nil if filter creation failed
+    func subscribeToStreams(authors: [String], limit: Int = 50) -> String? {
+        guard !authors.isEmpty else {
+            print("⚠️ NostrSDKClient: Cannot subscribe with empty author list, falling back to unfiltered")
+            return subscribeToStreams(limit: limit)
+        }
+        guard let filter = Filter(authors: authors, kinds: [30311], limit: limit) else {
+            print("❌ NostrSDKClient: Failed to create author-filtered streams filter")
+            return nil
+        }
+        let subId = subscribe(with: filter, purpose: "streams-filtered")
+        print("✅ NostrSDKClient: Subscribed to streams from \(authors.count) authors (limit: \(limit)): \(subId.prefix(8))...")
         return subId
     }
 
@@ -360,6 +556,15 @@ class NostrSDKClient {
 
     /// Request profile metadata for a pubkey
     func requestProfile(for pubkey: String) {
+        // Check rate limit
+        guard rateLimiter.shouldAllowRequest() else {
+            // Queue for later
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.requestProfile(for: pubkey)
+            }
+            return
+        }
+
         // Deduplicate requests
         var shouldRequest = false
         pendingRequestsQueue.sync {
@@ -382,6 +587,64 @@ class NostrSDKClient {
         DispatchQueue.global().asyncAfter(deadline: .now() + 30) { [weak self] in
             self?.pendingRequestsQueue.async {
                 self?.pendingProfileRequests.remove(pubkey)
+            }
+        }
+    }
+
+    /// Request profiles for multiple pubkeys in batches (more efficient)
+    /// - Parameter pubkeys: Array of pubkeys to fetch profiles for
+    func requestProfiles(for pubkeys: [String]) {
+        // Filter out already cached and pending profiles
+        var uncachedPubkeys: [String] = []
+        pendingRequestsQueue.sync {
+            uncachedPubkeys = pubkeys.filter { pubkey in
+                !pendingProfileRequests.contains(pubkey) && getProfile(for: pubkey) == nil
+            }
+        }
+
+        guard !uncachedPubkeys.isEmpty else { return }
+
+        // Mark all as pending
+        pendingRequestsQueue.async { [weak self] in
+            for pubkey in uncachedPubkeys {
+                self?.pendingProfileRequests.insert(pubkey)
+            }
+        }
+
+        // Batch into groups
+        let batches = uncachedPubkeys.chunked(into: profileBatchSize)
+
+        for (index, batch) in batches.enumerated() {
+            // Rate limit between batches
+            let delay = Double(index) * 0.2  // 200ms between batches
+
+            DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self = self else { return }
+
+                // Check rate limit
+                guard self.rateLimiter.shouldAllowRequest() else {
+                    // Retry after delay
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
+                        self.requestProfiles(for: batch)
+                    }
+                    return
+                }
+
+                guard let filter = Filter(authors: batch, kinds: [0], limit: batch.count) else {
+                    return
+                }
+
+                self.subscribe(with: filter, purpose: "profiles-batch-\(index)")
+                print("📋 NostrSDKClient: Requested \(batch.count) profiles in batch \(index)")
+            }
+        }
+
+        // Clear pending after timeout
+        DispatchQueue.global().asyncAfter(deadline: .now() + 30) { [weak self] in
+            self?.pendingRequestsQueue.async {
+                for pubkey in uncachedPubkeys {
+                    self?.pendingProfileRequests.remove(pubkey)
+                }
             }
         }
     }
@@ -846,4 +1109,63 @@ private struct ProfileCacheEntry {
     let profile: Profile
     let timestamp: Date
     var lastAccessed: Date
+}
+
+// MARK: - Rate Limiter
+
+/// Rate limiter to prevent overwhelming relays with requests
+final class RelayRateLimiter {
+    /// Maximum requests per second
+    private let maxRequestsPerSecond: Int
+
+    /// Request timestamps within the current window
+    private var requestTimestamps: [Date] = []
+
+    /// Lock for thread safety
+    private let lock = NSLock()
+
+    init(maxRequestsPerSecond: Int = 10) {
+        self.maxRequestsPerSecond = maxRequestsPerSecond
+    }
+
+    /// Check if a new request should be allowed
+    /// - Returns: True if within rate limit, false if should be throttled
+    func shouldAllowRequest() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let now = Date()
+
+        // Remove timestamps older than 1 second
+        requestTimestamps = requestTimestamps.filter { now.timeIntervalSince($0) < 1.0 }
+
+        // Check if we're under the limit
+        if requestTimestamps.count < maxRequestsPerSecond {
+            requestTimestamps.append(now)
+            return true
+        }
+
+        return false
+    }
+
+    /// Reset the rate limiter (e.g., after reconnection)
+    func reset() {
+        lock.lock()
+        defer { lock.unlock() }
+        requestTimestamps.removeAll()
+    }
+}
+
+// MARK: - Array Extension
+
+extension Array {
+    /// Split array into chunks of specified size
+    /// - Parameter size: Maximum size of each chunk
+    /// - Returns: Array of chunks
+    func chunked(into size: Int) -> [[Element]] {
+        guard size > 0 else { return [self] }
+        return stride(from: 0, to: count, by: size).map {
+            Array(self[$0..<Swift.min($0 + size, count)])
+        }
+    }
 }
