@@ -81,3 +81,29 @@ nostrTV is a native Apple TV application that displays live video streams from t
 - Profile data is cached locally during app session
 - Stream URLs are validated before playback
 - No external package dependencies - uses only iOS/tvOS system frameworks
+
+## Documentation
+
+### Live Chat Architecture
+**IMPORTANT**: Before working on live chat features, read `docs/LIVE_CHAT_ARCHITECTURE.md`
+
+This document contains:
+- Analysis of Primal iOS app's reliable chat implementation
+- Root causes of chat reliability issues
+- Comprehensive implementation plan with code patterns
+- Comparison with nostrdb (not recommended for this use case)
+
+Key findings:
+- Use singleton `ChatConnectionManager` pattern (not per-view ChatManager)
+- Store handlers per subscription ID (avoid global callback overwriting)
+- Implement RAII-style cleanup via `deinit`
+- Add heartbeat monitoring and exponential backoff reconnection
+- Buffer messages until EOSE (End of Stored Events)
+
+### Nostr Event Kinds Used
+| Kind | Name | Purpose |
+|------|------|---------|
+| 0 | Metadata | User profiles |
+| 30311 | Live Event | Stream metadata |
+| 1311 | Live Comment | Chat messages |
+| 9735 | Zap Receipt | Payment receipts |
