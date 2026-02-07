@@ -67,6 +67,13 @@ class StreamActivityManager: ObservableObject {
             }
         }
 
+        // Listen for profile arrivals so the UI updates when profiles load
+        client.addProfileReceivedCallback { [weak self] profile in
+            Task { @MainActor in
+                self?.handleProfileReceived(profile)
+            }
+        }
+
         // Subscribe to both kinds with a single request using the new helper
         subscriptionId = client.subscribeToChatAndZaps(aTag: currentStreamATag!)
 
@@ -180,6 +187,17 @@ class StreamActivityManager: ObservableObject {
 
         // Trigger UI update
         updateTrigger += 1
+    }
+
+    /// Handle a profile arrival - trigger UI update if the profile belongs to a chat/zap sender
+    private func handleProfileReceived(_ profile: Profile) {
+        let pubkey = profile.pubkey
+        let isRelevant = chatMessages.contains { $0.senderPubkey == pubkey }
+            || zapComments.contains { $0.senderPubkey == pubkey }
+
+        if isRelevant {
+            updateTrigger += 1
+        }
     }
 
     /// Normalize aTag for consistent comparison
