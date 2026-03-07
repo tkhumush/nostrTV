@@ -21,7 +21,7 @@ class StreamViewModel: ObservableObject {
     // Active subscription tracking
     private var adminFollowSubscriptionId: String?
     private var profilesSubscriptionId: String? // kind 0 - filtered by authors, limit 30
-    private var streamsSubscriptionId: String?  // kind 30311 - no author filter, limit 50
+    private var streamsSubscriptionId: String?  // kind 30311 - author-filtered when follow list available
 
     // Stream collection size limit to prevent unbounded memory growth
     private let maxStreamCount = 200
@@ -163,7 +163,7 @@ class StreamViewModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             guard let self = self else { return }
 
-            // Start streams subscription immediately (no author filter, filter client-side)
+            // Start streams subscription (author-filtered if follow list is cached, otherwise unfiltered)
             self.createStreamsSubscription()
 
             // If we have cached admin follow list, create profiles subscription
@@ -183,7 +183,8 @@ class StreamViewModel: ObservableObject {
         }
     }
 
-    /// Create streams subscription (kind 30311) - no author filter, filter client-side
+    /// Create streams subscription (kind 30311)
+    /// Uses relay-level author filtering when admin follow list is available for efficiency
     private func createStreamsSubscription() {
         // Close existing subscription if any
         if let existingSubId = streamsSubscriptionId {
@@ -192,9 +193,15 @@ class StreamViewModel: ObservableObject {
             streamsSubscriptionId = nil
         }
 
-        // Subscribe to all streams, filter by admin follow list client-side
-        streamsSubscriptionId = nostrSDKClient.subscribeToStreams(limit: 50)
-        print("✅ Created streams subscription: \(streamsSubscriptionId?.prefix(8) ?? "nil")")
+        if !adminFollowList.isEmpty {
+            // Relay-level filtering: only fetch streams from followed authors (reduces bandwidth)
+            streamsSubscriptionId = nostrSDKClient.subscribeToStreams(authors: Array(adminFollowList), limit: 50)
+            print("✅ Created author-filtered streams subscription (\(adminFollowList.count) authors): \(streamsSubscriptionId?.prefix(8) ?? "nil")")
+        } else {
+            // No follow list yet — subscribe unfiltered, will resubscribe once follow list arrives
+            streamsSubscriptionId = nostrSDKClient.subscribeToStreams(limit: 50)
+            print("✅ Created unfiltered streams subscription: \(streamsSubscriptionId?.prefix(8) ?? "nil")")
+        }
     }
 
     /// Create profiles subscription (kind 0) filtered by author list
@@ -249,6 +256,9 @@ class StreamViewModel: ObservableObject {
         adminFollowList = Set(follows)
         isLoadingAdminFollowList = false
         saveAdminFollowListToCache(follows)
+
+        // Resubscribe to streams with relay-level author filtering
+        createStreamsSubscription()
 
         // Create/update profiles subscription with the follow list
         let combinedAuthors = getCombinedAuthorList()
