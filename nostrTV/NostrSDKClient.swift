@@ -10,6 +10,28 @@ import Foundation
 import Combine
 import NostrSDK
 
+/// NIP-65 relay entry with read/write permissions
+struct UserRelay {
+    let url: String
+    let read: Bool
+    let write: Bool
+
+    /// All relay URLs from a list
+    static func allURLs(_ relays: [UserRelay]) -> [String] {
+        relays.map { $0.url }
+    }
+
+    /// Only relays marked for reading
+    static func readRelays(_ relays: [UserRelay]) -> [String] {
+        relays.filter { $0.read }.map { $0.url }
+    }
+
+    /// Only relays marked for writing
+    static func writeRelays(_ relays: [UserRelay]) -> [String] {
+        relays.filter { $0.write }.map { $0.url }
+    }
+}
+
 /// A wrapper around NostrSDK's RelayPool that provides the same interface as the legacy NostrClient.
 /// This allows gradual migration from custom WebSocket implementation to the official SDK.
 ///
@@ -124,7 +146,8 @@ class NostrSDKClient {
     var onFollowListReceived: (([String]) -> Void)?
 
     /// Called when a user relay list (kind 10002) is received
-    var onUserRelaysReceived: (([String]) -> Void)?
+    /// Each entry contains the relay URL and its read/write permissions per NIP-65
+    var onUserRelaysReceived: (([UserRelay]) -> Void)?
 
     /// Called when a zap receipt (kind 9735) is received
     var onZapReceived: ((ZapComment) -> Void)?
@@ -710,13 +733,22 @@ class NostrSDKClient {
     }
 
     /// Handle kind 10002 (relay list metadata) events
+    /// Parses NIP-65 r-tags with read/write markers
     private func handleRelayListEvent(_ event: NostrSDK.NostrEvent) {
-        // Extract r tags (relay URLs)
-        let relays = event.tags
+        let relays: [UserRelay] = event.tags
             .filter { $0.name == "r" }
-            .compactMap { $0.value }
-            .filter { $0.hasPrefix("wss://") || $0.hasPrefix("ws://") }
-
+            .compactMap { tag in
+                let url = tag.value
+                guard url.hasPrefix("wss://") || url.hasPrefix("ws://") else {
+                    return nil
+                }
+                // NIP-65: optional third element is "read" or "write"
+                // If no marker, relay is used for both read and write
+                let marker = tag.otherParameters.first
+                let canRead = marker == nil || marker == "read"
+                let canWrite = marker == nil || marker == "write"
+                return UserRelay(url: url, read: canRead, write: canWrite)
+            }
 
         DispatchQueue.main.async { [weak self] in
             self?.onUserRelaysReceived?(relays)
