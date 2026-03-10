@@ -203,7 +203,9 @@ private struct ChatMessageRow: View {
         status: "live",
         tags: [],
         createdAt: Date(),
-        viewerCount: 42
+        viewerCount: 42,
+        recording: "",
+        startsAt: nil
     )
 
     LiveChatView(activityManager: activityManager, stream: stream, nostrClient: nostrClient)

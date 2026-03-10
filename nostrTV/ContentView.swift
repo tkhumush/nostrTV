@@ -481,7 +481,9 @@ struct ContentView: View {
                                     status: selectedStream.status,
                                     tags: selectedStream.tags,
                                     createdAt: selectedStream.createdAt,
-                                    viewerCount: selectedStream.viewerCount
+                                    viewerCount: selectedStream.viewerCount,
+                                    recording: selectedStream.recording,
+                                    startsAt: selectedStream.startsAt
                                 )
                             }
 
@@ -521,7 +523,9 @@ struct ContentView: View {
                                     status: selectedStream.status,
                                     tags: selectedStream.tags,
                                     createdAt: selectedStream.createdAt,
-                                    viewerCount: selectedStream.viewerCount
+                                    viewerCount: selectedStream.viewerCount,
+                                    recording: selectedStream.recording,
+                                    startsAt: selectedStream.startsAt
                                 )
                             }
 

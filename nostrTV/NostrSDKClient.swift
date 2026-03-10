@@ -135,6 +135,9 @@ class NostrSDKClient {
     /// Called when a bunker message (kind 24133) is received
     var onBunkerMessageReceived: ((NostrEvent) -> Void)?
 
+    /// Called when a stream deletion event (kind 5) is received
+    var onStreamDeletion: ((Set<String>) -> Void)?
+
     // MARK: - Initialization
 
     /// Initialize with relay URLs
@@ -319,6 +322,8 @@ class NostrSDKClient {
             handleMetadataEvent(event)
         case 3:
             handleFollowListEvent(event)
+        case 5:
+            handleDeletionEvent(event)
         case 1311:
             handleLiveChatEvent(event)
         case 9735:
@@ -435,6 +440,19 @@ class NostrSDKClient {
         }
         let subId = subscribe(with: filter, purpose: "streams-filtered")
         print("✅ NostrSDKClient: Subscribed to streams from \(authors.count) authors (limit: \(limit)): \(subId.prefix(8))...")
+        return subId
+    }
+
+    /// Subscribe to deletion events (kind 5) that reference live stream events.
+    /// Matches zap.stream's deletion event handling.
+    /// - Returns: Subscription ID for later closing, or nil if filter creation failed
+    func subscribeToDeletions() -> String? {
+        guard let filter = Filter(kinds: [5], tags: ["k": ["30311"]], limit: 100) else {
+            print("❌ NostrSDKClient: Failed to create deletions filter")
+            return nil
+        }
+        let subId = subscribe(with: filter, purpose: "stream-deletions")
+        print("✅ NostrSDKClient: Subscribed to stream deletion events: \(subId.prefix(8))...")
         return subId
     }
 
@@ -860,6 +878,24 @@ class NostrSDKClient {
         }
     }
 
+    /// Handle kind 5 (deletion) events targeting live streams
+    private func handleDeletionEvent(_ event: NostrSDK.NostrEvent) {
+        // Look for "a" tags referencing live streams: 30311:<pubkey>:<d-tag>
+        let deletedAddresses = event.tags
+            .filter { $0.name == "a" }
+            .compactMap { $0.value }
+            .filter { $0.hasPrefix("30311:") && $0.contains(event.pubkey) }
+
+        guard !deletedAddresses.isEmpty else { return }
+
+        let deletedSet = Set(deletedAddresses)
+        print("🗑️ Stream deletion from \(event.pubkey.prefix(16)): \(deletedSet)")
+
+        DispatchQueue.main.async { [weak self] in
+            self?.onStreamDeletion?(deletedSet)
+        }
+    }
+
     /// Handle kind 30311 (live stream) events
     private func handleLiveStreamEvent(_ event: NostrSDK.NostrEvent) {
 
@@ -923,6 +959,16 @@ class NostrSDKClient {
         let finalStreamURL = streamURL ?? "ended://\(streamID)"
 
         // Create Stream object
+        // Extract recording URL and starts time
+        let recording = tagValue("recording") ?? ""
+        let startsAt: Date? = {
+            if let startsString = tagValue("starts"),
+               let startsTimestamp = TimeInterval(startsString) {
+                return Date(timeIntervalSince1970: startsTimestamp)
+            }
+            return nil
+        }()
+
         let stream = Stream(
             streamID: streamID,
             eventID: event.id,
@@ -935,7 +981,9 @@ class NostrSDKClient {
             status: status,
             tags: allTags,
             createdAt: createdAt,
-            viewerCount: viewerCount
+            viewerCount: viewerCount,
+            recording: recording,
+            startsAt: startsAt
         )
 
         // Notify callback

@@ -20,8 +20,22 @@ struct Stream: Identifiable, Codable, Equatable {
     let tags: [String]
     let createdAt: Date?
     let viewerCount: Int  // Current viewer/participant count
+    let recording: String  // Recording URL from "recording" tag (for ended streams with VODs)
+    let startsAt: Date?  // Scheduled start time from "starts" tag
 
     var id: String { streamID }
+
+    /// The Nostr "a-tag" coordinate: 30311:<eventAuthorPubkey>:<d-tag>
+    /// Used for deletion event matching (kind 5)
+    var aTag: String? {
+        guard let authorPubkey = eventAuthorPubkey else { return nil }
+        return "30311:\(authorPubkey):\(streamID)"
+    }
+
+    /// NIP-33 deduplication key: eventAuthorPubkey:d-tag
+    var dedupKey: String {
+        return "\(eventAuthorPubkey ?? pubkey ?? ""):\(streamID)"
+    }
 
     var isLive: Bool {
         return status == "live"
