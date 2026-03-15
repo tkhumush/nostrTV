@@ -81,48 +81,60 @@ enum BunkerConnectionState: Equatable {
 /// Format: bunker://<client-pubkey>?relay=<relay-url>&secret=<secret>&metadata=<json>
 struct BunkerURIComponents {
     let clientPubkey: String
-    let relay: String
+    let relays: [String]
     let secret: String?
     let metadata: [String: String]?
 
+    /// Primary relay (first in the list)
+    var relay: String { relays.first ?? "" }
+
     /// Generate a bunker URI from components (for signer->client flow)
     func toURI() -> String {
-        var uri = "bunker://\(clientPubkey)?relay=\(relay)"
+        var uri = "bunker://\(clientPubkey)"
+        var params: [String] = []
 
-        if let secret = secret {
-            uri += "&secret=\(secret)"
+        for relay in relays {
+            params.append("relay=\(relay)")
         }
-
+        if let secret = secret {
+            params.append("secret=\(secret)")
+        }
         if let metadata = metadata,
            let jsonData = try? JSONSerialization.data(withJSONObject: metadata),
            let jsonString = String(data: jsonData, encoding: .utf8),
            let encoded = jsonString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-            uri += "&metadata=\(encoded)"
+            params.append("metadata=\(encoded)")
         }
 
+        if !params.isEmpty {
+            uri += "?" + params.joined(separator: "&")
+        }
         return uri
     }
 
     /// Generate a nostrconnect URI from components (for client->signer flow / reverse flow)
     func toNostrConnectURI() -> String {
-        // URL encode the relay
-        let encodedRelay = relay.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? relay
+        var uri = "nostrconnect://\(clientPubkey)"
+        var params: [String] = []
 
-        var uri = "nostrconnect://\(clientPubkey)?relay=\(encodedRelay)"
-
-        if let secret = secret {
-            uri += "&secret=\(secret)"
+        for relay in relays {
+            let encodedRelay = relay.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? relay
+            params.append("relay=\(encodedRelay)")
         }
-
-        // Add metadata as individual parameters (name, url, etc.)
+        if let secret = secret {
+            params.append("secret=\(secret)")
+        }
         if let metadata = metadata {
             for (key, value) in metadata {
                 if let encodedValue = value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-                    uri += "&\(key)=\(encodedValue)"
+                    params.append("\(key)=\(encodedValue)")
                 }
             }
         }
 
+        if !params.isEmpty {
+            uri += "?" + params.joined(separator: "&")
+        }
         return uri
     }
 
@@ -149,14 +161,16 @@ struct BunkerURIComponents {
             throw BunkerError.invalidURI("Invalid query parameters")
         }
 
-        var relay: String?
+        var relays: [String] = []
         var secret: String?
         var metadata: [String: String]?
 
         for item in queryItems {
             switch item.name {
             case "relay":
-                relay = item.value
+                if let value = item.value {
+                    relays.append(value)
+                }
             case "secret":
                 secret = item.value
             case "metadata":
@@ -170,13 +184,13 @@ struct BunkerURIComponents {
             }
         }
 
-        guard let relayURL = relay else {
+        guard !relays.isEmpty else {
             throw BunkerError.invalidURI("Missing required 'relay' parameter")
         }
 
         return BunkerURIComponents(
             clientPubkey: pubkey,
-            relay: relayURL,
+            relays: relays,
             secret: secret,
             metadata: metadata
         )
