@@ -15,7 +15,7 @@ struct ProfileSettingsView: View {
         VStack(spacing: 0) {
             // Title
             Text("Profile")
-                .font(.system(size: 56, weight: .bold))
+                .font(.coveHeading)
                 .foregroundColor(.white)
                 .padding(.top, 40)
                 .padding(.bottom, 40)
@@ -31,11 +31,11 @@ struct ProfileSettingsView: View {
                                 .aspectRatio(contentMode: .fill)
                         } placeholder: {
                             Circle()
-                                .fill(Color.gray.opacity(0.3))
+                                .fill(Color.coveOverlay)
                                 .overlay(
                                     Image(systemName: "person.fill")
                                         .font(.system(size: 120))
-                                        .foregroundColor(.white)
+                                        .foregroundColor(.coveAccent)
                                 )
                         }
                         .frame(width: 300, height: 300)
@@ -57,10 +57,10 @@ struct ProfileSettingsView: View {
                                 HStack(spacing: 8) {
                                     Image(systemName: "checkmark.seal.fill")
                                         .font(.system(size: 25))
-                                        .foregroundColor(.blue)
+                                        .foregroundColor(.coveAccent)
                                     Text(nip05)
                                         .font(.system(size: 28))
-                                        .foregroundColor(.blue)
+                                        .foregroundColor(.coveAccent)
                                 }
                             }
 
@@ -76,10 +76,10 @@ struct ProfileSettingsView: View {
                                 HStack(spacing: 8) {
                                     Image(systemName: "bolt.fill")
                                         .font(.system(size: 25))
-                                        .foregroundColor(.yellow)
+                                        .foregroundColor(.coveGold)
                                     Text(lud16)
                                         .font(.system(size: 25))
-                                        .foregroundColor(.secondary)
+                                        .foregroundColor(.coveSecondary)
                                 }
                             }
 
@@ -102,29 +102,29 @@ struct ProfileSettingsView: View {
                             HStack(spacing: 12) {
                                 Image(systemName: "lock.shield.fill")
                                     .font(.system(size: 34))
-                                    .foregroundColor(.purple)
+                                    .foregroundColor(.coveAccent)
                                 Text("Bunker Connection")
-                                    .font(.system(size: 34, weight: .semibold))
+                                    .font(.system(size: 34, weight: .semibold, design: .rounded))
                                     .foregroundColor(.white)
                             }
 
                             HStack(spacing: 12) {
                                 Circle()
-                                    .fill(Color.green)
+                                    .fill(Color.coveAccent)
                                     .frame(width: 14, height: 14)
                                 Text("Connected")
                                     .font(.system(size: 25))
-                                    .foregroundColor(.green)
+                                    .foregroundColor(.coveAccent)
                                     .fontWeight(.semibold)
                             }
 
                             HStack(spacing: 12) {
                                 Image(systemName: "key.fill")
                                     .font(.system(size: 22))
-                                    .foregroundColor(.purple)
+                                    .foregroundColor(.coveAccent)
                                 Text("Remote Signing Active")
                                     .font(.system(size: 25))
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(.coveSecondary)
                             }
 
                             if let pubkey = authManager.currentUser?.hexPubkey {
@@ -142,7 +142,7 @@ struct ProfileSettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(34)
                         .background(.ultraThinMaterial)
-                        .cornerRadius(16)
+                        .cornerRadius(CoveUI.cornerRadius)
                     }
 
                     Spacer()
@@ -154,8 +154,8 @@ struct ProfileSettingsView: View {
                             isPresented = false
                         })
                         .buttonStyle(.borderedProminent)
-                        .tint(.red)
-                        .font(.system(size: 39, weight: .semibold))
+                        .tint(.coveSecondary)
+                        .font(.system(size: 39, weight: .semibold, design: .rounded))
                         .controlSize(.large)
                     }
                     .focusSection()
@@ -168,29 +168,40 @@ struct ProfileSettingsView: View {
                     if authManager.isLoadingProfile {
                         ProgressView()
                             .scaleEffect(3)
-                            .tint(.white)
-                        Text("Loading profile...")
-                            .font(.system(size: 39))
-                            .foregroundColor(.gray)
+                            .tint(.coveAccent)
+                        Text(CoveCopy.profileLoading)
+                            .font(.system(size: 39, weight: .regular, design: .rounded))
+                            .foregroundColor(.coveSecondary)
                     } else {
-                        // Not loading but no profile - show error
+                        // Not loading but no profile - show error with escape hatch
                         Image(systemName: "exclamationmark.triangle")
                             .font(.system(size: 112))
-                            .foregroundColor(.orange)
+                            .foregroundColor(.coveGold)
 
                         Text(authManager.errorMessage ?? "Profile not available")
-                            .font(.system(size: 39))
-                            .foregroundColor(.gray)
+                            .font(.system(size: 39, weight: .regular, design: .rounded))
+                            .foregroundColor(.coveSecondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 40)
 
-                        Button("Retry", action: {
-                            authManager.fetchUserData()
-                        })
-                        .buttonStyle(.borderedProminent)
-                        .tint(.blue)
-                        .font(.system(size: 39, weight: .semibold))
-                        .controlSize(.large)
+                        HStack(spacing: 30) {
+                            Button("Retry", action: {
+                                authManager.fetchUserData()
+                            })
+                            .buttonStyle(.borderedProminent)
+                            .tint(.coveAccent)
+                            .font(.system(size: 39, weight: .semibold))
+                            .controlSize(.large)
+
+                            Button("Log Out", action: {
+                                authManager.logout()
+                                isPresented = false
+                            })
+                            .buttonStyle(.borderedProminent)
+                            .tint(.coveSecondary)
+                            .font(.system(size: 39, weight: .semibold))
+                            .controlSize(.large)
+                        }
                         .padding(.top, 20)
                     }
                 }
@@ -199,7 +210,7 @@ struct ProfileSettingsView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
+        .background(Color.coveBackground)
         .onAppear {
             // If profile is not loaded but user is authenticated, fetch it
             if authManager.currentProfile == nil && authManager.isAuthenticated {

@@ -17,19 +17,20 @@ struct CuratedLoadingView: View {
 
             ProgressView()
                 .scaleEffect(2)
-                .tint(.white)
+                .tint(.coveAccent)
 
-            Text("Curating...")
-                .font(.title2)
-                .fontWeight(.semibold)
+            Text(CoveCopy.appLoading)
+                .font(.coveSubheading)
+                .foregroundColor(.white)
 
-            Text("This will take a few seconds")
-                .font(.body)
-                .foregroundColor(.secondary)
+            Text(CoveCopy.loadingSubtitle)
+                .font(.coveBody)
+                .foregroundColor(.coveSecondary)
 
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.coveBackground)
     }
 }
 
@@ -43,27 +44,28 @@ struct FollowingEmptyStateView: View {
 
             Image(systemName: "person.2.fill")
                 .font(.system(size: 100))
-                .foregroundColor(.secondary)
+                .foregroundColor(.coveAccent.opacity(0.6))
 
-            Text("Log in to see your Following")
-                .font(.title2)
-                .fontWeight(.semibold)
+            Text(CoveCopy.loginPrompt)
+                .font(.coveSubheading)
+                .foregroundColor(.white)
 
-            Text("Connect your Nostr account to view streams from people you follow")
-                .font(.body)
-                .foregroundColor(.secondary)
+            Text(CoveCopy.loginSubtitle)
+                .font(.coveBody)
+                .foregroundColor(.coveSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
 
             Button("Log In", action: onLoginTap)
                 .buttonStyle(.borderedProminent)
-                .tint(.blue)
-                .font(.headline)
+                .tint(.coveAccent)
+                .font(.coveSubheading)
                 .controlSize(.large)
 
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.coveBackground)
     }
 }
 
@@ -132,21 +134,21 @@ struct FeaturedStreamCardView: View {
                             .cornerRadius(12)
                     }
 
-                    // Live indicator badge (top left with padding)
+                    // Live indicator badge — warm amber glow
                     if stream.isLive {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 6) {
                             Circle()
-                                .fill(Color.red)
-                                .frame(width: 8, height: 8)
+                                .fill(Color.coveGold)
+                                .frame(width: 10, height: 10)
+                                .shadow(color: .coveGold.opacity(0.8), radius: 4)
                             Text("LIVE")
-                                .font(.caption)
-                                .fontWeight(.bold)
+                                .font(.system(size: 14, weight: .bold, design: .rounded))
                                 .foregroundColor(.white)
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.black.opacity(0.7))
-                        .cornerRadius(6)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Color.coveBackground.opacity(0.85))
+                        .cornerRadius(CoveUI.badgeCornerRadius)
                         .padding(16)
                     }
                 }
@@ -174,12 +176,12 @@ struct FeaturedStreamCardView: View {
                                     .clipShape(Circle())
                             } placeholder: {
                                 Circle()
-                                    .fill(Color.gray)
+                                    .fill(Color.coveOverlay)
                                     .frame(width: 32, height: 32)
                             }
                         } else {
                             Circle()
-                                .fill(Color.blue)
+                                .fill(Color.coveAccent.opacity(0.3))
                                 .frame(width: 32, height: 32)
                                 .overlay(
                                     Image(systemName: "person.fill")
@@ -197,18 +199,18 @@ struct FeaturedStreamCardView: View {
                             return "Unknown"
                         }())
                         .font(.body)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.coveSecondary)
                     }
 
                     // Category and viewer count
                     HStack(spacing: 12) {
                         Text(stream.category)
                             .font(.subheadline)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.coveSecondary)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(Color.gray.opacity(0.2))
-                            .cornerRadius(6)
+                            .background(Color.coveOverlay)
+                            .cornerRadius(CoveUI.badgeCornerRadius)
 
                         if stream.viewerCount > 0 {
                             HStack(spacing: 4) {
@@ -217,7 +219,7 @@ struct FeaturedStreamCardView: View {
                                 Text("\(stream.viewerCount)")
                                     .font(.subheadline)
                             }
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.coveSecondary)
                         }
                     }
                 }
@@ -236,16 +238,15 @@ struct CategoryHeaderView: View {
     var body: some View {
         HStack {
             Text(categoryName)
-                .font(.headline)
-                .fontWeight(.semibold)
+                .font(.system(size: 22, weight: .semibold, design: .rounded))
             Spacer()
             Text("\(streamCount)")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(.coveSecondary)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(Color.gray.opacity(0.2))
-                .cornerRadius(8)
+                .background(Color.coveOverlay)
+                .cornerRadius(CoveUI.badgeCornerRadius)
         }
         .padding(.vertical, 4)
     }
@@ -324,22 +325,22 @@ struct StreamRowView: View {
 
                     // Status indicator and tags
                     HStack(spacing: 8) {
-                        // Live/Ended indicator
+                        // Live/Ended indicator — amber glow for live
                         HStack(spacing: 4) {
                             Circle()
-                                .fill(stream.isLive ? Color.red : Color.gray)
+                                .fill(stream.isLive ? Color.coveGold : Color.coveSecondary)
                                 .frame(width: 8, height: 8)
+                                .shadow(color: stream.isLive ? .coveGold.opacity(0.6) : .clear, radius: 3)
                             Text(stream.isLive ? "LIVE" : "ENDED")
-                                .font(.caption)
-                                .fontWeight(.bold)
-                                .foregroundColor(stream.isLive ? .red : .gray)
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                                .foregroundColor(stream.isLive ? .coveGold : .coveSecondary)
                         }
 
                         // Tags
                         if !stream.tags.isEmpty {
                             Text(stream.tags.prefix(2).joined(separator: ", "))
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(.coveSecondary)
                                 .lineLimit(1)
                         }
                     }
@@ -359,13 +360,13 @@ struct StreamRowView: View {
                                     .clipShape(Circle())
                             } placeholder: {
                                 Circle()
-                                    .fill(Color.gray)
+                                    .fill(Color.coveOverlay)
                                     .frame(width: 24, height: 24)
                             }
                         } else {
                             // Default profile picture
                             Circle()
-                                .fill(Color.blue)
+                                .fill(Color.coveAccent.opacity(0.3))
                                 .frame(width: 24, height: 24)
                                 .overlay(
                                     Image(systemName: "person.fill")
@@ -383,7 +384,7 @@ struct StreamRowView: View {
                             return "Unknown"
                         }())
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.coveSecondary)
                     }
                 }
 
@@ -481,7 +482,9 @@ struct ContentView: View {
                                     status: selectedStream.status,
                                     tags: selectedStream.tags,
                                     createdAt: selectedStream.createdAt,
-                                    viewerCount: selectedStream.viewerCount
+                                    viewerCount: selectedStream.viewerCount,
+                                    recording: selectedStream.recording,
+                                    startsAt: selectedStream.startsAt
                                 )
                             }
 
@@ -521,7 +524,9 @@ struct ContentView: View {
                                     status: selectedStream.status,
                                     tags: selectedStream.tags,
                                     createdAt: selectedStream.createdAt,
-                                    viewerCount: selectedStream.viewerCount
+                                    viewerCount: selectedStream.viewerCount,
+                                    recording: selectedStream.recording,
+                                    startsAt: selectedStream.startsAt
                                 )
                             }
 
@@ -553,12 +558,12 @@ struct ContentView: View {
                             .clipShape(Circle())
                     } placeholder: {
                         Circle()
-                            .fill(Color.gray.opacity(0.3))
+                            .fill(Color.coveOverlay)
                             .frame(width: 48, height: 48)
                             .overlay(
                                 Image(systemName: "person.fill")
                                     .font(.system(size: 24))
-                                    .foregroundColor(.white)
+                                    .foregroundColor(.coveAccent)
                             )
                     }
                 } else {
