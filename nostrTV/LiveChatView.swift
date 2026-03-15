@@ -43,6 +43,9 @@ struct LiveChatView: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
+                        // Spacer pushes content to the bottom like a chat app
+                        Spacer(minLength: 0)
+
                         LazyVStack(alignment: .leading, spacing: 8) {
                             ForEach(messages) { message in
                                 ChatMessageRow(
@@ -51,38 +54,20 @@ struct LiveChatView: View {
                                     updateTrigger: activityManager.updateTrigger
                                 )
                                 .id(message.id)
-                                .onAppear {
-                                    // Re-enable auto-scroll when user scrolls back to bottom
-                                    if message.id == messages.last?.id {
-                                        shouldAutoScroll = true
-                                    }
-                                }
-                                .onDisappear {
-                                    // Disable auto-scroll when user scrolls up (last message goes off screen)
-                                    if message.id == messages.last?.id {
-                                        shouldAutoScroll = false
-                                    }
-                                }
                             }
                         }
                         .padding(.horizontal, 12)
                         .padding(.top, 8)
-                        .padding(.bottom, 8)  // Ensure last message has space
+                        .padding(.bottom, 8)
                     }
                     .focusable(false)  // Prevent ScrollView from capturing focus
                     .background(Color.coveBackground)
+                    .defaultScrollAnchor(.bottom)
                     .onChange(of: messages.count) { oldValue, newValue in
-                        // Only auto-scroll when new messages arrive AND user is at bottom
-                        if newValue > oldValue, shouldAutoScroll, let lastMessage = messages.last {
-                            withAnimation {
+                        if newValue > oldValue, let lastMessage = messages.last {
+                            withAnimation(.easeOut(duration: 0.2)) {
                                 proxy.scrollTo(lastMessage.id, anchor: .bottom)
                             }
-                        }
-                    }
-                    .onAppear {
-                        // Scroll to bottom on initial appear
-                        if let lastMessage = messages.last {
-                            proxy.scrollTo(lastMessage.id, anchor: .bottom)
                         }
                     }
                 }
