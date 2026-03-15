@@ -7,6 +7,17 @@
 
 import Foundation
 
+enum StreamStatus: String, Codable {
+    case live = "live"
+    case ended = "ended"
+    case planned = "planned"
+    case unknown = "unknown"
+
+    init(from string: String) {
+        self = StreamStatus(rawValue: string) ?? .unknown
+    }
+}
+
 struct Stream: Identifiable, Codable, Equatable {
     let streamID: String  // The "d" tag identifier
     let eventID: String?  // The actual Nostr event ID (for zap references)
@@ -20,11 +31,18 @@ struct Stream: Identifiable, Codable, Equatable {
     let tags: [String]
     let createdAt: Date?
     let viewerCount: Int  // Current viewer/participant count
+    let recording: String?  // Recording URL from "recording" tag
+    let startsAt: Date?     // From "starts" tag (unix timestamp)
 
     var id: String { streamID }
 
     var isLive: Bool {
         return status == "live"
+    }
+
+    /// NIP-33 addressable event coordinate (for deletion matching)
+    var aTag: String {
+        "30311:\(eventAuthorPubkey ?? ""):\(streamID)"
     }
 
     var category: String {
