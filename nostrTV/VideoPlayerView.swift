@@ -60,14 +60,14 @@ struct VideoPlayerView: View {
                     HStack(spacing: 0) {
                         // Banner section (83%)
                         HStack(spacing: 16) {
-                            // nostrTV logo
-                            Text("nostrTV")
-                                .font(.system(size: 26, weight: .bold))
-                                .foregroundColor(.white)
+                            // Cove logo
+                            Text("Cove")
+                                .font(.system(size: 28, weight: .bold, design: .rounded))
+                                .foregroundColor(.coveAccent)
 
                             Text("|")
                                 .font(.system(size: 26))
-                                .foregroundColor(.gray.opacity(0.6))
+                                .foregroundColor(.coveSecondary.opacity(0.6))
 
                             // Stream info: profile pic + username + stream name + viewer count (clickable)
                             Button(action: { showStreamerProfile = true }) {
@@ -84,17 +84,17 @@ struct VideoPlayerView: View {
                                                     .clipShape(Circle())
                                             case .failure(_), .empty:
                                                 Circle()
-                                                    .fill(Color.gray.opacity(0.5))
+                                                    .fill(Color.coveOverlay)
                                                     .frame(width: 52, height: 52)
                                             @unknown default:
                                                 Circle()
-                                                    .fill(Color.gray.opacity(0.5))
+                                                    .fill(Color.coveOverlay)
                                                     .frame(width: 52, height: 52)
                                             }
                                         }
                                     } else {
                                         Circle()
-                                            .fill(Color.gray.opacity(0.5))
+                                            .fill(Color.coveOverlay)
                                             .frame(width: 52, height: 52)
                                     }
 
@@ -174,10 +174,10 @@ struct VideoPlayerView: View {
                             stream: stream,
                             nostrClient: nostrSDKClient
                         )
-                        .frame(width: isChatVisible ? 375 : 0)  // Collapse width when hidden
-                        .opacity(isChatVisible ? 1 : 0)  // Hide visually
-                        .allowsHitTesting(isChatVisible)  // Disable interaction when hidden
-                        .background(Color.black)
+                        .frame(width: isChatVisible ? 375 : 0)
+                        .opacity(isChatVisible ? 1 : 0)
+                        .allowsHitTesting(isChatVisible)
+                        .background(Color.coveBackground)
                     }
                 }
 
@@ -466,17 +466,17 @@ struct ChatInputView: View {
     var body: some View {
         HStack(spacing: 9) {
             // Text field
-            TextField("Type message...", text: $message)
+            TextField(CoveCopy.chatPlaceholder, text: $message)
                 .font(.system(size: 18))
                 .padding(.horizontal, 12)
                 .foregroundColor(.white)
                 .focused($focusedField, equals: .textField)
                 .frame(width: 241, height: 58)
 
-            // Send button - icon only
+            // Send button
             ChatActionButton(
                 icon: "paperplane.fill",
-                color: .green,
+                color: .coveAccent,
                 action: onSend
             )
             .focused($focusedField, equals: .sendButton)
@@ -541,7 +541,7 @@ private struct ToggleChatButton: View {
         Button(action: action) {
             Image(systemName: isChatVisible ? "eye.slash.fill" : "eye.fill")
                 .font(.system(size: 22))
-                .foregroundColor(isChatVisible ? .orange : .green)
+                .foregroundColor(isChatVisible ? .coveGold : .coveAccent)
                 .frame(width: 58, height: 58)
         }
         .buttonStyle(.card)

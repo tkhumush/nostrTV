@@ -19,8 +19,8 @@ struct ZapQRCodeView: View {
 
     var body: some View {
         ZStack {
-            // Semi-transparent background - don't dismiss on tap, use Done button
-            Color.black.opacity(0.85)
+            // Semi-transparent background
+            Color.coveBackground.opacity(0.95)
                 .ignoresSafeArea()
 
             VStack(spacing: 20) {
@@ -37,7 +37,7 @@ struct ZapQRCodeView: View {
                         HStack(spacing: 8) {
                             Text("\(zapOption.displayAmount) sats")
                                 .font(.system(size: 26, weight: .bold))
-                                .foregroundColor(.yellow)
+                                .foregroundColor(.coveGold)
 
                             Text("•")
                                 .font(.system(size: 26))
@@ -59,7 +59,7 @@ struct ZapQRCodeView: View {
                         .frame(width: 420, height: 420)
                         .background(Color.white)
                         .cornerRadius(16)
-                        .shadow(color: .yellow.opacity(0.3), radius: 20)
+                        .shadow(color: .coveGold.opacity(0.3), radius: 20)
                 } else if isGenerating {
                     ZStack {
                         Rectangle()
@@ -85,13 +85,13 @@ struct ZapQRCodeView: View {
                 HStack {
                     Text("Scan with your Lightning wallet")
                         .font(.system(size: 22, weight: .medium))
-                        .foregroundColor(.white.opacity(0.8))
+                        .foregroundColor(.coveSecondary)
 
                     Spacer()
 
                     Button("Done", action: onDismiss)
                         .buttonStyle(.borderedProminent)
-                        .tint(.yellow)
+                        .tint(.coveGold)
                         .font(.system(size: 26, weight: .semibold))
                 }
                 .padding(.horizontal, 20)

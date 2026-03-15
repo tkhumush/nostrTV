@@ -13,25 +13,25 @@ struct WelcomeView: View {
 
     var body: some View {
         VStack(spacing: 40) {
-            // Logo or Title
-            Text("nostrTV")
-                .font(.system(size: 72, weight: .bold))
-                .foregroundColor(.white)
+            // Logo
+            Text("Cove")
+                .font(.coveTitle)
+                .foregroundColor(.coveAccent)
 
             // Instruction text
-            Text("Sign in to send zaps and chat")
-                .font(.system(size: 32))
-                .foregroundColor(.gray)
+            Text("Sign in to join the conversation")
+                .font(.system(size: 32, weight: .regular, design: .rounded))
+                .foregroundColor(.coveSecondary)
 
             Text("Use your nsec bunker to sign in")
-                .font(.system(size: 24))
-                .foregroundColor(.gray.opacity(0.7))
+                .font(.coveBody)
+                .foregroundColor(.coveSecondary.opacity(0.7))
 
             // Error message
             if let error = authManager.errorMessage {
                 Text(error)
-                    .font(.system(size: 20))
-                    .foregroundColor(.red)
+                    .font(.coveCaption)
+                    .foregroundColor(.coveGold)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
             }
@@ -42,17 +42,17 @@ struct WelcomeView: View {
                     Image(systemName: "qrcode")
                         .font(.system(size: 24))
                     Text("Sign in with nsec bunker")
-                        .font(.system(size: 28, weight: .semibold))
+                        .font(.coveSubheading)
                 }
                 .foregroundColor(.white)
                 .frame(width: 500, height: 70)
-                .background(Color.purple)
-                .cornerRadius(10)
+                .background(Color.coveAccent)
+                .cornerRadius(CoveUI.smallCornerRadius)
             }
             .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
+        .background(Color.coveBackground)
         .fullScreenCover(isPresented: $showBunkerLogin) {
             BunkerLoginView(authManager: authManager)
         }
