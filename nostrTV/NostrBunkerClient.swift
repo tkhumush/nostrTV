@@ -18,7 +18,7 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
     private let keyManager: NostrKeyManager
 
     var bunkerPubkey: String?
-    var bunkerRelay: String?
+    var bunkerRelays: [String] = []
     private var clientKeyPair: NostrKeyPair?
     private var expectedSecret: String?  // For nostrconnect:// flow validation
     private var connectContinuation: CheckedContinuation<Void, Error>?  // For waiting on connect response
@@ -31,8 +31,6 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
     private var pendingRequests: [String: PendingRequest] = [:]
 
     private var subscriptionId: String?
-    private var healthCheckTimer: Timer?
-    private var isReconnecting: Bool = false
 
     // MARK: - Initialization
 
@@ -79,7 +77,7 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
         // We extract the relay and secret
         let components = try parseNostrConnectURI(bunkerURI)
 
-        bunkerRelay = components.relay
+        bunkerRelays = components.relays
         expectedSecret = components.secret  // Store for validation
 
         // Use the keypair from NostrKeyManager (which matches the URI)
@@ -88,8 +86,8 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
         }
         clientKeyPair = keyPair
 
-        // Connect to the relay
-        try await connectToRelay(components.relay)
+        // Connect to the relays
+        try await connectToRelays(components.relays)
 
         // Subscribe to messages addressed to our client pubkey
         try await subscribeToMessages()
@@ -131,7 +129,7 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
 
         // In traditional flow, URI contains the SIGNER's pubkey
         bunkerPubkey = components.clientPubkey  // This is actually signer pubkey in bunker://
-        bunkerRelay = components.relay
+        bunkerRelays = components.relays
 
         // Restore saved client keypair if provided, otherwise generate new one
         if let savedPrivateKeyHex = clientPrivateKeyHex {
@@ -149,22 +147,19 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
             print("✅ Generated new client keypair")
         }
 
-        // Connect to the bunker relay
-        try await connectToRelay(components.relay)
+        // Connect to the bunker relays
+        try await connectToRelays(components.relays)
 
         // Subscribe to messages from the bunker
         try await subscribeToMessages()
 
         connectionState = .waitingForApproval
 
-        // Start health check timer for persistent connection monitoring
-        startHealthCheck()
-
         print("📡 Connected to bunker (traditional flow)")
     }
 
     /// Parse nostrconnect:// URI
-    private func parseNostrConnectURI(_ uri: String) throws -> (relay: String, secret: String?) {
+    private func parseNostrConnectURI(_ uri: String) throws -> (relays: [String], secret: String?) {
         let withoutScheme: String
         if uri.hasPrefix("nostrconnect://") {
             withoutScheme = String(uri.dropFirst(15))
@@ -188,13 +183,15 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
             throw BunkerError.invalidURI("Invalid query parameters")
         }
 
-        var relay: String?
+        var relays: [String] = []
         var secret: String?
 
         for item in queryItems {
             switch item.name {
             case "relay":
-                relay = item.value
+                if let value = item.value {
+                    relays.append(value)
+                }
             case "secret":
                 secret = item.value
             default:
@@ -202,31 +199,31 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
             }
         }
 
-        guard let relayURL = relay else {
+        guard !relays.isEmpty else {
             throw BunkerError.invalidURI("Missing relay parameter")
         }
 
-        return (relay: relayURL, secret: secret)
+        return (relays: relays, secret: secret)
     }
 
-    /// Connect to a specific relay for bunker communication
-    private func connectToRelay(_ relayURL: String) async throws {
+    /// Connect to relays for bunker communication
+    private func connectToRelays(_ relayURLs: [String]) async throws {
         do {
-            // Create NostrSDKClient with only the bunker relay
-            nostrSDKClient = try NostrSDKClient(relayURLs: [relayURL])
+            // Create NostrSDKClient with the bunker relays
+            nostrSDKClient = try NostrSDKClient(relayURLs: relayURLs)
 
             // Setup message handler
             setupMessageHandler()
 
-            // Connect to the bunker relay
+            // Connect to the bunker relays
             nostrSDKClient?.connect()
 
             // Give the connection a moment to establish
             try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
 
-            print("✅ Connected to bunker relay: \(relayURL)")
+            print("✅ Connected to bunker relays: \(relayURLs)")
         } catch {
-            throw BunkerError.connectionFailed("Failed to connect to bunker relay: \(relayURL) - \(error.localizedDescription)")
+            throw BunkerError.connectionFailed("Failed to connect to bunker relays: \(relayURLs) - \(error.localizedDescription)")
         }
     }
 
@@ -234,7 +231,7 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
     private func subscribeToMessages() async throws {
         guard let clientPubkey = clientKeyPair?.publicKeyHex,
               let nostrSDKClient = nostrSDKClient,
-              let relay = bunkerRelay else {
+              !bunkerRelays.isEmpty else {
             throw BunkerError.notConnected
         }
 
@@ -249,14 +246,11 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
         // Subscribe to bunker messages
         _ = nostrSDKClient.subscribe(with: filter, purpose: "bunker-messages")
 
-        print("📥 Subscribed to bunker messages on \(relay) for pubkey \(clientPubkey.prefix(8))...")
+        print("📥 Subscribed to bunker messages on \(bunkerRelays) for pubkey \(clientPubkey.prefix(8))...")
     }
 
     /// Disconnect from bunker
     func disconnect() {
-        // Stop health check
-        stopHealthCheck()
-
         // Cancel all pending requests
         for (_, pending) in pendingRequests {
             pending.timeoutTask.cancel()
@@ -270,8 +264,9 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
             _ = subId
         }
 
+        nostrSDKClient = nil
         bunkerPubkey = nil
-        bunkerRelay = nil
+        bunkerRelays = []
         clientKeyPair = nil
         subscriptionId = nil
         connectionState = .disconnected
@@ -281,7 +276,8 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
 
     /// Get the user's public key from the bunker
     func getPublicKey() async throws -> String {
-        let response = try await sendRequest(method: .getPublicKey, params: [])
+        try await ensureConnected()
+        let response = try await sendRequest(method: .getPublicKey, params: [], timeout: 10)
         return response
     }
 
@@ -289,6 +285,8 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
     /// - Parameter event: Unsigned event with all fields except id and sig
     /// - Returns: Fully signed event
     func signEvent(_ event: NostrEvent) async throws -> NostrEvent {
+        try await ensureConnected()
+
         // Serialize event to JSON
         let eventDict: [String: Any] = [
             "kind": event.kind,
@@ -302,7 +300,7 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
             throw BunkerError.invalidResponse
         }
 
-        let response = try await sendRequest(method: .signEvent, params: [jsonString])
+        let response = try await sendRequest(method: .signEvent, params: [jsonString], timeout: 30)
 
         // Parse signed event from response
         guard let responseData = response.data(using: .utf8),
@@ -317,7 +315,8 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
 
     /// Ping the bunker to check connectivity
     func ping() async throws {
-        _ = try await sendRequest(method: .ping, params: [])
+        try await ensureConnected()
+        _ = try await sendRequest(method: .ping, params: [], timeout: 10)
     }
 
     // MARK: - RPC Request Handling
@@ -326,8 +325,9 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
     /// - Parameters:
     ///   - method: The NIP-46 method to call
     ///   - params: Array of string parameters
+    ///   - timeout: Timeout in seconds for this request
     /// - Returns: Response string from bunker
-    private func sendRequest(method: BunkerMethod, params: [String]) async throws -> String {
+    private func sendRequest(method: BunkerMethod, params: [String], timeout: TimeInterval = 30) async throws -> String {
         guard let clientKeyPair = clientKeyPair,
               let bunkerPubkey = bunkerPubkey else {
             throw BunkerError.notConnected
@@ -337,9 +337,9 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
             let request = BunkerRequest(method: method.rawValue, params: params)
             let requestId = request.id
 
-            // Create timeout task (90 seconds / 1.5 minutes)
+            // Create timeout task
             let timeoutTask = Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 90_000_000_000) // 90 seconds (1.5 minutes)
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
 
                 if self.pendingRequests.removeValue(forKey: requestId) != nil {
                     continuation.resume(throwing: BunkerError.timeout)
@@ -550,75 +550,32 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
         }
     }
 
-    // MARK: - Connection Health Monitoring
+    // MARK: - Session Restoration & Lazy Connection
 
-    /// Start periodic health check (ping every 60 seconds)
-    private func startHealthCheck() {
-        // Cancel any existing timer
-        healthCheckTimer?.invalidate()
+    /// Restore session state without connecting to relays (lazy reconnection)
+    /// Connection will be established on-demand when first RPC call is made
+    func restoreFromSession(bunkerPubkey: String, relays: [String], clientPrivateKeyHex: String) throws {
+        self.bunkerPubkey = bunkerPubkey
+        self.bunkerRelays = relays
+        self.clientKeyPair = try NostrKeyPair(privateKeyHex: clientPrivateKeyHex)
+        self.connectionState = .disconnected
 
-        // Create new timer for health checks (60 second interval)
-        healthCheckTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                await self?.performHealthCheck()
-            }
-        }
-
-        print("🏥 Health check timer started (60s interval)")
+        print("📦 Session state restored (lazy — will connect on demand)")
     }
 
-    /// Stop health check timer
-    private func stopHealthCheck() {
-        healthCheckTimer?.invalidate()
-        healthCheckTimer = nil
-        print("🏥 Health check timer stopped")
-    }
+    /// Ensure relay connection is established before sending requests
+    /// Connects on-demand if not already connected
+    private func ensureConnected() async throws {
+        // Already connected
+        if nostrSDKClient != nil { return }
 
-    /// Perform a health check by pinging the bunker
-    private func performHealthCheck() async {
-        // Don't ping if already reconnecting or not connected
-        guard !isReconnecting,
-              bunkerPubkey != nil,
-              case .connected = connectionState else {
-            return
+        guard !bunkerRelays.isEmpty, clientKeyPair != nil else {
+            throw BunkerError.notConnected
         }
 
-        do {
-            try await ping()
-            print("💚 Health check passed")
-        } catch {
-            print("❌ Health check failed: \(error.localizedDescription)")
-            // Attempt to reconnect
-            await attemptReconnect()
-        }
-    }
-
-    /// Attempt to reconnect to bunker
-    private func attemptReconnect() async {
-        guard !isReconnecting,
-              let relay = bunkerRelay,
-              bunkerPubkey != nil,
-              clientKeyPair != nil else {
-            print("⚠️ Cannot reconnect - missing connection info")
-            return
-        }
-
-        isReconnecting = true
-        print("🔄 Attempting to reconnect to bunker...")
-
-        do {
-            // Recreate NostrSDKClient connection
-            try await connectToRelay(relay)
-
-            // Resubscribe to messages
-            try await subscribeToMessages()
-
-            print("✅ Reconnected to bunker successfully")
-            isReconnecting = false
-        } catch {
-            print("❌ Reconnection failed: \(error.localizedDescription)")
-            isReconnecting = false
-            connectionState = .error("Connection lost. Please sign in again.")
-        }
+        print("🔌 Connecting on demand to bunker relays...")
+        try await connectToRelays(bunkerRelays)
+        try await subscribeToMessages()
+        print("✅ On-demand connection established")
     }
 }

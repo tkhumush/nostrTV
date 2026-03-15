@@ -29,7 +29,7 @@ struct BunkerLoginView: View {
     var body: some View {
         ZStack {
             // Background
-            Color.black
+            Color.coveBackground
                 .ignoresSafeArea()
 
             HStack(spacing: 80) {
@@ -38,13 +38,13 @@ struct BunkerLoginView: View {
                     Spacer()
 
                     // Title
-                    Text("nostrTV")
-                        .font(.system(size: 72, weight: .bold))
-                        .foregroundColor(.white)
+                    Text("Cove")
+                        .font(.coveTitle)
+                        .foregroundColor(.coveAccent)
 
-                    Text("Sign in with nsec bunker")
-                        .font(.system(size: 32))
-                        .foregroundColor(.gray)
+                    Text(CoveCopy.bunkerTitle)
+                        .font(.system(size: 32, weight: .regular, design: .rounded))
+                        .foregroundColor(.coveSecondary)
 
                     // Status Section
                     statusSection
@@ -56,8 +56,8 @@ struct BunkerLoginView: View {
                         dismiss()
                     })
                     .buttonStyle(.bordered)
-                    .tint(.gray)
-                    .font(.system(size: 28))
+                    .tint(.coveSecondary)
+                    .font(.coveSubheading)
                     .controlSize(.large)
 
                     Spacer()
@@ -94,7 +94,7 @@ struct BunkerLoginView: View {
                 .frame(width: 500, height: 500)
                 .background(Color.white)
                 .cornerRadius(20)
-                .shadow(color: .purple.opacity(0.3), radius: 20)
+                .shadow(color: .coveAccent.opacity(0.3), radius: 20)
         } else if isGenerating {
             ZStack {
                 Rectangle()
@@ -138,59 +138,59 @@ struct BunkerLoginView: View {
             VStack(spacing: 12) {
                 ProgressView()
                     .scaleEffect(1.5)
-                    .tint(.white)
-                Text("Connecting to bunker relay...")
-                    .font(.system(size: 24))
-                    .foregroundColor(.gray)
+                    .tint(.coveAccent)
+                Text(CoveCopy.bunkerConnecting)
+                    .font(.coveBody)
+                    .foregroundColor(.coveSecondary)
             }
 
         case .waitingForScan:
             VStack(spacing: 12) {
                 ProgressView()
                     .scaleEffect(1.5)
-                    .tint(.purple)
-                Text("Scan the QR code")
-                    .font(.system(size: 24))
+                    .tint(.coveAccent)
+                Text(CoveCopy.bunkerScan)
+                    .font(.coveBody)
                     .foregroundColor(.white)
-                Text("Use Amber, Amethyst, or compatible app")
-                    .font(.system(size: 20))
-                    .foregroundColor(.gray)
+                Text(CoveCopy.bunkerScanSub)
+                    .font(.coveCaption)
+                    .foregroundColor(.coveSecondary)
             }
 
         case .waitingForApproval:
             VStack(spacing: 12) {
                 ProgressView()
                     .scaleEffect(1.5)
-                    .tint(.purple)
-                Text("Approve the connection on your phone")
-                    .font(.system(size: 24))
-                    .foregroundColor(.purple)
+                    .tint(.coveGold)
+                Text(CoveCopy.bunkerApprove)
+                    .font(.coveBody)
+                    .foregroundColor(.coveGold)
             }
 
         case .connected(let userPubkey):
             VStack(spacing: 12) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 48))
-                    .foregroundColor(.green)
-                Text("Connected!")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundColor(.green)
-                Text("Fetching your profile...")
-                    .font(.system(size: 20))
-                    .foregroundColor(.gray)
+                    .foregroundColor(.coveAccent)
+                Text(CoveCopy.bunkerConnected)
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundColor(.coveAccent)
+                Text(CoveCopy.bunkerFetching)
+                    .font(.coveCaption)
+                    .foregroundColor(.coveSecondary)
             }
 
         case .error(let message):
             VStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 48))
-                    .foregroundColor(.red)
+                    .foregroundColor(.coveGold)
                 Text("Connection Failed")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundColor(.red)
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundColor(.coveGold)
                 Text(message)
-                    .font(.system(size: 20))
-                    .foregroundColor(.gray)
+                    .font(.coveCaption)
+                    .foregroundColor(.coveSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
 
@@ -198,11 +198,11 @@ struct BunkerLoginView: View {
                     startBunkerFlow()
                 }) {
                     Text("Try Again")
-                        .font(.system(size: 24))
+                        .font(.coveBody)
                         .foregroundColor(.white)
                         .frame(width: 200, height: 50)
-                        .background(Color.purple)
-                        .cornerRadius(8)
+                        .background(Color.coveAccent)
+                        .cornerRadius(CoveUI.badgeCornerRadius)
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 8)
@@ -264,21 +264,25 @@ struct BunkerLoginView: View {
             throw BunkerError.connectionFailed("Failed to generate client keys")
         }
 
-        // Use a well-known relay for bunker communication
-        let relay = "wss://relay.primal.net"
+        // Use multiple well-known relays for bunker communication (improves reliability)
+        let relays = [
+            "wss://relay.primal.net",
+            "wss://relay.damus.io",
+            "wss://bucket.coracle.social"
+        ]
 
         // Generate random secret for validation
         let secret = UUID().uuidString
 
         // Optional metadata about the app
         let metadata: [String: String] = [
-            "name": "nostrTV",
+            "name": "Cove",
             "url": "https://nostrtv.app"
         ]
 
         let components = BunkerURIComponents(
             clientPubkey: clientPubkey,
-            relay: relay,
+            relays: relays,
             secret: secret,
             metadata: metadata
         )
