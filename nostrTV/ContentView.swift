@@ -442,7 +442,7 @@ struct ContentView: View {
     @State private var player: AVPlayer?
     @State private var selectedLightningAddress: String?
     @State private var selectedStream: Stream?  // Track selected stream for live activity
-    @State private var showProfilePage = false
+    @State private var showProfilePage = true  // Kept for ProfileSettingsView binding
     @State private var showLoginSheet = false
 
     init() {
@@ -542,38 +542,13 @@ struct ContentView: View {
                 .tabItem {
                     Label("Following", systemImage: "person.2.fill")
                 }
-            }
 
-            // Profile button overlayed on top right
-            Button(action: {
-                showProfilePage = true
-            }) {
-                // Show actual profile picture if logged in, otherwise generic icon
-                if authManager.isAuthenticated, let profile = authManager.currentProfile, let pictureURL = profile.picture {
-                    AsyncImage(url: URL(string: pictureURL)) { image in
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 48, height: 48)
-                            .clipShape(Circle())
-                    } placeholder: {
-                        Circle()
-                            .fill(Color.coveOverlay)
-                            .frame(width: 48, height: 48)
-                            .overlay(
-                                Image(systemName: "person.fill")
-                                    .font(.system(size: 24))
-                                    .foregroundColor(.coveAccent)
-                            )
+                // Profile tab
+                ProfileSettingsView(authManager: authManager, isPresented: $showProfilePage)
+                    .tabItem {
+                        Label("Profile", systemImage: "person.crop.circle.fill")
                     }
-                } else {
-                    Image(systemName: "person.circle.fill")
-                        .font(.system(size: 48))
-                }
             }
-            .buttonStyle(.card)
-            .padding(.top, 60)
-            .padding(.trailing, 40)
         }
         .ignoresSafeArea()
         .fullScreenCover(isPresented: $showPlayer) {
@@ -581,9 +556,6 @@ struct ContentView: View {
                 VideoPlayerView(player: player, lightningAddress: selectedLightningAddress, stream: selectedStream, nostrSDKClient: viewModel.sdkClient, authManager: authManager)
                     .ignoresSafeArea()
             }
-        }
-        .fullScreenCover(isPresented: $showProfilePage) {
-            ProfileSettingsView(authManager: authManager, isPresented: $showProfilePage)
         }
         .fullScreenCover(isPresented: $showLoginSheet) {
             LoginFlowView(authManager: authManager)

@@ -10,6 +10,7 @@ import SwiftUI
 struct ProfileSettingsView: View {
     @ObservedObject var authManager: NostrAuthManager
     @Binding var isPresented: Bool
+    @State private var showLoginSheet = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,7 +21,40 @@ struct ProfileSettingsView: View {
                 .padding(.top, 40)
                 .padding(.bottom, 40)
 
-            if let profile = authManager.currentProfile {
+            if !authManager.isAuthenticated {
+                // Not logged in - show login prompt
+                VStack(spacing: 30) {
+                    Spacer()
+
+                    Image(systemName: "person.crop.circle.badge.plus")
+                        .font(.system(size: 100))
+                        .foregroundColor(.coveAccent.opacity(0.6))
+
+                    Text(CoveCopy.loginPrompt)
+                        .font(.coveSubheading)
+                        .foregroundColor(.white)
+
+                    Text(CoveCopy.loginSubtitle)
+                        .font(.coveBody)
+                        .foregroundColor(.coveSecondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+
+                    Button("Log In") {
+                        showLoginSheet = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.coveAccent)
+                    .font(.coveSubheading)
+                    .controlSize(.large)
+
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .fullScreenCover(isPresented: $showLoginSheet) {
+                    LoginFlowView(authManager: authManager)
+                }
+            } else if let profile = authManager.currentProfile {
                 VStack(alignment: .center, spacing: 40) {
                     // Three-column layout: Profile picture | Profile info | Bunker card
                     HStack(alignment: .top, spacing: 60) {
