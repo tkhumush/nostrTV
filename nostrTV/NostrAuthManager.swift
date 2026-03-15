@@ -142,7 +142,7 @@ class NostrAuthManager: ObservableObject {
         self.bunkerClient = bunkerClient
 
         guard let bunkerPubkey = bunkerClient.bunkerPubkey,
-              let relay = bunkerClient.bunkerRelay,
+              let relay = bunkerClient.bunkerRelays.first,
               let clientPrivateKeyHex = bunkerClient.clientPrivateKeyHex else {
             errorMessage = "Invalid bunker configuration"
             return
@@ -172,30 +172,27 @@ class NostrAuthManager: ObservableObject {
         isAuthenticated = true
     }
 
-    /// Restore a bunker session on app launch
+    /// Restore a bunker session on app launch (lazy — no network calls)
+    /// Relay connection is deferred until the first actual signing request
     @MainActor
     private func restoreBunkerSession(_ session: BunkerSession) async {
         do {
             // Recreate bunker client
             let client = NostrBunkerClient(keyManager: NostrKeyManager.shared)
 
-            // Attempt to reconnect with saved client keypair
-            let uri = BunkerURIComponents(
-                clientPubkey: session.bunkerPubkey,
-                relay: session.relay,
-                secret: nil,
-                metadata: nil
-            ).toURI()
-
-            // Pass the saved client private key for session restoration
-            try await client.connect(bunkerURI: uri, clientPrivateKeyHex: session.clientPrivateKeyHex)
+            // Restore session state without connecting to relays
+            try client.restoreFromSession(
+                bunkerPubkey: session.bunkerPubkey,
+                relays: [session.relay],
+                clientPrivateKeyHex: session.clientPrivateKeyHex
+            )
 
             // Update session last used
             bunkerSessionManager.updateLastUsed()
 
             self.bunkerClient = client
 
-            print("✅ Bunker session restored successfully with saved keypair")
+            print("✅ Bunker session restored (lazy — will connect on first use)")
 
         } catch {
             print("⚠️ Failed to restore bunker session: \(error.localizedDescription)")

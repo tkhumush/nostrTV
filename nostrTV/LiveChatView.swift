@@ -28,21 +28,25 @@ struct LiveChatView: View {
             if messages.isEmpty {
                 // Empty state
                 VStack(spacing: 12) {
-                    Text("💭")
-                        .font(.system(size: 60))
-                    Text("No messages yet")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundColor(.gray)
-                    Text("Be the first to chat!")
-                        .font(.system(size: 16))
-                        .foregroundColor(.gray.opacity(0.7))
+                    Image(systemName: "bubble.left.and.bubble.right")
+                        .font(.system(size: 50))
+                        .foregroundColor(.coveAccent.opacity(0.4))
+                    Text(CoveCopy.noMessages)
+                        .font(.coveCaption)
+                        .foregroundColor(.coveSecondary)
+                    Text(CoveCopy.noMessagesSub)
+                        .font(.coveSmall)
+                        .foregroundColor(.coveSecondary.opacity(0.7))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black)
+                .background(Color.coveBackground)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 8) {
+                        // Spacer pushes content to the bottom like a chat app
+                        Spacer(minLength: 0)
+
+                        VStack(alignment: .leading, spacing: 8) {
                             ForEach(messages) { message in
                                 ChatMessageRow(
                                     message: message,
@@ -50,44 +54,34 @@ struct LiveChatView: View {
                                     updateTrigger: activityManager.updateTrigger
                                 )
                                 .id(message.id)
-                                .onAppear {
-                                    // Re-enable auto-scroll when user scrolls back to bottom
-                                    if message.id == messages.last?.id {
-                                        shouldAutoScroll = true
-                                    }
-                                }
-                                .onDisappear {
-                                    // Disable auto-scroll when user scrolls up (last message goes off screen)
-                                    if message.id == messages.last?.id {
-                                        shouldAutoScroll = false
-                                    }
-                                }
                             }
                         }
                         .padding(.horizontal, 12)
                         .padding(.top, 8)
-                        .padding(.bottom, 8)  // Ensure last message has space
+                        .padding(.bottom, 8)
+
+                        // Invisible anchor at the very bottom
+                        Color.clear
+                            .frame(height: 1)
+                            .id("bottom")
                     }
                     .focusable(false)  // Prevent ScrollView from capturing focus
-                    .background(Color.black)
-                    .onChange(of: messages.count) { oldValue, newValue in
-                        // Only auto-scroll when new messages arrive AND user is at bottom
-                        if newValue > oldValue, shouldAutoScroll, let lastMessage = messages.last {
-                            withAnimation {
-                                proxy.scrollTo(lastMessage.id, anchor: .bottom)
-                            }
-                        }
-                    }
-                    .onAppear {
-                        // Scroll to bottom on initial appear
+                    .background(Color.coveBackground)
+                    .defaultScrollAnchor(.bottom)
+                    .onChange(of: activityManager.updateTrigger) { _, _ in
                         if let lastMessage = messages.last {
-                            proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                            // Small delay lets the layout engine place the new row
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                                }
+                            }
                         }
                     }
                 }
             }
         }
-        .background(Color.black)
+        .background(Color.coveBackground)
         .onAppear {
             print("🔍 LiveChatView: Displaying chat for stream: \(stream.streamID)")
             print("   eventAuthorPubkey: \(stream.eventAuthorPubkey ?? "nil")")
@@ -129,28 +123,28 @@ private struct ChatMessageRow: View {
                     case .failure(_), .empty:
                         // Fallback to default avatar
                         Circle()
-                            .fill(Color.gray)
+                            .fill(Color.coveOverlay)
                             .frame(width: 32, height: 32)
                             .overlay(
                                 Text(String(displayName.prefix(1)).uppercased())
                                     .font(.system(size: 14, weight: .bold))
-                                    .foregroundColor(.white)
+                                    .foregroundColor(.coveAccent)
                             )
                     @unknown default:
                         Circle()
-                            .fill(Color.gray)
+                            .fill(Color.coveOverlay)
                             .frame(width: 32, height: 32)
                     }
                 }
             } else {
                 // Default avatar with first letter
                 Circle()
-                    .fill(Color.gray)
+                    .fill(Color.coveOverlay)
                     .frame(width: 32, height: 32)
                     .overlay(
                         Text(String(displayName.prefix(1)).uppercased())
                             .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.white)
+                            .foregroundColor(.coveAccent)
                     )
             }
 
@@ -159,11 +153,11 @@ private struct ChatMessageRow: View {
                 HStack(spacing: 8) {
                     Text(displayName)
                         .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(.yellow)
+                        .foregroundColor(.coveAccent)
 
                     Text(timeString(from: message.timestamp))
                         .font(.system(size: 14))
-                        .foregroundColor(.gray)
+                        .foregroundColor(.coveSecondary)
                 }
 
                 // Message content
@@ -175,8 +169,8 @@ private struct ChatMessageRow: View {
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
-        .background(Color.white.opacity(0.05))
-        .cornerRadius(6)
+        .background(Color.coveOverlay.opacity(0.5))
+        .cornerRadius(CoveUI.smallCornerRadius)
     }
 
     private func timeString(from date: Date) -> String {
@@ -203,7 +197,9 @@ private struct ChatMessageRow: View {
         status: "live",
         tags: [],
         createdAt: Date(),
-        viewerCount: 42
+        viewerCount: 42,
+        recording: nil,
+        startsAt: nil
     )
 
     LiveChatView(activityManager: activityManager, stream: stream, nostrClient: nostrClient)

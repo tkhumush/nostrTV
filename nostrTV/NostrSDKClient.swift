@@ -10,6 +10,28 @@ import Foundation
 import Combine
 import NostrSDK
 
+/// NIP-65 relay entry with read/write permissions
+struct UserRelay {
+    let url: String
+    let read: Bool
+    let write: Bool
+
+    /// All relay URLs from a list
+    static func allURLs(_ relays: [UserRelay]) -> [String] {
+        relays.map { $0.url }
+    }
+
+    /// Only relays marked for reading
+    static func readRelays(_ relays: [UserRelay]) -> [String] {
+        relays.filter { $0.read }.map { $0.url }
+    }
+
+    /// Only relays marked for writing
+    static func writeRelays(_ relays: [UserRelay]) -> [String] {
+        relays.filter { $0.write }.map { $0.url }
+    }
+}
+
 /// A wrapper around NostrSDK's RelayPool that provides the same interface as the legacy NostrClient.
 /// This allows gradual migration from custom WebSocket implementation to the official SDK.
 ///
@@ -124,16 +146,20 @@ class NostrSDKClient {
     var onFollowListReceived: (([String]) -> Void)?
 
     /// Called when a user relay list (kind 10002) is received
-    var onUserRelaysReceived: (([String]) -> Void)?
+    /// Each entry contains the relay URL and its read/write permissions per NIP-65
+    var onUserRelaysReceived: (([UserRelay]) -> Void)?
 
     /// Called when a zap receipt (kind 9735) is received
-    var onZapReceived: ((ZapComment) -> Void)?
+    private var zapReceivedCallbacks: [(ZapComment) -> Void] = []
 
     /// Called when a live chat message (kind 1311) is received
-    var onChatReceived: ((ZapComment) -> Void)?
+    private var chatReceivedCallbacks: [(ZapComment) -> Void] = []
 
     /// Called when a bunker message (kind 24133) is received
     var onBunkerMessageReceived: ((NostrEvent) -> Void)?
+
+    /// Called when a deletion event (kind 5) targeting live streams is received
+    var onDeletionReceived: ((Set<String>) -> Void)?
 
     // MARK: - Initialization
 
@@ -327,6 +353,8 @@ class NostrSDKClient {
             handleRelayListEvent(event)
         case 24133:
             handleBunkerMessageEvent(event)
+        case 5:
+            handleDeletionEvent(event)
         case 30311:
             handleLiveStreamEvent(event)
         default:
@@ -438,6 +466,18 @@ class NostrSDKClient {
         return subId
     }
 
+    /// Subscribe to deletion events (kind 5) targeting live stream events
+    /// - Returns: Subscription ID for later closing, or nil if filter creation failed
+    func subscribeToDeletions() -> String? {
+        guard let filter = Filter(kinds: [5], tags: ["k": ["30311"]], limit: 100) else {
+            print("❌ NostrSDKClient: Failed to create deletion filter")
+            return nil
+        }
+        let subId = subscribe(with: filter, purpose: "stream-deletions")
+        print("✅ NostrSDKClient: Subscribed to stream deletions: \(subId.prefix(8))...")
+        return subId
+    }
+
     /// Subscribe to chat (kind 1311) and zaps (kind 9735) for a specific stream by a-tag
     /// - Parameter aTag: The stream's a-tag (format: "30311:<pubkey>:<d-tag>")
     /// - Returns: Subscription ID for later closing, or nil if filter creation failed
@@ -481,6 +521,22 @@ class NostrSDKClient {
     /// Add a callback for profile received events (supports multiple observers)
     func addProfileReceivedCallback(_ callback: @escaping (Profile) -> Void) {
         profileReceivedCallbacks.append(callback)
+    }
+
+    /// Add a callback for chat message received events (supports multiple observers)
+    func addChatReceivedCallback(_ callback: @escaping (ZapComment) -> Void) {
+        chatReceivedCallbacks.append(callback)
+    }
+
+    /// Add a callback for zap receipt received events (supports multiple observers)
+    func addZapReceivedCallback(_ callback: @escaping (ZapComment) -> Void) {
+        zapReceivedCallbacks.append(callback)
+    }
+
+    /// Remove all chat/zap callbacks (call when cleaning up subscriptions)
+    func removeActivityCallbacks() {
+        chatReceivedCallbacks.removeAll()
+        zapReceivedCallbacks.removeAll()
     }
 
     /// Get cached profile for a pubkey
@@ -710,13 +766,22 @@ class NostrSDKClient {
     }
 
     /// Handle kind 10002 (relay list metadata) events
+    /// Parses NIP-65 r-tags with read/write markers
     private func handleRelayListEvent(_ event: NostrSDK.NostrEvent) {
-        // Extract r tags (relay URLs)
-        let relays = event.tags
+        let relays: [UserRelay] = event.tags
             .filter { $0.name == "r" }
-            .compactMap { $0.value }
-            .filter { $0.hasPrefix("wss://") || $0.hasPrefix("ws://") }
-
+            .compactMap { tag in
+                let url = tag.value
+                guard url.hasPrefix("wss://") || url.hasPrefix("ws://") else {
+                    return nil
+                }
+                // NIP-65: optional third element is "read" or "write"
+                // If no marker, relay is used for both read and write
+                let marker = tag.otherParameters.first
+                let canRead = marker == nil || marker == "read"
+                let canWrite = marker == nil || marker == "write"
+                return UserRelay(url: url, read: canRead, write: canWrite)
+            }
 
         DispatchQueue.main.async { [weak self] in
             self?.onUserRelaysReceived?(relays)
@@ -756,9 +821,13 @@ class NostrSDKClient {
         )
 
 
-        // Notify callback
-        DispatchQueue.main.async { [weak self] in
-            self?.onChatReceived?(chatComment)
+        // Notify all callbacks
+        let callbacks = chatReceivedCallbacks
+        print("📨 NostrSDKClient: Notifying \(callbacks.count) chat callback(s)")
+        DispatchQueue.main.async {
+            for callback in callbacks {
+                callback(chatComment)
+            }
         }
 
         // Request profile if not cached
@@ -828,9 +897,12 @@ class NostrSDKClient {
         )
 
 
-        // Notify callback
-        DispatchQueue.main.async { [weak self] in
-            self?.onZapReceived?(zapComment)
+        // Notify all callbacks
+        let callbacks = zapReceivedCallbacks
+        DispatchQueue.main.async {
+            for callback in callbacks {
+                callback(zapComment)
+            }
         }
 
         // Request profile if not cached
@@ -857,6 +929,22 @@ class NostrSDKClient {
         // Notify callback
         DispatchQueue.main.async { [weak self] in
             self?.onBunkerMessageReceived?(legacyEvent)
+        }
+    }
+
+    /// Handle kind 5 (deletion) events targeting live streams
+    private func handleDeletionEvent(_ event: NostrSDK.NostrEvent) {
+        let deletedAddresses = event.tags
+            .filter { $0.name == "a" }
+            .compactMap { $0.value }
+            .filter { $0.hasPrefix("30311:") && $0.contains(event.pubkey) }
+
+        guard !deletedAddresses.isEmpty else { return }
+
+        print("🗑️ NostrSDKClient: Stream deletion from \(event.pubkey.prefix(16)): \(deletedAddresses)")
+
+        DispatchQueue.main.async { [weak self] in
+            self?.onDeletionReceived?(Set(deletedAddresses))
         }
     }
 
@@ -895,6 +983,15 @@ class NostrSDKClient {
         let hashtags = event.tags.filter { $0.name == "t" }.compactMap { $0.value }
         let gTags = event.tags.filter { $0.name == "g" }.compactMap { $0.value }
         let allTags = hashtags + gTags
+
+        // Extract recording URL and starts timestamp
+        let recording = tagValue("recording")
+        let startsAt: Date? = {
+            if let startsString = tagValue("starts"), let ts = TimeInterval(startsString) {
+                return Date(timeIntervalSince1970: ts)
+            }
+            return nil
+        }()
 
         // Extract created_at
         let createdAt = Date(timeIntervalSince1970: TimeInterval(event.createdAt))
@@ -935,7 +1032,9 @@ class NostrSDKClient {
             status: status,
             tags: allTags,
             createdAt: createdAt,
-            viewerCount: viewerCount
+            viewerCount: viewerCount,
+            recording: recording,
+            startsAt: startsAt
         )
 
         // Notify callback

@@ -25,13 +25,13 @@ struct StreamerProfilePopupView: View {
                 onClose: onDismiss
             )
             .frame(width: 600)
-            .background(Color.black)
+            .background(Color.coveBackground)
 
             Spacer()
         }
         .transition(.move(edge: .leading))
         .background(
-            Color.black.opacity(0.7)
+            Color.coveBackground.opacity(0.7)
                 .ignoresSafeArea()
                 .onTapGesture { onDismiss() }
         )
@@ -93,7 +93,7 @@ struct StreamerSideMenu: View {
                                     .clipShape(Circle())
                             case .failure(_):
                                 Circle()
-                                    .fill(Color.gray.opacity(0.3))
+                                    .fill(Color.coveOverlay)
                                     .frame(width: 200, height: 200)
                                     .overlay(
                                         Image(systemName: "person.fill")
@@ -105,7 +105,7 @@ struct StreamerSideMenu: View {
                                     .frame(width: 200, height: 200)
                             @unknown default:
                                 Circle()
-                                    .fill(Color.gray.opacity(0.3))
+                                    .fill(Color.coveOverlay)
                                     .frame(width: 200, height: 200)
                             }
                         }
@@ -126,11 +126,11 @@ struct StreamerSideMenu: View {
                         if let nip05 = profile.nip05, !nip05.isEmpty {
                             HStack(spacing: 8) {
                                 Image(systemName: "checkmark.seal.fill")
-                                    .foregroundColor(.blue)
+                                    .foregroundColor(.coveAccent)
                                     .font(.system(size: 18))
                                 Text(nip05)
                                     .font(.system(size: 18))
-                                    .foregroundColor(.blue)
+                                    .foregroundColor(.coveAccent)
                             }
                         }
 
@@ -146,7 +146,7 @@ struct StreamerSideMenu: View {
                     } else {
                         // No profile available
                         Circle()
-                            .fill(Color.gray.opacity(0.3))
+                            .fill(Color.coveOverlay)
                             .frame(width: 200, height: 200)
                             .overlay(
                                 Image(systemName: "person.fill")
@@ -163,13 +163,13 @@ struct StreamerSideMenu: View {
                 .padding(.horizontal, 30)
 
                 Divider()
-                    .background(Color.gray.opacity(0.3))
+                    .background(Color.coveOverlay)
                     .padding(.horizontal, 30)
 
                 // Zap Section
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("Buy \(stream.profile?.displayNameOrName ?? "Streamer") Coffee")
-                        .font(.system(size: 28, weight: .bold))
+                    Text("\(CoveCopy.zapAction) to \(stream.profile?.displayNameOrName ?? "Streamer")")
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                         .padding(.horizontal, 30)
 
@@ -177,11 +177,11 @@ struct StreamerSideMenu: View {
                         VStack(spacing: 15) {
                             Image(systemName: "exclamationmark.triangle")
                                 .font(.system(size: 40))
-                                .foregroundColor(.orange)
+                                .foregroundColor(.coveGold)
 
-                            Text("⚠️ This streamer hasn't set up Lightning zaps")
-                                .font(.system(size: 20))
-                                .foregroundColor(.orange)
+                            Text("This streamer hasn't set up Lightning yet")
+                                .font(.coveCaption)
+                                .foregroundColor(.coveGold)
                                 .multilineTextAlignment(.center)
                         }
                         .frame(maxWidth: .infinity)
@@ -190,11 +190,11 @@ struct StreamerSideMenu: View {
                         VStack(spacing: 15) {
                             Image(systemName: "person.crop.circle.badge.exclamationmark")
                                 .font(.system(size: 40))
-                                .foregroundColor(.gray)
+                                .foregroundColor(.coveSecondary)
 
-                            Text("Please sign in to send authenticated zaps")
-                                .font(.system(size: 20))
-                                .foregroundColor(.gray)
+                            Text("Sign in to send warmth")
+                                .font(.coveCaption)
+                                .foregroundColor(.coveSecondary)
                                 .multilineTextAlignment(.center)
                         }
                         .frame(maxWidth: .infinity)
@@ -222,7 +222,7 @@ struct StreamerSideMenu: View {
                                     .font(.system(size: 36))
                                 Text("\(selectedAmount ?? 0) sats")
                                     .font(.system(size: 28, weight: .bold))
-                                    .foregroundColor(.yellow)
+                                    .foregroundColor(.coveGold)
                             }
 
                             if zapReceived {
@@ -230,13 +230,13 @@ struct StreamerSideMenu: View {
                                 VStack(spacing: 20) {
                                     Image(systemName: "checkmark.circle.fill")
                                         .font(.system(size: 100))
-                                        .foregroundColor(.green)
+                                        .foregroundColor(.coveAccent)
                                         .scaleEffect(1.0)
                                         .animation(.spring(response: 0.5, dampingFraction: 0.6), value: zapReceived)
 
-                                    Text("⚡️ Zap Received!")
-                                        .font(.system(size: 36, weight: .bold))
-                                        .foregroundColor(.yellow)
+                                    Text("Warmth Received!")
+                                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                                        .foregroundColor(.coveGold)
 
                                     Text("Thank you for supporting \(stream.profile?.displayNameOrName ?? "the streamer")!")
                                         .font(.system(size: 20))
@@ -248,18 +248,18 @@ struct StreamerSideMenu: View {
                             } else if isGenerating {
                                 ProgressView()
                                     .scaleEffect(1.5)
-                                Text("Generating QR code...")
-                                    .font(.system(size: 20))
-                                    .foregroundColor(.gray)
+                                Text(CoveCopy.generatingQR)
+                                    .font(.coveCaption)
+                                    .foregroundColor(.coveSecondary)
                             } else if let error = errorMessage {
                                 // Error state
                                 VStack(spacing: 15) {
                                     Image(systemName: "exclamationmark.triangle")
                                         .font(.system(size: 40))
-                                        .foregroundColor(.red)
+                                        .foregroundColor(.coveGold)
 
                                     Text(error)
-                                        .font(.system(size: 20))
+                                        .font(.coveCaption)
                                         .foregroundColor(.white)
                                         .multilineTextAlignment(.center)
 
@@ -270,7 +270,7 @@ struct StreamerSideMenu: View {
                                         }
                                     }
                                     .buttonStyle(.borderedProminent)
-                                    .tint(.blue)
+                                    .tint(.coveAccent)
                                     .font(.system(size: 20))
                                     .controlSize(.large)
                                 }
@@ -282,14 +282,14 @@ struct StreamerSideMenu: View {
                                     .frame(width: 400, height: 400)
                                     .background(Color.white)
                                     .cornerRadius(20)
-                                    .shadow(color: .yellow.opacity(0.3), radius: 15)
+                                    .shadow(color: .coveGold.opacity(0.3), radius: 15)
                             }
 
                             // Instructions (hide when zap received)
                             if !zapReceived {
-                                Text("Scan to send zap")
-                                    .font(.system(size: 20))
-                                    .foregroundColor(.gray)
+                                Text(CoveCopy.scanToZap)
+                                    .font(.coveCaption)
+                                    .foregroundColor(.coveSecondary)
                             }
 
                             // Back button (hide when zap received - will auto-dismiss)
@@ -338,7 +338,7 @@ struct StreamerSideMenu: View {
                 let uri = try await generator.generateZapRequest(
                     stream: stream,
                     amount: amount,
-                    comment: "Sent from nostrTV",
+                    comment: "Sent from Cove",
                     lud16: lud16
                 )
 
@@ -429,8 +429,8 @@ struct StreamerSideMenu: View {
         let subscriptionId = sdkClient.subscribe(with: filter, purpose: "zap-receipts")
         print("✅ Subscribed to zap receipts with ID: \(subscriptionId)")
 
-        // Set up callback for zap receipts
-        sdkClient.onZapReceived = { zapComment in
+        // Set up callback for zap receipts (uses array-based callbacks, no overwriting)
+        sdkClient.addZapReceivedCallback { zapComment in
             Task { @MainActor [self] in
                 print("📨 Received zap receipt")
 
@@ -490,6 +490,7 @@ struct ZapAmountButton: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(amount) sats")
                         .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(.secondary)
                     Text(label)
                         .font(.system(size: 20))
                         .foregroundColor(.secondary)
@@ -499,7 +500,7 @@ struct ZapAmountButton: View {
             }
         }
         .buttonStyle(.bordered)
-        .tint(isSelected ? .yellow : .gray)
+        .tint(isSelected ? .coveGold : .coveSecondary)
         .controlSize(.large)
     }
 }

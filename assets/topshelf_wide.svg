@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4640 1440">
+  <!-- Band 1: Lightest teal (left) -->
+  <path d="
+    M0,0 L900,0
+    C890,230 980,470 930,700
+    C880,930 960,1200 900,1440
+    L0,1440 Z
+  " fill="#5ec8c4"/>
+
+  <!-- Band 2: Light teal -->
+  <path d="
+    M900,0
+    C890,230 980,470 930,700
+    C880,930 960,1200 900,1440
+    L1850,1440
+    C1910,1180 1830,920 1880,700
+    C1930,480 1840,240 1850,0 Z
+  " fill="#2aacae"/>
+
+  <!-- Band 3: Mid teal -->
+  <path d="
+    M1850,0
+    C1840,240 1930,480 1880,700
+    C1830,920 1910,1180 1850,1440
+    L2850,1440
+    C2900,1150 2820,900 2870,680
+    C2920,460 2840,220 2850,0 Z
+  " fill="#0a8a8c"/>
+
+  <!-- Band 4: Dark teal -->
+  <path d="
+    M2850,0
+    C2840,220 2920,460 2870,680
+    C2820,900 2900,1150 2850,1440
+    L3800,1440
+    C3850,1200 3780,950 3820,700
+    C3860,450 3790,200 3800,0 Z
+  " fill="#006d6f"/>
+
+  <!-- Band 5: Darkest teal (right) -->
+  <path d="
+    M3800,0
+    C3790,200 3860,450 3820,700
+    C3780,950 3850,1200 3800,1440
+    L4640,1440 L4640,0 Z
+  " fill="#004d4f"/>
+
+  <!-- Vertical wave lines - white, following the band edges -->
+
+  <!-- Wave along band 1/2 edge -->
+  <path d="
+    M920,0 C910,180 1000,400 950,650
+    C900,900 980,1150 920,1440
+  " fill="none" stroke="white" stroke-width="4" opacity="0.35"/>
+  <path d="
+    M880,0 C870,200 960,430 910,680
+    C860,930 940,1180 880,1440
+  " fill="none" stroke="white" stroke-width="2.5" opacity="0.2"/>
+
+  <!-- Wave along band 2/3 edge -->
+  <path d="
+    M1870,0 C1860,200 1950,450 1900,700
+    C1850,950 1930,1180 1870,1440
+  " fill="none" stroke="white" stroke-width="4" opacity="0.4"/>
+  <path d="
+    M1830,0 C1820,220 1910,460 1860,700
+    C1810,940 1890,1160 1830,1440
+  " fill="none" stroke="white" stroke-width="2.5" opacity="0.2"/>
+
+  <!-- Wave along band 3/4 edge -->
+  <path d="
+    M2870,0 C2860,180 2940,420 2890,680
+    C2840,940 2920,1160 2870,1440
+  " fill="none" stroke="white" stroke-width="3.5" opacity="0.35"/>
+  <path d="
+    M2830,0 C2820,210 2900,440 2850,690
+    C2800,940 2880,1180 2830,1440
+  " fill="none" stroke="white" stroke-width="2" opacity="0.18"/>
+
+  <!-- Wave along band 4/5 edge -->
+  <path d="
+    M3820,0 C3810,200 3880,430 3840,700
+    C3800,970 3870,1200 3820,1440
+  " fill="none" stroke="white" stroke-width="3" opacity="0.3"/>
+  <path d="
+    M3780,0 C3770,190 3840,450 3800,710
+    C3760,970 3830,1210 3780,1440
+  " fill="none" stroke="white" stroke-width="2" opacity="0.15"/>
+
+  <!-- Extra vertical wave lines within bands for texture -->
+
+  <!-- In band 1 -->
+  <path d="
+    M450,0 C440,250 520,500 470,720
+    C420,940 500,1200 450,1440
+  " fill="none" stroke="white" stroke-width="2" opacity="0.15"/>
+
+  <!-- In band 2 -->
+  <path d="
+    M1380,0 C1370,230 1450,470 1400,700
+    C1350,930 1430,1180 1380,1440
+  " fill="none" stroke="white" stroke-width="2" opacity="0.12"/>
+
+  <!-- In band 3 -->
+  <path d="
+    M2350,0 C2340,210 2420,450 2370,690
+    C2320,930 2400,1170 2350,1440
+  " fill="none" stroke="white" stroke-width="2" opacity="0.1"/>
+
+  <!-- In band 4 -->
+  <path d="
+    M3320,0 C3310,220 3390,460 3340,700
+    C3290,940 3370,1180 3320,1440
+  " fill="none" stroke="white" stroke-width="1.5" opacity="0.08"/>
+
+  <!-- Foam dots along the main wave lines -->
+  <circle cx="940" cy="300" r="4" fill="white" opacity="0.3"/>
+  <circle cx="960" cy="500" r="3" fill="white" opacity="0.25"/>
+  <circle cx="920" cy="900" r="4" fill="white" opacity="0.25"/>
+  <circle cx="950" cy="1100" r="3" fill="white" opacity="0.2"/>
+
+  <circle cx="1890" cy="250" r="4" fill="white" opacity="0.3"/>
+  <circle cx="1910" cy="550" r="5" fill="white" opacity="0.35"/>
+  <circle cx="1880" cy="850" r="4" fill="white" opacity="0.25"/>
+  <circle cx="1900" cy="1050" r="3" fill="white" opacity="0.2"/>
+
+  <circle cx="2880" cy="350" r="4" fill="white" opacity="0.25"/>
+  <circle cx="2900" cy="600" r="3" fill="white" opacity="0.2"/>
+  <circle cx="2870" cy="950" r="3" fill="white" opacity="0.2"/>
+
+  <circle cx="3830" cy="400" r="3" fill="white" opacity="0.2"/>
+  <circle cx="3850" cy="750" r="3" fill="white" opacity="0.15"/>
+  <circle cx="3820" cy="1100" r="3" fill="white" opacity="0.15"/>
+</svg>

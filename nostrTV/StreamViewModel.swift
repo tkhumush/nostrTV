@@ -1,5 +1,4 @@
 import Foundation
-import AVFoundation
 
 struct StreamCategory {
     let name: String
@@ -16,15 +15,42 @@ class StreamViewModel: ObservableObject {
     private var nostrSDKClient: NostrSDKClient
     private var followList: Set<String> = [] // User follow list - Use Set for O(1) lookups
     private var adminFollowList: Set<String> = [] // Admin follow list for Discover tab
-    private var validationTasks: Set<String> = [] // Track ongoing validations
+    private var deletedStreamAddresses: Set<String> = [] // Tracks kind 5 deletions
 
     // Active subscription tracking
     private var adminFollowSubscriptionId: String?
     private var profilesSubscriptionId: String? // kind 0 - filtered by authors, limit 30
-    private var streamsSubscriptionId: String?  // kind 30311 - no author filter, limit 50
+    private var streamsSubscriptionId: String?  // kind 30311 - unfiltered, pipeline handles filtering
+    private var deletionsSubscriptionId: String? // kind 5 - stream deletion events
 
     // Stream collection size limit to prevent unbounded memory growth
     private let maxStreamCount = 200
+
+    // MARK: - zap.stream Filtering Pipeline Constants
+
+    /// Maximum age for stream events (24 hours)
+    private static let maxStreamAgeSeconds: TimeInterval = 24 * 60 * 60
+
+    /// Check if a URL is a playable stream URL (matches zap.stream's canPlayUrl)
+    private static func canPlayURL(_ url: String) -> Bool {
+        guard !url.isEmpty,
+              !url.contains("localhost"),
+              !url.contains("127.0.0.1"),
+              let components = URLComponents(string: url) else { return false }
+        return components.path.contains(".m3u8") || components.scheme == "moq"
+    }
+
+    /// Check if a stream has any playable URL (streaming or recording)
+    private static func canPlayStream(_ stream: Stream) -> Bool {
+        return canPlayURL(stream.streaming_url) ||
+               (stream.recording != nil && canPlayURL(stream.recording!))
+    }
+
+    /// Check if a stream event is within the 24-hour age window
+    private static func isWithinAgeWindow(_ stream: Stream) -> Bool {
+        guard let createdAt = stream.createdAt else { return false }
+        return Date().timeIntervalSince(createdAt) < maxStreamAgeSeconds
+    }
 
     // Use AdminConfig for curated Discover feed (supports multi-admin)
     private var adminPubkey: String {
@@ -36,35 +62,16 @@ class StreamViewModel: ObservableObject {
         return nostrSDKClient
     }
 
-    /// Get the featured stream (live stream with most viewers)
+    /// Get the featured stream for Following tab (live stream with most viewers from pipeline-filtered streams)
     var featuredStream: Stream? {
-        let liveStreams = streams.filter { $0.isLive }
-        // If following specific users, prioritize their streams
-        if !followList.isEmpty {
-            let followedLiveStreams = liveStreams.filter { stream in
-                guard let pubkey = stream.pubkey else { return false }
-                return followList.contains(pubkey)
-            }
-            if !followedLiveStreams.isEmpty {
-                return followedLiveStreams.max(by: { $0.viewerCount < $1.viewerCount })
-            }
-        }
-        // Otherwise return the stream with most viewers overall
+        let liveStreams = categorizedStreams.flatMap { $0.streams }.filter { $0.isLive }
         return liveStreams.max(by: { $0.viewerCount < $1.viewerCount })
     }
 
-    /// Get the featured stream for Discover tab (filtered by admin follow list, most viewers)
+    /// Get the featured stream for Discover tab (live stream with most viewers from pipeline-filtered streams)
     var discoverFeaturedStream: Stream? {
-        let filteredStreams: [Stream]
-        if !adminFollowList.isEmpty {
-            filteredStreams = streams.filter { stream in
-                guard let pubkey = stream.pubkey else { return false }
-                return adminFollowList.contains(pubkey) && stream.isLive
-            }
-        } else {
-            filteredStreams = streams.filter { $0.isLive }
-        }
-        return filteredStreams.max(by: { $0.viewerCount < $1.viewerCount })
+        let liveStreams = allCategorizedStreams.flatMap { $0.streams }.filter { $0.isLive }
+        return liveStreams.max(by: { $0.viewerCount < $1.viewerCount })
     }
 
     init() {
@@ -95,7 +102,7 @@ class StreamViewModel: ObservableObject {
     // MARK: - Callback Setup
 
     private func setupCallbacks() {
-        // Handle incoming streams
+        // Handle incoming streams — NIP-33 dedup (eventAuthorPubkey + d-tag)
         nostrSDKClient.onStreamReceived = { [weak self] stream in
             DispatchQueue.main.async {
                 guard let self = self else { return }
@@ -106,42 +113,45 @@ class StreamViewModel: ObservableObject {
                     print("✅ First stream received, ending initial load state")
                 }
 
-                // Filter to only show live streams (client-side filter since SDK doesn't support multi-char tag filters)
-                guard stream.isLive else {
-                    print("⏭️ Skipping ended stream: \(stream.streamID) (status: \(stream.status))")
+                print("📺 Stream received: \(stream.streamID) (status: \(stream.status), live: \(stream.isLive))")
+
+                // Skip streams that have been deleted via kind 5
+                if self.deletedStreamAddresses.contains(stream.aTag) {
+                    print("🗑️ Skipping deleted stream: \(stream.aTag)")
                     return
                 }
 
-                guard let pubkey = stream.pubkey else {
-                    print("⚠️ Stream has no pubkey, skipping: \(stream.streamID)")
-                    return
-                }
-
-                // Check if we already have a stream from this pubkey
-                if let existingIndex = self.streams.firstIndex(where: { $0.pubkey == pubkey }) {
+                // NIP-33 dedup: unique by eventAuthorPubkey + d-tag (streamID), keep newest
+                let deduplicationKey = "\(stream.eventAuthorPubkey ?? ""):\(stream.streamID)"
+                if let existingIndex = self.streams.firstIndex(where: {
+                    "\($0.eventAuthorPubkey ?? ""):\($0.streamID)" == deduplicationKey
+                }) {
                     let existingStream = self.streams[existingIndex]
-
-                    // Compare dates - keep only the most recent stream per pubkey
                     let newDate = stream.createdAt ?? Date.distantPast
                     let existingDate = existingStream.createdAt ?? Date.distantPast
 
                     if newDate > existingDate {
-                        // New stream is more recent - replace the old one
-                        self.streams.remove(at: existingIndex)
-                        self.streams.append(stream)
-                        self.validateStreamURL(stream)
+                        self.streams[existingIndex] = stream
                     }
-                    // If existing stream is newer, ignore this one
                 } else {
-                    // No existing stream from this pubkey - add it
                     self.streams.append(stream)
-                    self.validateStreamURL(stream)
                 }
 
                 // Evict old streams if we exceed the limit
                 self.evictOldStreamsIfNeeded()
 
                 self.updateCategorizedStreams()
+            }
+        }
+
+        // Handle deletion events (kind 5) targeting live streams
+        nostrSDKClient.onDeletionReceived = { [weak self] addresses in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.deletedStreamAddresses.formUnion(addresses)
+                self.streams.removeAll { addresses.contains($0.aTag) }
+                self.updateCategorizedStreams()
+                print("🗑️ Removed \(addresses.count) deleted streams")
             }
         }
 
@@ -163,8 +173,11 @@ class StreamViewModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             guard let self = self else { return }
 
-            // Start streams subscription immediately (no author filter, filter client-side)
+            // Start streams subscription (always unfiltered — pipeline handles filtering)
             self.createStreamsSubscription()
+
+            // Subscribe to deletion events (kind 5 targeting 30311)
+            self.deletionsSubscriptionId = self.nostrSDKClient.subscribeToDeletions()
 
             // If we have cached admin follow list, create profiles subscription
             if !self.adminFollowList.isEmpty {
@@ -183,7 +196,8 @@ class StreamViewModel: ObservableObject {
         }
     }
 
-    /// Create streams subscription (kind 30311) - no author filter, filter client-side
+    /// Create streams subscription (kind 30311)
+    /// Always unfiltered — the zap.stream pipeline handles all filtering client-side
     private func createStreamsSubscription() {
         // Close existing subscription if any
         if let existingSubId = streamsSubscriptionId {
@@ -192,9 +206,8 @@ class StreamViewModel: ObservableObject {
             streamsSubscriptionId = nil
         }
 
-        // Subscribe to all streams, filter by admin follow list client-side
         streamsSubscriptionId = nostrSDKClient.subscribeToStreams(limit: 50)
-        print("✅ Created streams subscription: \(streamsSubscriptionId?.prefix(8) ?? "nil")")
+        print("✅ Created unfiltered streams subscription: \(streamsSubscriptionId?.prefix(8) ?? "nil")")
     }
 
     /// Create profiles subscription (kind 0) filtered by author list
@@ -254,6 +267,7 @@ class StreamViewModel: ObservableObject {
         let combinedAuthors = getCombinedAuthorList()
         createProfilesSubscription(authors: combinedAuthors)
 
+        // Re-run pipeline with the new admin follow list
         updateCategorizedStreams()
         print("✅ Admin follow list processed: \(follows.count) users")
     }
@@ -293,6 +307,9 @@ class StreamViewModel: ObservableObject {
             nostrSDKClient.closeSubscription(subId)
         }
         if let subId = adminFollowSubscriptionId {
+            nostrSDKClient.closeSubscription(subId)
+        }
+        if let subId = deletionsSubscriptionId {
             nostrSDKClient.closeSubscription(subId)
         }
         nostrSDKClient.disconnect()
@@ -355,33 +372,64 @@ class StreamViewModel: ObservableObject {
     }
 
     private func updateCategorizedStreams() {
-        // Update Discover streams (filtered by admin follow list)
+        // === ZAP.STREAM FILTERING PIPELINE ===
+        // Applied uniformly before splitting into Curated/Following tabs
+
+        // Step 1: Age filter — discard events older than 24 hours
+        let ageFiltered = streams.filter { Self.isWithinAgeWindow($0) }
+
+        // Step 2: Playability filter — must have valid .m3u8 or moq: URL
+        let playable = ageFiltered.filter { Self.canPlayStream($0) }
+
+        // Step 3: Remove deleted streams (kind 5)
+        let notDeleted = playable.filter { !deletedStreamAddresses.contains($0.aTag) }
+
+        // Step 4: Status bucketing
+        let live = notDeleted
+            .filter { $0.status == "live" }
+            .sorted { ($0.startsAt ?? $0.createdAt ?? .distantPast) > ($1.startsAt ?? $1.createdAt ?? .distantPast) }
+
+        let ended = notDeleted
+            .filter { $0.status == "ended" && $0.recording != nil && !$0.recording!.isEmpty }
+            .sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
+
+        // Combine live + ended-with-recording as the clean base
+        let cleanBase = live + ended
+
+        print("📊 Pipeline: \(streams.count) raw → \(ageFiltered.count) age → \(playable.count) playable → \(notDeleted.count) not-deleted → \(live.count) live + \(ended.count) ended")
+
+        // Fetch profiles for all streamers in the clean base
+        let pubkeys = cleanBase.compactMap { $0.pubkey }
+        let uniquePubkeys = Array(Set(pubkeys))
+        if !uniquePubkeys.isEmpty {
+            nostrSDKClient.requestProfiles(for: uniquePubkeys)
+        }
+
+        // === SPLIT INTO TABS ===
+
+        // Discover: filter by admin follow list
         let discoverStreams: [Stream]
         if !adminFollowList.isEmpty {
-            discoverStreams = streams.filter { stream in
+            discoverStreams = cleanBase.filter { stream in
                 guard let pubkey = stream.pubkey else { return false }
                 return adminFollowList.contains(pubkey)
             }
         } else {
-            // If admin follow list is empty, show nothing (prevents showing all streams)
             discoverStreams = []
         }
         self.allCategorizedStreams = categorizeStreams(discoverStreams)
 
-        // Update Following streams (filtered by user follow list)
-        let filteredStreams: [Stream]
+        // Following: filter by user follow list
+        let followingStreams: [Stream]
         if !followList.isEmpty {
-            filteredStreams = streams.filter { stream in
+            followingStreams = cleanBase.filter { stream in
                 guard let pubkey = stream.pubkey else { return false }
                 return followList.contains(pubkey)
             }
         } else {
-            // If follow list is empty, show nothing
-            filteredStreams = []
+            followingStreams = []
         }
-
-        // Update filtered streams
-        self.categorizedStreams = categorizeStreams(filteredStreams)
+        self.categorizedStreams = categorizeStreams(followingStreams)
     }
 
     private func categorizeStreams(_ streamList: [Stream]) -> [StreamCategory] {
@@ -427,69 +475,6 @@ class StreamViewModel: ObservableObject {
         }
 
         return categories
-    }
-
-    // MARK: - Stream URL Validation
-
-    private func validateStreamURL(_ stream: Stream) {
-        // Skip if already validating this stream
-        guard !validationTasks.contains(stream.streamID) else { return }
-
-        // Skip if URL is a placeholder for ended streams
-        guard !stream.streaming_url.hasPrefix("ended://") else { return }
-
-        guard let url = URL(string: stream.streaming_url) else {
-            removeInvalidStream(stream)
-            return
-        }
-
-        validationTasks.insert(stream.streamID)
-
-        // Use AVAsset to validate if the URL is actually a playable stream
-        Task {
-            let asset = AVAsset(url: url)
-
-            do {
-                // Try to load the asset's playable property with timeout
-                let isPlayable = try await withTimeout(seconds: 15) {
-                    try await asset.load(.isPlayable)
-                }
-
-                await MainActor.run {
-                    self.validationTasks.remove(stream.streamID)
-                    if !isPlayable {
-                        self.removeInvalidStream(stream)
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    self.validationTasks.remove(stream.streamID)
-                    self.removeInvalidStream(stream)
-                }
-            }
-        }
-    }
-
-    private func withTimeout<T>(seconds: TimeInterval, operation: @escaping () async throws -> T) async throws -> T {
-        try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask {
-                try await operation()
-            }
-
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-                throw URLError(.timedOut)
-            }
-
-            let result = try await group.next()!
-            group.cancelAll()
-            return result
-        }
-    }
-
-    private func removeInvalidStream(_ stream: Stream) {
-        streams.removeAll { $0.streamID == stream.streamID }
-        updateCategorizedStreams()
     }
 
     // MARK: - Cache Management

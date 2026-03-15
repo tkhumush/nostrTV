@@ -13,19 +13,19 @@ struct ProfileConfirmationView: View {
     var body: some View {
         VStack(spacing: 50) {
             // Title
-            Text("nostrTV")
-                .font(.system(size: 72, weight: .bold))
-                .foregroundColor(.white)
+            Text("Cove")
+                .font(.coveTitle)
+                .foregroundColor(.coveAccent)
 
             if authManager.isLoadingProfile {
                 // Loading state
                 VStack(spacing: 20) {
                     ProgressView()
                         .scaleEffect(2)
-                        .tint(.white)
-                    Text("Loading your profile...")
-                        .font(.system(size: 28))
-                        .foregroundColor(.gray)
+                        .tint(.coveAccent)
+                    Text(CoveCopy.profileLoading)
+                        .font(.coveSubheading)
+                        .foregroundColor(.coveSecondary)
                 }
             } else if let profile = authManager.currentProfile {
                 // Profile loaded
@@ -37,11 +37,11 @@ struct ProfileConfirmationView: View {
                             .aspectRatio(contentMode: .fill)
                     } placeholder: {
                         Circle()
-                            .fill(Color.gray.opacity(0.3))
+                            .fill(Color.coveOverlay)
                             .overlay(
                                 Image(systemName: "person.fill")
                                     .font(.system(size: 80))
-                                    .foregroundColor(.white)
+                                    .foregroundColor(.coveAccent)
                             )
                     }
                     .frame(width: 200, height: 200)
@@ -56,14 +56,14 @@ struct ProfileConfirmationView: View {
                     if let nip05 = authManager.currentUser?.nip05 {
                         Text(nip05)
                             .font(.system(size: 22))
-                            .foregroundColor(.blue)
+                            .foregroundColor(.coveAccent)
                     }
 
                     // Follow count
                     if !authManager.followList.isEmpty {
                         Text("Following \(authManager.followList.count) users")
-                            .font(.system(size: 24))
-                            .foregroundColor(.gray)
+                            .font(.coveBody)
+                            .foregroundColor(.coveSecondary)
                     }
 
                     // Buttons
@@ -73,11 +73,11 @@ struct ProfileConfirmationView: View {
                             authManager.logout()
                         }) {
                             Text("Log Out")
-                                .font(.system(size: 28, weight: .semibold))
+                                .font(.coveSubheading)
                                 .foregroundColor(.white)
                                 .frame(width: 250, height: 70)
-                                .background(Color.red.opacity(0.8))
-                                .cornerRadius(10)
+                                .background(Color.coveSecondary.opacity(0.5))
+                                .cornerRadius(CoveUI.smallCornerRadius)
                         }
 
                         // Login button
@@ -85,11 +85,11 @@ struct ProfileConfirmationView: View {
                             authManager.login()
                         }) {
                             Text("Log In")
-                                .font(.system(size: 28, weight: .semibold))
+                                .font(.coveSubheading)
                                 .foregroundColor(.white)
                                 .frame(width: 250, height: 70)
-                                .background(Color.blue)
-                                .cornerRadius(10)
+                                .background(Color.coveAccent)
+                                .cornerRadius(CoveUI.smallCornerRadius)
                         }
                     }
                     .padding(.top, 20)
@@ -99,30 +99,30 @@ struct ProfileConfirmationView: View {
                 VStack(spacing: 30) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 80))
-                        .foregroundColor(.orange)
+                        .foregroundColor(.coveGold)
 
                     Text("Could not load profile")
-                        .font(.system(size: 28))
+                        .font(.coveSubheading)
                         .foregroundColor(.white)
 
                     Text("Please check your NIP-05 and try again")
-                        .font(.system(size: 22))
-                        .foregroundColor(.gray)
+                        .font(.coveBody)
+                        .foregroundColor(.coveSecondary)
 
                     Button(action: {
                         authManager.logout()
                     }) {
                         Text("Try Again")
-                            .font(.system(size: 28, weight: .semibold))
+                            .font(.coveSubheading)
                             .foregroundColor(.white)
                             .frame(width: 300, height: 70)
-                            .background(Color.blue)
-                            .cornerRadius(10)
+                            .background(Color.coveAccent)
+                            .cornerRadius(CoveUI.smallCornerRadius)
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
+        .background(Color.coveBackground)
     }
 }

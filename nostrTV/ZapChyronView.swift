@@ -42,9 +42,9 @@ struct ZapChyronView: View {
                 }
             } else {
                 // Placeholder when no zaps
-                Text("No zaps yet - be the first to zap!")
-                    .font(.system(size: 24, weight: .medium))
-                    .foregroundColor(.gray)
+                Text(CoveCopy.noZaps)
+                    .font(.coveBody)
+                    .foregroundColor(.coveSecondary)
             }
         }
         .frame(height: 120)
@@ -114,7 +114,7 @@ private struct ZapDisplayView: View {
 
                     Text("\(zap.amountInSats) sats")
                         .font(.system(size: 22, weight: .bold))
-                        .foregroundColor(.yellow)
+                        .foregroundColor(.coveGold)
                 }
 
                 // Second line: Comment (if present)

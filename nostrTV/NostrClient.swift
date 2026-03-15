@@ -381,7 +381,9 @@ class NostrClient {
             status: status,
             tags: allTags,
             createdAt: createdAt,
-            viewerCount: viewerCount
+            viewerCount: viewerCount,
+            recording: nil,
+            startsAt: nil
         )
 
         DispatchQueue.main.async {

@@ -16,9 +16,9 @@ struct ZapButtonView: View {
         Button(action: onTap) {
             ZStack {
                 Circle()
-                    .fill(isFocused ? Color.yellow.opacity(0.9) : Color.yellow)
+                    .fill(isFocused ? Color.coveGold.opacity(0.9) : Color.coveGold)
                     .frame(width: 100, height: 100)
-                    .shadow(color: .yellow.opacity(0.5), radius: 10)
+                    .shadow(color: .coveGold.opacity(0.5), radius: 10)
                     .scaleEffect(isFocused ? 1.2 : 1.0)
                     .animation(.easeInOut(duration: 0.2), value: isFocused)
 
