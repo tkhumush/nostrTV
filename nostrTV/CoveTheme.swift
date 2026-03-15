@@ -73,19 +73,19 @@ struct CoveCopy {
     static let noStreams = "The tide is low right now. Check back soon!"
     static let noMessages = "It's quiet in here..."
     static let noMessagesSub = "Be the first to say hello!"
-    static let noZaps = "No warmth sent yet — be the first!"
+    static let noZaps = "No zaps sent yet — be the first!"
 
     // Actions
     static let followAction = "Pull up a chair"
-    static let zapAction = "Send some warmth"
+    static let zapAction = "Send a zap"
     static let loginPrompt = "Sign in to join the conversation"
-    static let loginSubtitle = "Connect your Nostr identity to chat and send warmth"
+    static let loginSubtitle = "Connect your Nostr identity to chat and send zaps"
 
     // Chat
     static let chatPlaceholder = "Say something..."
 
     // Player
-    static let scanToZap = "Scan to send warmth"
+    static let scanToZap = "Scan to zap"
 
     // Bunker
     static let bunkerTitle = "Sign in with nsec bunker"

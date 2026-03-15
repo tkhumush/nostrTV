@@ -192,7 +192,7 @@ struct StreamerSideMenu: View {
                                 .font(.system(size: 40))
                                 .foregroundColor(.coveSecondary)
 
-                            Text("Sign in to send warmth")
+                            Text("Sign in to send zaps")
                                 .font(.coveCaption)
                                 .foregroundColor(.coveSecondary)
                                 .multilineTextAlignment(.center)
@@ -234,7 +234,7 @@ struct StreamerSideMenu: View {
                                         .scaleEffect(1.0)
                                         .animation(.spring(response: 0.5, dampingFraction: 0.6), value: zapReceived)
 
-                                    Text("Warmth Received!")
+                                    Text("Zap Received!")
                                         .font(.system(size: 36, weight: .bold, design: .rounded))
                                         .foregroundColor(.coveGold)
 
