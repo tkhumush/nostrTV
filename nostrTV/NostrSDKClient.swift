@@ -150,10 +150,10 @@ class NostrSDKClient {
     var onUserRelaysReceived: (([UserRelay]) -> Void)?
 
     /// Called when a zap receipt (kind 9735) is received
-    var onZapReceived: ((ZapComment) -> Void)?
+    private var zapReceivedCallbacks: [(ZapComment) -> Void] = []
 
     /// Called when a live chat message (kind 1311) is received
-    var onChatReceived: ((ZapComment) -> Void)?
+    private var chatReceivedCallbacks: [(ZapComment) -> Void] = []
 
     /// Called when a bunker message (kind 24133) is received
     var onBunkerMessageReceived: ((NostrEvent) -> Void)?
@@ -523,6 +523,22 @@ class NostrSDKClient {
         profileReceivedCallbacks.append(callback)
     }
 
+    /// Add a callback for chat message received events (supports multiple observers)
+    func addChatReceivedCallback(_ callback: @escaping (ZapComment) -> Void) {
+        chatReceivedCallbacks.append(callback)
+    }
+
+    /// Add a callback for zap receipt received events (supports multiple observers)
+    func addZapReceivedCallback(_ callback: @escaping (ZapComment) -> Void) {
+        zapReceivedCallbacks.append(callback)
+    }
+
+    /// Remove all chat/zap callbacks (call when cleaning up subscriptions)
+    func removeActivityCallbacks() {
+        chatReceivedCallbacks.removeAll()
+        zapReceivedCallbacks.removeAll()
+    }
+
     /// Get cached profile for a pubkey
     /// - Parameter pubkey: The public key (hex)
     /// - Returns: Cached profile if available and not expired
@@ -805,9 +821,13 @@ class NostrSDKClient {
         )
 
 
-        // Notify callback
-        DispatchQueue.main.async { [weak self] in
-            self?.onChatReceived?(chatComment)
+        // Notify all callbacks
+        let callbacks = chatReceivedCallbacks
+        print("📨 NostrSDKClient: Notifying \(callbacks.count) chat callback(s)")
+        DispatchQueue.main.async {
+            for callback in callbacks {
+                callback(chatComment)
+            }
         }
 
         // Request profile if not cached
@@ -877,9 +897,12 @@ class NostrSDKClient {
         )
 
 
-        // Notify callback
-        DispatchQueue.main.async { [weak self] in
-            self?.onZapReceived?(zapComment)
+        // Notify all callbacks
+        let callbacks = zapReceivedCallbacks
+        DispatchQueue.main.async {
+            for callback in callbacks {
+                callback(zapComment)
+            }
         }
 
         // Request profile if not cached

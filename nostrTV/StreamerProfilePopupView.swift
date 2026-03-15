@@ -429,8 +429,8 @@ struct StreamerSideMenu: View {
         let subscriptionId = sdkClient.subscribe(with: filter, purpose: "zap-receipts")
         print("✅ Subscribed to zap receipts with ID: \(subscriptionId)")
 
-        // Set up callback for zap receipts
-        sdkClient.onZapReceived = { zapComment in
+        // Set up callback for zap receipts (uses array-based callbacks, no overwriting)
+        sdkClient.addZapReceivedCallback { zapComment in
             Task { @MainActor [self] in
                 print("📨 Received zap receipt")
 

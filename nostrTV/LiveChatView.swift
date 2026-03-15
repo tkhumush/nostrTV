@@ -46,7 +46,7 @@ struct LiveChatView: View {
                         // Spacer pushes content to the bottom like a chat app
                         Spacer(minLength: 0)
 
-                        LazyVStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 8) {
                             ForEach(messages) { message in
                                 ChatMessageRow(
                                     message: message,
@@ -59,14 +59,22 @@ struct LiveChatView: View {
                         .padding(.horizontal, 12)
                         .padding(.top, 8)
                         .padding(.bottom, 8)
+
+                        // Invisible anchor at the very bottom
+                        Color.clear
+                            .frame(height: 1)
+                            .id("bottom")
                     }
                     .focusable(false)  // Prevent ScrollView from capturing focus
                     .background(Color.coveBackground)
                     .defaultScrollAnchor(.bottom)
-                    .onChange(of: messages.count) { oldValue, newValue in
-                        if newValue > oldValue, let lastMessage = messages.last {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                    .onChange(of: activityManager.updateTrigger) { _, _ in
+                        if let lastMessage = messages.last {
+                            // Small delay lets the layout engine place the new row
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                                }
                             }
                         }
                     }

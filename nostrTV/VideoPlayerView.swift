@@ -374,14 +374,25 @@ struct VideoPlayerView: View {
             return
         }
 
+        let messageText = chatMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Optimistic self-echo: immediately show the message in chat
+        if let userPubkey = authManager.currentUser?.hexPubkey {
+            let localMessage = ChatMessage(
+                id: UUID().uuidString,  // Temporary ID until relay echoes back
+                senderPubkey: userPubkey,
+                message: messageText,
+                timestamp: Date()
+            )
+            activityManager.addLocalMessage(localMessage)
+        }
+
+        // Clear input immediately for responsive feel
+        chatMessage = ""
+
         Task {
             do {
-                try await liveActivityManager.sendChatMessage(chatMessage)
-
-                await MainActor.run {
-                    // Clear input
-                    chatMessage = ""
-                }
+                try await liveActivityManager.sendChatMessage(messageText)
             } catch {
                 print("❌ Failed to send chat message: \(error)")
             }

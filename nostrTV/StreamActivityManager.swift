@@ -54,14 +54,17 @@ class StreamActivityManager: ObservableObject {
         chatMessages = []
         zapComments = []
 
-        // Set up callbacks for both chat and zaps
-        client.onChatReceived = { [weak self] chatComment in
+        // Remove any previous callbacks before adding new ones
+        client.removeActivityCallbacks()
+
+        // Set up callbacks for both chat and zaps (array-based, no overwriting)
+        client.addChatReceivedCallback { [weak self] chatComment in
             Task { @MainActor in
                 self?.handleChatReceived(chatComment)
             }
         }
 
-        client.onZapReceived = { [weak self] zapComment in
+        client.addZapReceivedCallback { [weak self] zapComment in
             Task { @MainActor in
                 self?.handleZapReceived(zapComment)
             }
@@ -86,6 +89,7 @@ class StreamActivityManager: ObservableObject {
     func stopListening() {
         print("📺 StreamActivityManager: Stopping")
         closeSubscription()
+        nostrClient?.removeActivityCallbacks()
         chatMessages = []
         zapComments = []
         currentStreamATag = nil
@@ -94,6 +98,21 @@ class StreamActivityManager: ObservableObject {
     /// Get profile for a pubkey (convenience method)
     func getProfile(for pubkey: String) -> Profile? {
         return nostrClient?.getProfile(for: pubkey)
+    }
+
+    /// Add a locally-sent message (optimistic self-echo)
+    func addLocalMessage(_ message: ChatMessage) {
+        // Check for duplicates
+        guard !chatMessages.contains(where: { $0.id == message.id }) else { return }
+
+        chatMessages.append(message)
+        chatMessages.sort { $0.timestamp < $1.timestamp }
+
+        if chatMessages.count > maxMessages {
+            chatMessages.removeFirst(chatMessages.count - maxMessages)
+        }
+
+        updateTrigger += 1
     }
 
     // MARK: - Private Methods
@@ -135,8 +154,15 @@ class StreamActivityManager: ObservableObject {
             client.requestProfile(for: chatComment.senderPubkey)
         }
 
-        // Check for duplicates
-        guard !chatMessages.contains(where: { $0.id == message.id }) else {
+        // Check for duplicates (by ID or by matching sender+content for optimistic echoes)
+        if let existingIndex = chatMessages.firstIndex(where: {
+            $0.id == message.id ||
+            ($0.senderPubkey == message.senderPubkey && $0.message == message.message &&
+             abs($0.timestamp.timeIntervalSince(message.timestamp)) < 60)
+        }) {
+            // Replace optimistic message with the real one (has correct Nostr event ID)
+            chatMessages[existingIndex] = message
+            updateTrigger += 1
             return
         }
 
@@ -213,4 +239,12 @@ class StreamActivityManager: ObservableObject {
 
         return "\(kind):\(pubkey):\(dTag)"
     }
+}
+
+/// Represents a chat message in a live stream
+struct ChatMessage: Identifiable {
+    let id: String
+    let senderPubkey: String
+    let message: String
+    let timestamp: Date
 }
