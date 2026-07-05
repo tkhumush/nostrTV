@@ -52,7 +52,7 @@ struct ProfileSettingsView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .fullScreenCover(isPresented: $showLoginSheet) {
-                    LoginFlowView(authManager: authManager)
+                    WelcomeView(authManager: authManager)
                 }
             } else if let profile = authManager.currentProfile {
                 VStack(alignment: .center, spacing: 40) {
