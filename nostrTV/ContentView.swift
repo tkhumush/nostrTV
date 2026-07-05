@@ -558,7 +558,7 @@ struct ContentView: View {
             }
         }
         .fullScreenCover(isPresented: $showLoginSheet) {
-            LoginFlowView(authManager: authManager)
+            WelcomeView(authManager: authManager)
         }
         .onAppear {
             // Update follow list when view appears

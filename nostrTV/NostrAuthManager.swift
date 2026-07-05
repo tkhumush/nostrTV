@@ -45,6 +45,14 @@ class NostrAuthManager: ObservableObject {
             Task { @MainActor in
                 await restoreBunkerSession(bunkerSession)
             }
+        } else if let storedNsec = KeychainHelper.load(),
+                  let keyPair = try? NostrKeyPair(nsec: storedNsec) {
+            // Restore nsec session
+            authMethod = .nsec(keyPair: keyPair)
+            currentUser = UserSession(nip05: "", hexPubkey: keyPair.publicKeyHex)
+            isAuthenticated = true
+            loadCachedProfile()
+            isLoadingProfile = false
         }
     }
 
@@ -172,6 +180,23 @@ class NostrAuthManager: ObservableObject {
         isAuthenticated = true
     }
 
+    // MARK: - nsec Authentication
+
+    /// Authenticate directly with an nsec private key
+    @MainActor
+    func authenticateWithNsec(_ nsec: String) async throws {
+        guard let keyPair = try? NostrKeyPair(nsec: nsec) else {
+            throw NostrAuthError.invalidNsec
+        }
+
+        KeychainHelper.save(nsec)
+        authMethod = .nsec(keyPair: keyPair)
+        currentUser = UserSession(nip05: "", hexPubkey: keyPair.publicKeyHex)
+        isAuthenticated = true
+        isLoadingProfile = true
+        fetchUserData(force: true)
+    }
+
     /// Restore a bunker session on app launch (lazy — no network calls)
     /// Relay connection is deferred until the first actual signing request
     @MainActor
@@ -212,6 +237,9 @@ class NostrAuthManager: ObservableObject {
         // Clear bunker session
         bunkerSessionManager.clearSession()
 
+        // Clear nsec from Keychain
+        KeychainHelper.delete()
+
         // Clear UserDefaults
         UserDefaults.standard.removeObject(forKey: "nostrUserProfile")
         UserDefaults.standard.removeObject(forKey: "nostrUserFollowList")
@@ -230,12 +258,24 @@ class NostrAuthManager: ObservableObject {
 
     // MARK: - Event Signing
 
-    /// Sign a Nostr event using bunker (remote signing only)
+    /// Sign a Nostr event using the active auth method
     func signEvent(_ event: NostrEvent) async throws -> NostrEvent {
-        guard let bunkerClient = bunkerClient else {
-            throw NostrAuthError.bunkerNotConnected
+        switch authMethod {
+        case .bunker:
+            guard let bunkerClient = bunkerClient else {
+                throw NostrAuthError.bunkerNotConnected
+            }
+            return try await bunkerClient.signEvent(event)
+        case .nsec(let keyPair):
+            return try nostrSDKClient.createSignedEvent(
+                kind: event.kind,
+                content: event.content ?? "",
+                tags: event.tags,
+                using: keyPair
+            )
+        case nil:
+            throw NostrAuthError.notAuthenticated
         }
-        return try await bunkerClient.signEvent(event)
     }
 }
 
@@ -244,6 +284,7 @@ class NostrAuthManager: ObservableObject {
 enum NostrAuthError: LocalizedError {
     case notAuthenticated
     case bunkerNotConnected
+    case invalidNsec
 
     var errorDescription: String? {
         switch self {
@@ -251,6 +292,8 @@ enum NostrAuthError: LocalizedError {
             return "User is not authenticated"
         case .bunkerNotConnected:
             return "Bunker client not connected"
+        case .invalidNsec:
+            return "Invalid nsec key. Please check and try again."
         }
     }
 }
@@ -259,6 +302,7 @@ enum NostrAuthError: LocalizedError {
 
 enum AuthMethod {
     case bunker(session: BunkerSession)
+    case nsec(keyPair: NostrKeyPair)
 }
 
 struct UserSession {
