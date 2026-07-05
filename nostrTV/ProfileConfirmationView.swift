@@ -52,8 +52,8 @@ struct ProfileConfirmationView: View {
                         .font(.system(size: 36, weight: .semibold))
                         .foregroundColor(.white)
 
-                    // NIP-05 identifier
-                    if let nip05 = authManager.currentUser?.nip05 {
+                    // NIP-05 identifier (omit for nsec logins where nip05 is empty)
+                    if let nip05 = authManager.currentUser?.nip05, !nip05.isEmpty {
                         Text(nip05)
                             .font(.system(size: 22))
                             .foregroundColor(.coveAccent)

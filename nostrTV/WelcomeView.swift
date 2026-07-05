@@ -10,6 +10,7 @@ import SwiftUI
 struct WelcomeView: View {
     @ObservedObject var authManager: NostrAuthManager
     @State private var showBunkerLogin: Bool = false
+    @State private var showNsecLogin: Bool = false
 
     var body: some View {
         VStack(spacing: 40) {
@@ -23,10 +24,6 @@ struct WelcomeView: View {
                 .font(.system(size: 32, weight: .regular, design: .rounded))
                 .foregroundColor(.coveSecondary)
 
-            Text("Use your nsec bunker to sign in")
-                .font(.coveBody)
-                .foregroundColor(.coveSecondary.opacity(0.7))
-
             // Error message
             if let error = authManager.errorMessage {
                 Text(error)
@@ -36,25 +33,49 @@ struct WelcomeView: View {
                     .padding(.horizontal, 40)
             }
 
-            // Bunker login button
-            Button(action: { showBunkerLogin = true }) {
-                HStack(spacing: 12) {
-                    Image(systemName: "qrcode")
-                        .font(.system(size: 24))
-                    Text("Sign in with nsec bunker")
-                        .font(.coveSubheading)
+            VStack(spacing: 20) {
+                // Primary: Bunker login
+                Button(action: { showBunkerLogin = true }) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "qrcode")
+                            .font(.system(size: 24))
+                        Text("Sign in with nsec bunker")
+                            .font(.coveSubheading)
+                    }
+                    .foregroundColor(.white)
+                    .frame(width: 500, height: 70)
+                    .background(Color.coveAccent)
+                    .cornerRadius(CoveUI.smallCornerRadius)
                 }
-                .foregroundColor(.white)
-                .frame(width: 500, height: 70)
-                .background(Color.coveAccent)
-                .cornerRadius(CoveUI.smallCornerRadius)
+                .buttonStyle(.plain)
+
+                // Secondary: nsec key login
+                Button(action: { showNsecLogin = true }) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "key.fill")
+                            .font(.system(size: 24))
+                        Text("Sign in with nsec key")
+                            .font(.coveSubheading)
+                    }
+                    .foregroundColor(.coveSecondary)
+                    .frame(width: 500, height: 70)
+                    .background(Color.coveOverlay)
+                    .cornerRadius(CoveUI.smallCornerRadius)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: CoveUI.smallCornerRadius)
+                            .stroke(Color.coveSecondary.opacity(0.4), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.coveBackground)
         .fullScreenCover(isPresented: $showBunkerLogin) {
             BunkerLoginView(authManager: authManager)
+        }
+        .fullScreenCover(isPresented: $showNsecLogin) {
+            NsecLoginView(authManager: authManager)
         }
     }
 }
