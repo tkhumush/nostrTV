@@ -44,16 +44,6 @@ struct UserRelay {
 /// **Migration Status:** Phase 2 - Used by ChatManager
 class NostrSDKClient {
 
-    // MARK: - Singleton for Phase 2
-
-    /// Shared instance for chat functionality (Phase 2 temporary solution)
-    /// Phase 3 will pass SDK client from ContentView properly
-    static let sharedForChat: NostrSDKClient = {
-        let client = try! NostrSDKClient()
-        client.connect()
-        return client
-    }()
-
     // MARK: - Properties
 
     /// The relay pool managing all relay connections
@@ -134,6 +124,9 @@ class NostrSDKClient {
     /// Silence threshold before considering connection dead
     private let connectionSilenceThreshold: TimeInterval = 60
 
+    /// Non-fatal initialization error, if the client was created as an error fallback.
+    private(set) var initError: Error?
+
     // MARK: - Callbacks (matching NostrClient interface)
 
     /// Called when a live stream event (kind 30311) is received
@@ -194,6 +187,22 @@ class NostrSDKClient {
         ]
         print("🔧 NostrSDKClient: Default relays: \(defaultRelays.joined(separator: ", "))")
         try self.init(relayURLs: defaultRelays)
+    }
+
+    /// Creates a client that cannot connect but never throws. Used as a graceful
+    /// fallback when the shared relay pool fails to initialize at app launch.
+    /// Callers can check `initError` to surface a user-facing error state.
+    static func errorClient(message: String) -> NostrSDKClient {
+        // This factory uses a private path that bypasses the throwing RelayPool
+        // initializer. We create the client via the normal throwing path with an
+        // empty relay set (which cannot fail) and then record the error.
+        let client = try! NostrSDKClient(relayURLs: [])
+        client.initError = NSError(
+            domain: "NostrSDKClient",
+            code: -1,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
+        return client
     }
 
     // MARK: - Connection Management

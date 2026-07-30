@@ -233,6 +233,7 @@ struct VideoPlayerView: View {
                 StreamerProfilePopupView(
                     stream: stream,
                     authManager: authManager,
+                    nostrSDKClient: nostrSDKClient,
                     onDismiss: { showStreamerProfile = false }
                 )
                 .animation(.easeInOut(duration: 0.3), value: showStreamerProfile)

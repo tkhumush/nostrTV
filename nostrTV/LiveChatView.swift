@@ -182,7 +182,12 @@ private struct ChatMessageRow: View {
 }
 
 #Preview {
-    let nostrClient = try! NostrSDKClient()
+    let nostrClient: NostrSDKClient
+    do {
+        nostrClient = try NostrSDKClient()
+    } catch {
+        nostrClient = NostrSDKClient.errorClient(message: "Preview client init failed: \(error.localizedDescription)")
+    }
     let activityManager = StreamActivityManager()
 
     let stream = Stream(

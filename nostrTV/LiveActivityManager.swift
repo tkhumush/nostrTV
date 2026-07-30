@@ -5,33 +5,18 @@ import Combine
 /// Publishes events when users join or leave streams (bunker-authenticated users only)
 @MainActor
 class LiveActivityManager: ObservableObject {
-    static let shared = LiveActivityManager()
-
     private let nostrSDKClient: NostrSDKClient
     private var authManager: NostrAuthManager?
 
     @Published private(set) var currentStream: Stream?
     @Published private(set) var isWatchingStream: Bool = false
 
-    private init(nostrSDKClient: NostrSDKClient? = nil) {
-        if let client = nostrSDKClient {
-            self.nostrSDKClient = client
-        } else {
-            self.nostrSDKClient = try! NostrSDKClient()
-        }
-        self.authManager = nil
-    }
-
-    /// Initialize with custom NostrSDKClient (for dependency injection)
+    /// Initialize with an injected NostrSDKClient.
+    /// This manager no longer creates its own relay pool; it uses the shared
+    /// app-level client to avoid multiplying WebSocket connections.
     init(nostrSDKClient: NostrSDKClient, authManager: NostrAuthManager? = nil) {
         self.nostrSDKClient = nostrSDKClient
         self.authManager = authManager
-    }
-
-    /// Configure to use an existing NostrSDKClient instance
-    func configure(with nostrSDKClient: NostrSDKClient) {
-        // Store reference but don't create new connections
-        // We'll use the existing client's connections
     }
 
     // MARK: - Join Stream

@@ -14,6 +14,7 @@ import NostrSDK
 struct StreamerProfilePopupView: View {
     let stream: Stream
     let authManager: NostrAuthManager
+    let nostrSDKClient: NostrSDKClient
     let onDismiss: () -> Void
 
     var body: some View {
@@ -22,6 +23,7 @@ struct StreamerProfilePopupView: View {
             StreamerSideMenu(
                 stream: stream,
                 authManager: authManager,
+                nostrSDKClient: nostrSDKClient,
                 onClose: onDismiss
             )
             .frame(width: 600)
@@ -43,6 +45,7 @@ struct StreamerProfilePopupView: View {
 struct StreamerSideMenu: View {
     let stream: Stream
     let authManager: NostrAuthManager
+    let nostrSDKClient: NostrSDKClient
     let onClose: () -> Void
 
     @State private var selectedAmount: Int?
@@ -53,7 +56,7 @@ struct StreamerSideMenu: View {
     @State private var errorMessage: String?
     @State private var zapReceived = false
     @State private var generatedInvoice: String?  // Store just the invoice string for matching
-    @State private var nostrSDKClient: NostrSDKClient?
+    @State private var zapSubscriptionId: String?
 
     // Zap amount options
     private let zapAmounts = [
@@ -329,9 +332,11 @@ struct StreamerSideMenu: View {
 
         Task {
             do {
-                let sdkClient = try NostrSDKClient()
+                // Use the shared app-level client instead of creating a new one.
+                // This prevents a per-zap relay pool from leaking and ensures
+                // zap receipts arrive on the same connection used by chat/zaps.
                 let generator = ZapRequestGenerator(
-                    nostrSDKClient: sdkClient,
+                    nostrSDKClient: nostrSDKClient,
                     authManager: authManager
                 )
 
@@ -352,10 +357,9 @@ struct StreamerSideMenu: View {
                     generatedInvoice = invoice
                     qrCodeImage = qrImage
                     isGenerating = false
-                    nostrSDKClient = sdkClient
 
-                    // Subscribe to zap receipts
-                    subscribeToZapReceipts(invoice: invoice, sdkClient: sdkClient)
+                    // Subscribe to zap receipts on the shared client
+                    subscribeToZapReceipts(invoice: invoice)
                 }
             } catch let error as ZapRequestError {
                 await MainActor.run {
@@ -417,20 +421,21 @@ struct StreamerSideMenu: View {
         }.value
     }
 
-    private func subscribeToZapReceipts(invoice: String, sdkClient: NostrSDKClient) {
+    private func subscribeToZapReceipts(invoice: String) {
         print("📡 Subscribing to zap receipts for invoice: \(invoice.prefix(20))...")
 
-        // Subscribe to kind 9735 (zap receipt) events
+        // Subscribe to kind 9735 (zap receipt) events on the shared client
         guard let filter = Filter(kinds: [9735], limit: 100) else {
             print("❌ Failed to create zap receipt filter")
             return
         }
 
-        let subscriptionId = sdkClient.subscribe(with: filter, purpose: "zap-receipts")
+        let subscriptionId = nostrSDKClient.subscribe(with: filter, purpose: "zap-receipts")
+        zapSubscriptionId = subscriptionId
         print("✅ Subscribed to zap receipts with ID: \(subscriptionId)")
 
         // Set up callback for zap receipts (uses array-based callbacks, no overwriting)
-        sdkClient.addZapReceivedCallback { zapComment in
+        nostrSDKClient.addZapReceivedCallback { zapComment in
             Task { @MainActor [self] in
                 print("📨 Received zap receipt")
 
@@ -467,7 +472,12 @@ struct StreamerSideMenu: View {
         errorMessage = nil
         zapReceived = false
         generatedInvoice = nil
-        nostrSDKClient = nil
+
+        // Close the zap receipt subscription on the shared client
+        if let subId = zapSubscriptionId {
+            nostrSDKClient.closeSubscription(subId)
+            zapSubscriptionId = nil
+        }
     }
 }
 

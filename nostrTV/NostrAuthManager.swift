@@ -21,12 +21,30 @@ class NostrAuthManager: ObservableObject {
     private var nostrSDKClient: NostrSDKClient
     private let bunkerSessionManager = BunkerSessionManager()
 
-    init() {
-        // Initialize NostrSDKClient
-        do {
-            self.nostrSDKClient = try NostrSDKClient()
-        } catch {
-            fatalError("Failed to initialize NostrSDKClient: \(error)")
+    /// Initialize with an optional shared NostrSDKClient.
+    /// When `nostrSDKClient` is provided, it is used directly so the auth manager
+    /// shares the same relay pool as the rest of the app. If it is nil or creation
+    /// fails, a non-fatal error client is created and an error message is surfaced.
+    init(nostrSDKClient: NostrSDKClient? = nil) {
+        if let client = nostrSDKClient {
+            self.nostrSDKClient = client
+        } else {
+            // Fallback for code paths that still instantiate without injection.
+            // This should not happen at the app level anymore.
+            do {
+                self.nostrSDKClient = try NostrSDKClient()
+            } catch {
+                print("❌ NostrAuthManager: Failed to initialize NostrSDKClient: \(error)")
+                self.nostrSDKClient = NostrSDKClient.errorClient(
+                    message: "Failed to initialize relay pool: \(error.localizedDescription)"
+                )
+                self.errorMessage = "Relay connection unavailable. Please restart the app."
+            }
+        }
+
+        // Surface any pre-existing shared-client initialization error
+        if let initError = self.nostrSDKClient.initError {
+            self.errorMessage = initError.localizedDescription
         }
 
         // Check for bunker session and restore if exists
