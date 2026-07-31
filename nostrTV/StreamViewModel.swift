@@ -26,6 +26,21 @@ class StreamViewModel: ObservableObject {
     private var streamsSubscriptionId: String?  // kind 30311 - unfiltered, pipeline handles filtering
     private var deletionsSubscriptionId: String? // kind 5 - stream deletion events
 
+    /// kind 30311 subscriptions scoped to the user's follow list (by author and by p-tag).
+    ///
+    /// The unfiltered subscription above asks for the most recent streams globally, so a
+    /// followed stream only appears if it happens to land in that window. These ask the
+    /// relays directly for streams belonging to people the user follows, so the Following
+    /// tab does not compete with global volume.
+    private var followingStreamsSubscriptionIds: [String] = []
+
+    /// Pubkeys per follow-list subscription.
+    ///
+    /// Follow lists routinely run to hundreds or thousands of entries, and relays impose
+    /// their own limits on filter size — rejecting an over-large REQ silently, exactly
+    /// like the NIP-01 subscription ID limit did. Chunking keeps each filter modest.
+    private let followFilterChunkSize = 200
+
     // Stream collection size limit to prevent unbounded memory growth
     private let maxStreamCount = 200
 
@@ -227,6 +242,40 @@ class StreamViewModel: ObservableObject {
     }
 
     /// Create profiles subscription (kind 0) filtered by author list
+    /// Subscribe to kind 30311 events belonging to the user's follow list.
+    ///
+    /// Two filters per chunk, mirroring the host-or-author match the Following tab
+    /// applies locally: `authors` catches streams a followed user published, and `#p`
+    /// catches streams that tag a followed user as host or participant but were
+    /// published by someone else.
+    private func createFollowingStreamsSubscriptions() {
+        // Close any previous follow-list subscriptions first
+        for subId in followingStreamsSubscriptionIds {
+            print("📪 Closing following-streams subscription: \(subId.prefix(8))...")
+            sdkClient.closeSubscription(subId)
+        }
+        followingStreamsSubscriptionIds = []
+
+        guard !followList.isEmpty else {
+            print("ℹ️ No follow list; skipping follow-list stream subscriptions")
+            return
+        }
+
+        let pubkeys = Array(followList)
+        for chunkStart in stride(from: 0, to: pubkeys.count, by: followFilterChunkSize) {
+            let chunk = Array(pubkeys[chunkStart..<min(chunkStart + followFilterChunkSize, pubkeys.count)])
+
+            if let authorSubId = sdkClient.subscribeToStreams(authors: chunk, limit: 100) {
+                followingStreamsSubscriptionIds.append(authorSubId)
+            }
+            if let participantSubId = sdkClient.subscribeToStreams(participants: chunk, limit: 100) {
+                followingStreamsSubscriptionIds.append(participantSubId)
+            }
+        }
+
+        print("✅ Created \(followingStreamsSubscriptionIds.count) follow-list stream subscription(s) for \(pubkeys.count) pubkeys")
+    }
+
     private func createProfilesSubscription(authors: [String]) {
         guard !authors.isEmpty else {
             print("⚠️ Cannot create profiles subscription with empty author list")
@@ -303,6 +352,12 @@ class StreamViewModel: ObservableObject {
             createProfilesSubscription(authors: combinedAuthors)
         }
 
+        // Ask the relays directly for streams from the follow list. Rebuild whenever the
+        // list changes, including when it empties on logout (which tears these down).
+        if followList != previousFollowList {
+            createFollowingStreamsSubscriptions()
+        }
+
         // Re-categorize streams with new follow filter
         updateCategorizedStreams()
     }
@@ -326,6 +381,9 @@ class StreamViewModel: ObservableObject {
             sdkClient.closeSubscription(subId)
         }
         if let subId = deletionsSubscriptionId {
+            sdkClient.closeSubscription(subId)
+        }
+        for subId in followingStreamsSubscriptionIds {
             sdkClient.closeSubscription(subId)
         }
         // Deliberately does NOT call sdkClient.disconnect(): the client is the

@@ -646,8 +646,30 @@ class NostrSDKClient {
             print("❌ NostrSDKClient: Failed to create author-filtered streams filter")
             return nil
         }
-        let subId = subscribe(with: filter, purpose: "streams-filtered")
+        let subId = subscribe(with: filter, purpose: "streams-by-author")
         print("✅ NostrSDKClient: Subscribed to streams from \(authors.count) authors (limit: \(limit)): \(subId.prefix(8))...")
+        return subId
+    }
+
+    /// Subscribe to live streams where any of the given pubkeys is a tagged participant.
+    ///
+    /// The `authors` filter only matches the event signer. A stream published on
+    /// someone's behalf names the host in a `p` tag instead, so following the host
+    /// alone would not match an author-filtered subscription. This `#p` filter is the
+    /// relay-side counterpart to the host-or-author match the Following tab applies
+    /// locally.
+    /// - Parameters:
+    ///   - participants: Pubkeys to match against the event's `p` tags.
+    ///   - limit: Maximum stored events to return.
+    func subscribeToStreams(participants: [String], limit: Int = 50) -> String? {
+        guard !participants.isEmpty else { return nil }
+
+        guard let filter = Filter(kinds: [30311], tags: ["p": participants], limit: limit) else {
+            print("❌ NostrSDKClient: Failed to create participant-filtered streams filter")
+            return nil
+        }
+        let subId = subscribe(with: filter, purpose: "streams-by-participant")
+        print("✅ NostrSDKClient: Subscribed to streams tagging \(participants.count) participants (limit: \(limit)): \(subId.prefix(8))...")
         return subId
     }
 
