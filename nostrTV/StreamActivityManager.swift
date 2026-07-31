@@ -45,17 +45,30 @@ class StreamActivityManager: ObservableObject {
             return
         }
 
-        // Guard against double-start: if already listening, stop first to prevent
-        // duplicate subscriptions and stale callbacks. This handles the case where
-        // onAppear fires without a prior onDisappear (e.g. fullScreenCover reuse).
+        let requestedATag = ATag.construct(pubkey: authorPubkey, dTag: stream.streamID)
+
+        // Already listening to this exact stream: do nothing.
+        //
+        // This must be a no-op rather than a restart. VideoPlayerView calls this from
+        // onAppear, which fires repeatedly while the player is open — device logs
+        // showed ten distinct chat-zaps subscriptions inside ten minutes. Restarting
+        // tears down the live subscription and clears chatMessages/zapComments, so
+        // arriving messages were wiped every ~30 seconds and chat only ever showed
+        // the batch of stored events fetched right after (re)entering the stream.
+        if subscriptionId != nil, currentStreamATag == requestedATag {
+            print("📺 StreamActivityManager: Already listening to \(stream.streamID); keeping the existing subscription")
+            return
+        }
+
+        // Switching to a different stream: tear the old subscription down first.
         if subscriptionId != nil {
-            print("📺 StreamActivityManager: Already listening, stopping previous subscription before restart")
+            print("📺 StreamActivityManager: Switching streams, stopping previous subscription")
             stopListening()
         }
 
         self.nostrClient = client
-        self.currentStreamATag = ATag.construct(pubkey: authorPubkey, dTag: stream.streamID)
-        let aTag = currentStreamATag!
+        self.currentStreamATag = requestedATag
+        let aTag = requestedATag
 
         // Join the stream's own relays before subscribing. Chat (1311) and zap
         // receipts (9735) are usually published only there, not to our default
