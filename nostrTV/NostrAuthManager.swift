@@ -60,6 +60,12 @@ class NostrAuthManager: ObservableObject {
             loadCachedProfile()
             isLoadingProfile = false
 
+            // Refresh profile and follow list from the relays. Restoring a session
+            // only rehydrates the cache; without this nothing ever subscribes for the
+            // user's kind 3, so an empty or stale cache left the Following tab blank
+            // until the user logged in again or opened Profile settings.
+            refreshUserDataAfterRestore()
+
             // Reconnect bunker client in background
             Task { @MainActor in
                 await restoreBunkerSession(bunkerSession)
@@ -72,6 +78,22 @@ class NostrAuthManager: ObservableObject {
             isAuthenticated = true
             loadCachedProfile()
             isLoadingProfile = false
+            refreshUserDataAfterRestore()
+        }
+    }
+
+    /// Fetch the user's profile and follow list after restoring a saved session.
+    ///
+    /// Mirrors the login-time path: connect the shared pool first so the subscription
+    /// is not issued against relays that have not begun connecting (Bug #14), then
+    /// fetch. Runs on the next main-loop turn because `init` has not finished yet and
+    /// `fetchUserData` reads `currentUser`.
+    private func refreshUserDataAfterRestore() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            print("🔄 NostrAuthManager: Refreshing profile and follow list after session restore")
+            self.nostrSDKClient.connect()
+            self.fetchUserData(force: true)
         }
     }
 
@@ -148,10 +170,17 @@ class NostrAuthManager: ObservableObject {
         // is delivered when this subscription's kind-3 events arrive. Using the
         // keyed API prevents StreamViewModel (or any other component) from
         // overwriting this handler via the legacy `onFollowListReceived` property.
-        nostrSDKClient.addFollowListReceivedCallback(forSubscriptionId: Self.userDataSubscriptionId) { [weak self] follows in
+        nostrSDKClient.addFollowListReceivedCallback(forSubscriptionId: Self.userDataSubscriptionId) { [weak self] authorPubkey, follows in
+            guard let self = self else { return }
+            // Kind 3 events for other pubkeys — notably the admin's, fetched at startup
+            // for the Curated tab — arrive on this same dispatch. Adopting one of those
+            // would silently replace the user's follow list, and cache it.
+            guard authorPubkey.caseInsensitiveCompare(user.hexPubkey) == .orderedSame else {
+                return
+            }
             DispatchQueue.main.async {
-                self?.followList = follows
-                self?.saveFollowListToCache(follows)
+                self.followList = follows
+                self.saveFollowListToCache(follows)
             }
         }
 

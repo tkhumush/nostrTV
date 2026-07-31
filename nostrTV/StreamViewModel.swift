@@ -177,10 +177,16 @@ class StreamViewModel: ObservableObject {
             }
         }
 
-        // Handle follow list received (for admin follow list fetch)
-        sdkClient.onFollowListReceived = { [weak self] follows in
+        // Handle follow list received (for admin follow list fetch).
+        // Kind 3 events for other pubkeys — notably the logged-in user's, fetched by
+        // NostrAuthManager — arrive on this same callback, so accept only the admin's.
+        sdkClient.onFollowListReceived = { [weak self] authorPubkey, follows in
+            guard let self = self else { return }
+            guard authorPubkey.caseInsensitiveCompare(self.adminPubkey) == .orderedSame else {
+                return
+            }
             DispatchQueue.main.async {
-                self?.handleAdminFollowListReceived(follows)
+                self.handleAdminFollowListReceived(follows)
             }
         }
     }

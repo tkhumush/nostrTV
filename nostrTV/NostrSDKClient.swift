@@ -187,7 +187,11 @@ class NostrSDKClient {
 
     /// Called when a follow list event (kind 3) is received, keyed by subscription ID.
     /// Using the same `subscriptionId` replaces any existing callback for that subscription.
-    private var followListReceivedCallbacks: [String: ([String]) -> Void] = [:]
+    /// Receives (author pubkey, follows). The author is essential: kind 3 events for
+    /// several different pubkeys flow through this one dispatch (the admin's list for
+    /// the Curated tab and the logged-in user's for Following), and a callback that
+    /// cannot tell them apart will happily adopt someone else's follow list.
+    private var followListReceivedCallbacks: [String: (String, [String]) -> Void] = [:]
 
     /// Special key used to back the backward-compatible `onFollowListReceived` property
     /// so it does not collide with subscription-keyed callbacks.
@@ -199,7 +203,7 @@ class NostrSDKClient {
     /// any subscription-keyed callbacks instead of overwriting them. Existing
     /// callers (e.g. StreamViewModel) that assign this property continue to work,
     /// while new callers should prefer `addFollowListReceivedCallback(forSubscriptionId:_:)`.
-    var onFollowListReceived: (([String]) -> Void)? {
+    var onFollowListReceived: ((String, [String]) -> Void)? {
         get {
             followListReceivedCallbacks[Self.legacyFollowListCallbackKey]
         }
@@ -743,7 +747,7 @@ class NostrSDKClient {
     /// Using the same `subscriptionId` replaces any existing callback for that subscription.
     /// This is the preferred API for new callers; it prevents one component from
     /// overwriting another component's handler (the failure mode that Bug #14 fixed).
-    func addFollowListReceivedCallback(forSubscriptionId subscriptionId: String, _ callback: @escaping ([String]) -> Void) {
+    func addFollowListReceivedCallback(forSubscriptionId subscriptionId: String, _ callback: @escaping (String, [String]) -> Void) {
         followListReceivedCallbacks[subscriptionId] = callback
     }
 
@@ -1002,7 +1006,7 @@ class NostrSDKClient {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             for callback in self.followListReceivedCallbacks.values {
-                callback(follows)
+                callback(event.pubkey, follows)
             }
         }
     }
