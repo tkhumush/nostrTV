@@ -144,6 +144,39 @@ class NostrSDKClient {
     /// "`<subscription_id>` is an arbitrary, non-empty string of max length 64 chars."
     static let maxSubscriptionIdLength = 64
 
+    /// Resolve the host of a NIP-53 live event (kind 30311) from its tags.
+    ///
+    /// A `p` tag is a participant entry, not necessarily the host:
+    ///
+    ///     ["p", "<pubkey>", "<relay-url>", "<role>", "<proof>"]
+    ///
+    /// where the role is a displayable marker such as `Host`, `Speaker` or
+    /// `Participant`. Simply taking the first `p` tag picks a guest on any
+    /// multi-participant stream, which shows the wrong profile and hides the stream
+    /// from the Following tab, since that filter matches on the host pubkey.
+    ///
+    /// The role's position varies in practice — the relay URL is frequently empty or
+    /// omitted entirely — so the marker is matched anywhere in the tag's parameters
+    /// rather than at a fixed index.
+    ///
+    /// - Parameters:
+    ///   - tags: The event's tags.
+    ///   - eventAuthorPubkey: The event signer, used when no participant is listed.
+    /// - Returns: The host pubkey, the first participant, or the event author.
+    static func hostPubkey(fromTags tags: [Tag], eventAuthorPubkey: String) -> String {
+        let participantTags = tags.filter { $0.name == "p" }
+
+        if let host = participantTags.first(where: { tag in
+            tag.otherParameters.contains { $0.caseInsensitiveCompare("host") == .orderedSame }
+        }) {
+            return host.value
+        }
+
+        // No explicit Host marker: fall back to the first participant, then to the
+        // event signer (streams published by the host itself carry no p tag at all).
+        return participantTags.first?.value ?? eventAuthorPubkey
+    }
+
     // MARK: - Callbacks (matching NostrClient interface)
 
     /// Called when a live stream event (kind 30311) is received
@@ -1159,9 +1192,20 @@ class NostrSDKClient {
         let imageURL = tagValue("image")
 
         // IMPORTANT: We need BOTH pubkeys for different purposes:
-        // 1. Host pubkey (p-tag): Used for profile display
+        // 1. Host pubkey (p-tag): Used for profile display and Following-tab filtering
         // 2. Event author pubkey (event.pubkey): Used for a-tag coordinate in chat subscriptions
-        let hostPubkey = tagValue("p") ?? event.pubkey  // Prefer p-tag, fallback to event author
+        //
+        // Per NIP-53 a `p` tag is a participant entry, not necessarily the host:
+        //   ["p", "<pubkey>", "<relay-url>", "<role>", "<proof>"]
+        // with role being a displayable marker such as Host, Speaker or Participant.
+        // Taking the first `p` tag therefore picked a guest on any multi-participant
+        // stream, which showed the wrong profile and — because Following matches on
+        // this pubkey — hid streams whose host the user actually follows.
+        //
+        // Prefer the participant explicitly marked as the host. The role's position
+        // varies (the relay URL is often empty or omitted), so match it anywhere in
+        // the tag's parameters rather than at a fixed index.
+        let hostPubkey = Self.hostPubkey(fromTags: event.tags, eventAuthorPubkey: event.pubkey)
         let eventAuthorPubkey = event.pubkey  // Always the event signer
 
         // Extract viewer count

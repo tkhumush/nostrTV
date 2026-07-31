@@ -439,12 +439,22 @@ class StreamViewModel: ObservableObject {
         }
         self.allCategorizedStreams = categorizeStreams(discoverStreams)
 
-        // Following: filter by user follow list
+        // Following: filter by user follow list.
+        //
+        // Match either the host (p-tag participant marked Host) or the event author.
+        // Streams published by the host directly carry no p tag, so the host identity
+        // lives in eventAuthorPubkey; streams published on someone's behalf carry both.
+        // Checking only one field silently hid followed streams of the other shape.
         let followingStreams: [Stream]
         if !followList.isEmpty {
             followingStreams = cleanBase.filter { stream in
-                guard let pubkey = stream.pubkey else { return false }
-                return followList.contains(pubkey)
+                if let hostPubkey = stream.pubkey, followList.contains(hostPubkey) {
+                    return true
+                }
+                if let authorPubkey = stream.eventAuthorPubkey, followList.contains(authorPubkey) {
+                    return true
+                }
+                return false
             }
         } else {
             followingStreams = []
