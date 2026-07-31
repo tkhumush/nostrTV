@@ -140,6 +140,10 @@ class NostrSDKClient {
     /// Non-fatal initialization error, if the client was created as an error fallback.
     private(set) var initError: Error?
 
+    /// Maximum subscription ID length permitted by NIP-01.
+    /// "`<subscription_id>` is an arbitrary, non-empty string of max length 64 chars."
+    static let maxSubscriptionIdLength = 64
+
     // MARK: - Callbacks (matching NostrClient interface)
 
     /// Called when a live stream event (kind 30311) is received
@@ -251,6 +255,49 @@ class NostrSDKClient {
         startHeartbeat()
         reconnectDelay = 1  // Reset backoff on successful connect
         lastMessageTime = Date()
+    }
+
+    /// Add relays to the shared pool, connecting any that are new.
+    ///
+    /// Used for NIP-53 stream relays: a stream's chat (kind 1311) and zap receipts
+    /// (kind 9735) are typically published only to the relays named in the event's
+    /// "relays" tag, which are usually not in our default set. Subscribing without
+    /// them yields a well-formed request that simply never matches anything.
+    ///
+    /// `RelayPool.add` de-duplicates by URL and connects automatically, so calling
+    /// this repeatedly with the same URLs is safe.
+    ///
+    /// A newly added relay is not connected yet, and `Relay.subscribe` throws
+    /// `.notConnected` (an error `RelayPool` swallows), so a subscription created
+    /// right now would silently skip it. After a short delay to let the socket come
+    /// up, all active subscriptions are re-emitted with their original IDs — which
+    /// is idempotent for relays that already have them.
+    /// - Parameter urls: Relay URLs to ensure are present in the pool.
+    func addRelays(_ urls: [String]) {
+        let existingURLs = Set(relayPool.relays.map { $0.url.absoluteString })
+        var addedAny = false
+
+        for urlString in urls {
+            guard let url = URL(string: urlString),
+                  !existingURLs.contains(url.absoluteString) else { continue }
+
+            do {
+                let relay = try Relay(url: url)
+                relayPool.add(relay: relay)
+                addedAny = true
+                print("🔌 NostrSDKClient: Added stream relay \(url.absoluteString)")
+            } catch {
+                print("⚠️ NostrSDKClient: Skipping invalid stream relay \(urlString): \(error.localizedDescription)")
+            }
+        }
+
+        guard addedAny else { return }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self = self else { return }
+            print("🔄 NostrSDKClient: Re-emitting subscriptions to newly added relays")
+            self.resubscribeAll()
+        }
     }
 
     /// Disconnect from all relays.
@@ -464,6 +511,16 @@ class NostrSDKClient {
     /// Subscribe with an explicit subscription ID so reconnection can restore the exact same subscription.
     @discardableResult
     func subscribe(with filter: Filter, subscriptionId: String, purpose: String = "custom") -> String {
+        // NIP-01 caps subscription IDs at 64 characters. Relays reject longer ones,
+        // and they do it silently from our side: the REQ simply never takes effect
+        // and no events ever arrive for that subscription. Fail loudly instead.
+        if subscriptionId.count > Self.maxSubscriptionIdLength {
+            assertionFailure("Subscription ID for '\(purpose)' is \(subscriptionId.count) chars, over the NIP-01 limit of \(Self.maxSubscriptionIdLength)")
+            print("❌ NostrSDKClient: Subscription ID for '\(purpose)' is \(subscriptionId.count) chars, "
+                  + "over the NIP-01 limit of \(Self.maxSubscriptionIdLength). Relays will reject this REQ "
+                  + "and no events will arrive: \(subscriptionId)")
+        }
+
         let actualId = relayPool.subscribe(with: filter, subscriptionId: subscriptionId)
         subscriptionsLock.lock()
         activeSubscriptions[actualId] = StoredSubscription(id: actualId, filter: filter, purpose: purpose)
@@ -1121,6 +1178,15 @@ class NostrSDKClient {
         let gTags = event.tags.filter { $0.name == "g" }.compactMap { $0.value }
         let allTags = hashtags + gTags
 
+        // Extract the NIP-53 "relays" tag: a single tag carrying many values,
+        // e.g. ["relays", "wss://relay.one", "wss://relay.two"], so the first
+        // value and otherParameters are all relay URLs. This is where the
+        // stream's chat and zap events actually live.
+        let streamRelays: [String] = event.tags
+            .filter { $0.name == "relays" }
+            .flatMap { [$0.value] + $0.otherParameters }
+            .filter { $0.hasPrefix("wss://") || $0.hasPrefix("ws://") }
+
         // Extract recording URL and starts timestamp
         let recording = tagValue("recording")
         let startsAt: Date? = {
@@ -1171,7 +1237,8 @@ class NostrSDKClient {
             createdAt: createdAt,
             viewerCount: viewerCount,
             recording: recording,
-            startsAt: startsAt
+            startsAt: startsAt,
+            relays: streamRelays
         )
 
         // Notify callback

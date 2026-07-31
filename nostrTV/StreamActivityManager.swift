@@ -57,12 +57,29 @@ class StreamActivityManager: ObservableObject {
         self.currentStreamATag = ATag.construct(pubkey: authorPubkey, dTag: stream.streamID)
         let aTag = currentStreamATag!
 
+        // Join the stream's own relays before subscribing. Chat (1311) and zap
+        // receipts (9735) are usually published only there, not to our default
+        // relay set, so without this the subscription below matches nothing.
+        if !stream.relays.isEmpty {
+            print("📺 StreamActivityManager: Stream lists \(stream.relays.count) relay(s): \(stream.relays.joined(separator: ", "))")
+            client.addRelays(stream.relays)
+        } else {
+            print("📺 StreamActivityManager: Stream lists no relays; using the default pool only")
+        }
+
         // Generate a unique subscription ID per listening session.
-        // Using a UUID suffix ensures that stopListening on an old StreamActivityManager
+        // The UUID suffix ensures that stopListening on an old StreamActivityManager
         // can never accidentally remove callbacks for a new one's subscription, even if
         // SwiftUI's @StateObject lifecycle causes old/new managers to overlap.
+        //
+        // IMPORTANT: do not put the a-tag in this ID. NIP-01 caps subscription IDs at
+        // 64 characters, and an a-tag is 71 chars before its d-tag even starts
+        // ("30311:" + 64-char pubkey + ":"). Including it produced IDs of 90+ chars,
+        // which relays reject — so the REQ never took effect and neither chat nor zaps
+        // ever arrived. The UUID alone gives us the uniqueness we actually need.
         let uuidSuffix = String(UUID().uuidString.prefix(8))
-        let uniqueSubscriptionId = "chat-zaps-\(aTag)-\(uuidSuffix)"
+        let uniqueSubscriptionId = "chat-zaps-\(uuidSuffix)"
+        assert(uniqueSubscriptionId.count <= 64, "Subscription ID exceeds the NIP-01 64-character limit")
 
         // Clear existing data
         chatMessages = []
