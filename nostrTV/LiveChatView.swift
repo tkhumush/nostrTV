@@ -182,7 +182,8 @@ private struct ChatMessageRow: View {
 }
 
 #Preview {
-    let nostrClient = try! NostrSDKClient()
+    let nostrClient = (try? NostrSDKClient())
+        ?? NostrSDKClient.errorClient(message: "Preview client init failed")
     let activityManager = StreamActivityManager()
 
     let stream = Stream(

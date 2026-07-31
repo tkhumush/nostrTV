@@ -445,8 +445,14 @@ struct ContentView: View {
     @State private var showProfilePage = true  // Kept for ProfileSettingsView binding
     @State private var showLoginSheet = false
 
-    init() {
-        let vm = StreamViewModel()
+    /// The shared NostrSDKClient created at the app level.
+    /// ContentView passes it into StreamViewModel and forwards it to any child
+    /// views/managers that need relay access (VideoPlayerView, LiveActivityManager, etc.).
+    private let nostrSDKClient: NostrSDKClient
+
+    init(nostrSDKClient: NostrSDKClient) {
+        self.nostrSDKClient = nostrSDKClient
+        let vm = StreamViewModel(nostrSDKClient: nostrSDKClient)
         _viewModel = StateObject(wrappedValue: vm)
     }
 
@@ -553,7 +559,7 @@ struct ContentView: View {
         .ignoresSafeArea()
         .fullScreenCover(isPresented: $showPlayer) {
             if let player = player {
-                VideoPlayerView(player: player, lightningAddress: selectedLightningAddress, stream: selectedStream, nostrSDKClient: viewModel.sdkClient, authManager: authManager)
+                VideoPlayerView(player: player, lightningAddress: selectedLightningAddress, stream: selectedStream, nostrSDKClient: nostrSDKClient, authManager: authManager)
                     .ignoresSafeArea()
             }
         }

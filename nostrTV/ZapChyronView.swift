@@ -139,7 +139,8 @@ private struct ZapDisplayView: View {
 }
 
 #Preview {
-    let nostrSDKClient = try! NostrSDKClient()
+    let nostrSDKClient = (try? NostrSDKClient())
+        ?? NostrSDKClient.errorClient(message: "Preview client init failed")
     let activityManager = StreamActivityManager()
 
     ZStack {
