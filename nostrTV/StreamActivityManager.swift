@@ -45,50 +45,63 @@ class StreamActivityManager: ObservableObject {
             return
         }
 
+        // Guard against double-start: if already listening, stop first to prevent
+        // duplicate subscriptions and stale callbacks. This handles the case where
+        // onAppear fires without a prior onDisappear (e.g. fullScreenCover reuse).
+        if subscriptionId != nil {
+            print("📺 StreamActivityManager: Already listening, stopping previous subscription before restart")
+            stopListening()
+        }
+
         self.nostrClient = client
         self.currentStreamATag = "30311:\(authorPubkey.lowercased()):\(stream.streamID)"
         let aTag = currentStreamATag!
-        let subscriptionIdPrefix = "chat-zaps-\(aTag)"
 
-        // Close any existing subscription first
-        closeSubscription()
+        // Generate a unique subscription ID per listening session.
+        // Using a UUID suffix ensures that stopListening on an old StreamActivityManager
+        // can never accidentally remove callbacks for a new one's subscription, even if
+        // SwiftUI's @StateObject lifecycle causes old/new managers to overlap.
+        let uuidSuffix = String(UUID().uuidString.prefix(8))
+        let uniqueSubscriptionId = "chat-zaps-\(aTag)-\(uuidSuffix)"
 
         // Clear existing data
         chatMessages = []
         zapComments = []
 
-        // Store the new subscription ID and use it consistently for callbacks, subscription, and cleanup
-        subscriptionId = subscriptionIdPrefix
+        // Store the new unique subscription ID and use it consistently for callbacks,
+        // subscription, and cleanup.
+        subscriptionId = uniqueSubscriptionId
 
-        // Remove any stale callbacks for this subscription ID before adding new ones
-        client.removeActivityCallbacks(forSubscriptionId: subscriptionIdPrefix)
+        // Remove any stale callbacks for this subscription ID before adding new ones.
+        // (Safe no-op if none exist; the unique ID makes collisions impossible.)
+        client.removeActivityCallbacks(forSubscriptionId: uniqueSubscriptionId)
 
-        // Set up callbacks for both chat and zaps, keyed by subscription ID
-        client.addChatReceivedCallback(forSubscriptionId: subscriptionIdPrefix) { [weak self] chatComment in
+        // Set up callbacks for both chat and zaps, keyed by the unique subscription ID
+        client.addChatReceivedCallback(forSubscriptionId: uniqueSubscriptionId) { [weak self] chatComment in
             Task { @MainActor in
                 self?.handleChatReceived(chatComment)
             }
         }
 
-        client.addZapReceivedCallback(forSubscriptionId: subscriptionIdPrefix) { [weak self] zapComment in
+        client.addZapReceivedCallback(forSubscriptionId: uniqueSubscriptionId) { [weak self] zapComment in
             Task { @MainActor in
                 self?.handleZapReceived(zapComment)
             }
         }
 
         // Listen for profile arrivals so the UI updates when profiles load
-        client.addProfileReceivedCallback(forSubscriptionId: subscriptionIdPrefix) { [weak self] profile in
+        client.addProfileReceivedCallback(forSubscriptionId: uniqueSubscriptionId) { [weak self] profile in
             Task { @MainActor in
                 self?.handleProfileReceived(profile)
             }
         }
 
-        // Subscribe to both kinds with a single request using the explicit subscription ID
+        // Subscribe to both kinds with a single request using the unique subscription ID
         guard let filter = Filter(kinds: [1311, 9735], tags: ["a": [aTag]], limit: 100) else {
             print("❌ StreamActivityManager: Failed to create chat+zaps filter")
             return
         }
-        let subId = client.subscribe(with: filter, subscriptionId: subscriptionIdPrefix, purpose: "chat-zaps")
+        let subId = client.subscribe(with: filter, subscriptionId: uniqueSubscriptionId, purpose: "chat-zaps")
         subscriptionId = subId
 
         print("📺 StreamActivityManager: Started listening for \(stream.streamID)")
@@ -130,17 +143,6 @@ class StreamActivityManager: ObservableObject {
     }
 
     // MARK: - Private Methods
-
-    /// Close the current subscription
-    private func closeSubscription() {
-        guard let subId = subscriptionId, let client = nostrClient else {
-            return
-        }
-
-        client.closeSubscription(subId)
-        print("📪 StreamActivityManager: Closed subscription \(subId.prefix(8))...")
-        subscriptionId = nil
-    }
 
     /// Handle a received chat message (kind 1311)
     private func handleChatReceived(_ chatComment: ZapComment) {
