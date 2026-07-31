@@ -469,6 +469,13 @@ class NostrSDKClient {
                 self?.handleRelayEvent(relayEvent)
             }
             .store(in: &cancellables)
+
+        // The events publisher only carries EVENT messages. Everything a relay says
+        // about the health of a subscription — CLOSED, NOTICE, OK, EOSE — and every
+        // connection state change arrives via the delegate instead. Without it a relay
+        // terminating a subscription is completely invisible: events simply stop, with
+        // no error anywhere. Observing it makes those failures diagnosable.
+        relayPool.delegate = self
     }
 
     /// Route incoming relay events to appropriate handlers based on event kind
@@ -1513,5 +1520,72 @@ extension Array {
         return stride(from: 0, to: count, by: size).map {
             Array(self[$0..<Swift.min($0 + size, count)])
         }
+    }
+}
+
+// MARK: - RelayDelegate
+
+/// Observes relay control messages and connection state.
+///
+/// `RelayPool.events` only publishes EVENT messages, so without this the app is blind
+/// to everything else a relay says. In particular a relay that closes one of our
+/// subscriptions (CLOSED) produces no error and no callback — events just stop
+/// arriving, which is indistinguishable from a quiet stream. Subscription-scoped
+/// messages are logged with the subscription's purpose so it is obvious which feature
+/// went silent.
+extension NostrSDKClient: RelayDelegate {
+
+    func relayStateDidChange(_ relay: Relay, state: Relay.State) {
+        switch state {
+        case .connected:
+            print("🔗 Relay connected: \(relay.url.absoluteString)")
+        case .connecting:
+            print("🔄 Relay connecting: \(relay.url.absoluteString)")
+        case .notConnected:
+            print("🔌 Relay disconnected: \(relay.url.absoluteString)")
+        case .error(let error):
+            print("❌ Relay error (\(relay.url.absoluteString)): \(error.localizedDescription)")
+        @unknown default:
+            print("❔ Relay state changed (\(relay.url.absoluteString)): \(String(describing: state))")
+        }
+    }
+
+    func relay(_ relay: Relay, didReceive response: RelayResponse) {
+        switch response {
+        case .closed(let subscriptionId, let message):
+            // The relay has terminated this subscription: no further events will
+            // arrive on it until we resubscribe.
+            print("🚫 Relay \(relay.url.absoluteString) CLOSED subscription \(subscriptionId) "
+                  + "(purpose: \(purpose(forSubscriptionId: subscriptionId))): \(message)")
+
+        case .notice(let message):
+            print("📢 Relay notice (\(relay.url.absoluteString)): \(message)")
+
+        case .eose(let subscriptionId):
+            print("📭 Relay \(relay.url.absoluteString) end of stored events for \(subscriptionId) "
+                  + "(purpose: \(purpose(forSubscriptionId: subscriptionId))) — live events follow")
+
+        case .ok(let eventId, let success, let message):
+            if !success {
+                print("❌ Relay \(relay.url.absoluteString) rejected event \(eventId.prefix(8))…: \(message)")
+            }
+
+        case .auth(let challenge):
+            print("🔐 Relay \(relay.url.absoluteString) requested AUTH (challenge: \(challenge.prefix(12))…) — not implemented")
+
+        case .event, .count:
+            break  // Events flow through the events publisher
+        }
+    }
+
+    func relay(_ relay: Relay, didReceive event: RelayEvent) {
+        // Handled via the events publisher in setupEventStream()
+    }
+
+    /// Human-readable purpose for a subscription, for logging.
+    private func purpose(forSubscriptionId subscriptionId: String) -> String {
+        subscriptionsLock.lock()
+        defer { subscriptionsLock.unlock() }
+        return activeSubscriptions[subscriptionId]?.purpose ?? "unknown"
     }
 }
