@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import NostrSDK
 
 /// Manages live chat messages and zap receipts for a stream with a single subscription
 /// Uses #a tag filtering to get both kinds in one request
