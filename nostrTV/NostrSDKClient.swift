@@ -253,7 +253,19 @@ class NostrSDKClient {
         lastMessageTime = Date()
     }
 
-    /// Disconnect from all relays
+    /// Disconnect from all relays.
+    ///
+    /// - Important: This is **terminal and not recoverable** by calling `connect()`
+    ///   again. It stops the heartbeat (nothing will detect silence and reconnect),
+    ///   clears `cancellables` — and `setupEventStream()` only runs from `init`, so
+    ///   incoming events stop being processed permanently — and empties
+    ///   `activeSubscriptions`, leaving `performReconnection()` no filters to replay.
+    ///
+    ///   Because this client is shared app-wide, calling it takes stream discovery,
+    ///   auth, chat and zaps offline until the process restarts. No component that
+    ///   merely *uses* the shared client should call this; scope cleanup to your own
+    ///   subscriptions via `closeSubscription(_:)` and `removeCallback(forSubscriptionId:)`.
+    ///   It currently has no callers, and is kept only for whole-app teardown.
     func disconnect() {
         stopHeartbeat()
         relayPool.disconnect()
@@ -607,11 +619,6 @@ class NostrSDKClient {
         profileReceivedCallbacks[subscriptionId] = callback
     }
 
-    /// Backward-compatible overload that stores the callback under a generated unique key.
-    func addProfileReceivedCallback(_ callback: @escaping (Profile) -> Void) {
-        let key = "unkeyed-profile-\(UUID().uuidString)"
-        profileReceivedCallbacks[key] = callback
-    }
 
     /// Add a callback for chat message received events, keyed by subscription ID.
     /// Using the same `subscriptionId` replaces any existing callback for that subscription.
@@ -619,11 +626,6 @@ class NostrSDKClient {
         chatReceivedCallbacks[subscriptionId] = callback
     }
 
-    /// Backward-compatible overload that stores the callback under a generated unique key.
-    func addChatReceivedCallback(_ callback: @escaping (ZapComment) -> Void) {
-        let key = "unkeyed-chat-\(UUID().uuidString)"
-        chatReceivedCallbacks[key] = callback
-    }
 
     /// Add a callback for follow list received events, keyed by subscription ID.
     /// Using the same `subscriptionId` replaces any existing callback for that subscription.
@@ -633,11 +635,6 @@ class NostrSDKClient {
         followListReceivedCallbacks[subscriptionId] = callback
     }
 
-    /// Backward-compatible overload that stores the callback under a generated unique key.
-    func addFollowListReceivedCallback(_ callback: @escaping ([String]) -> Void) {
-        let key = "unkeyed-follow-list-\(UUID().uuidString)"
-        followListReceivedCallbacks[key] = callback
-    }
 
     /// Add a callback for zap receipt received events, keyed by subscription ID.
     /// Using the same `subscriptionId` replaces any existing callback for that subscription.
@@ -645,11 +642,6 @@ class NostrSDKClient {
         zapReceivedCallbacks[subscriptionId] = callback
     }
 
-    /// Backward-compatible overload that stores the callback under a generated unique key.
-    func addZapReceivedCallback(_ callback: @escaping (ZapComment) -> Void) {
-        let key = "unkeyed-zap-\(UUID().uuidString)"
-        zapReceivedCallbacks[key] = callback
-    }
 
     /// Remove callbacks for a specific subscription ID.
     /// Removes profile, follow list, chat, AND zap callbacks registered under that key.
