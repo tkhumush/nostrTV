@@ -32,6 +32,13 @@ struct UserRelay {
     }
 }
 
+/// Stored subscription state used to restore an exact subscription after reconnect.
+private struct StoredSubscription {
+    let id: String
+    let filter: Filter
+    let purpose: String
+}
+
 /// A wrapper around NostrSDK's RelayPool that provides the same interface as the legacy NostrClient.
 /// This allows gradual migration from custom WebSocket implementation to the official SDK.
 ///
@@ -49,8 +56,8 @@ class NostrSDKClient {
     /// The relay pool managing all relay connections
     private let relayPool: RelayPool
 
-    /// Active subscription IDs mapped to their purpose
-    private var activeSubscriptions: [String: String] = [:] // subscriptionId -> purpose
+    /// Active subscription IDs mapped to their full stored state
+    private var activeSubscriptions: [String: StoredSubscription] = [:] // subscriptionId -> StoredSubscription
 
     /// Lock for thread-safe access to activeSubscriptions
     private let subscriptionsLock = NSLock()
@@ -121,6 +128,12 @@ class NostrSDKClient {
     /// Whether we're currently attempting to reconnect
     private var isReconnecting: Bool = false
 
+    /// Lock guarding `isReconnecting` to serialize reconnect attempts
+    private let reconnectLock = NSLock()
+
+    /// Serial queue for scheduling reconnect work (prevents parallel attempts)
+    private let reconnectQueue = DispatchQueue(label: "com.nostrtv.sdk.reconnect")
+
     /// Silence threshold before considering connection dead
     private let connectionSilenceThreshold: TimeInterval = 60
 
@@ -132,8 +145,8 @@ class NostrSDKClient {
     /// Called when a live stream event (kind 30311) is received
     var onStreamReceived: ((Stream) -> Void)?
 
-    /// Called when a profile metadata event (kind 0) is received
-    private var profileReceivedCallbacks: [((Profile) -> Void)] = []
+    /// Called when a profile metadata event (kind 0) is received, keyed by subscription ID
+    private var profileReceivedCallbacks: [String: (Profile) -> Void] = [:]
 
     /// Called when a follow list event (kind 3) is received
     var onFollowListReceived: (([String]) -> Void)?
@@ -142,11 +155,11 @@ class NostrSDKClient {
     /// Each entry contains the relay URL and its read/write permissions per NIP-65
     var onUserRelaysReceived: (([UserRelay]) -> Void)?
 
-    /// Called when a zap receipt (kind 9735) is received
-    private var zapReceivedCallbacks: [(ZapComment) -> Void] = []
+    /// Called when a zap receipt (kind 9735) is received, keyed by subscription ID
+    private var zapReceivedCallbacks: [String: (ZapComment) -> Void] = [:]
 
-    /// Called when a live chat message (kind 1311) is received
-    private var chatReceivedCallbacks: [(ZapComment) -> Void] = []
+    /// Called when a live chat message (kind 1311) is received, keyed by subscription ID
+    private var chatReceivedCallbacks: [String: (ZapComment) -> Void] = [:]
 
     /// Called when a bunker message (kind 24133) is received
     var onBunkerMessageReceived: ((NostrEvent) -> Void)?
@@ -261,57 +274,84 @@ class NostrSDKClient {
 
     /// Attempt to reconnect with exponential backoff
     private func attemptReconnection() {
+        reconnectLock.lock()
+        defer { reconnectLock.unlock() }
+
         guard !isReconnecting else { return }
         isReconnecting = true
 
-        print("🔄 NostrSDKClient: Attempting reconnection (delay: \(reconnectDelay)s)...")
+        let delay = reconnectDelay
+        print("🔄 NostrSDKClient: Attempting reconnection (delay: \(delay)s)...")
+        scheduleReconnectionWork(after: delay)
+    }
+
+    /// Schedule the actual reconnect work on the dedicated reconnect queue
+    private func scheduleReconnectionWork(after delay: TimeInterval) {
+        reconnectQueue.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self = self else { return }
+            self.performReconnection()
+        }
+    }
+
+    /// Disconnect, reconnect, verify at least one relay is connected, then restore subscriptions
+    private func performReconnection() {
+        print("🔄 NostrSDKClient: Performing reconnection...")
 
         // Disconnect cleanly first
         relayPool.disconnect()
 
-        // Wait for backoff delay then reconnect
-        DispatchQueue.main.asyncAfter(deadline: .now() + reconnectDelay) { [weak self] in
+        // Reconnect
+        relayPool.connect()
+        lastMessageTime = Date()
+
+        // Wait briefly for connections to establish, then verify and restore subscriptions
+        reconnectQueue.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             guard let self = self else { return }
 
-            self.relayPool.connect()
-            self.lastMessageTime = Date()
+            let isConnected = self.relayPool.relays.contains { $0.state == .connected }
 
-            // Resubscribe to all active subscriptions
-            self.resubscribeAll()
+            if isConnected {
+                self.resubscribeAll()
 
-            // Increase backoff for next attempt (capped)
-            self.reconnectDelay = min(self.reconnectDelay * 2, self.maxReconnectDelay)
-            self.isReconnecting = false
+                self.reconnectLock.lock()
+                // Reset backoff on successful reconnect and release the flag
+                self.reconnectDelay = 1
+                self.isReconnecting = false
+                self.reconnectLock.unlock()
 
-            print("✅ NostrSDKClient: Reconnection attempt complete")
+                print("✅ NostrSDKClient: Reconnection successful, subscriptions restored")
+            } else {
+                self.reconnectLock.lock()
+                // Increase backoff for next attempt (capped)
+                self.reconnectDelay = min(self.reconnectDelay * 2, self.maxReconnectDelay)
+                let nextDelay = self.reconnectDelay
+                self.reconnectLock.unlock()
+
+                print("⚠️ NostrSDKClient: Reconnection failed, retrying in \(nextDelay)s...")
+                self.scheduleReconnectionWork(after: nextDelay)
+            }
         }
     }
 
-    /// Resubscribe to all previously active subscriptions
+    /// Resubscribe to all previously active subscriptions using stored filter state
     private func resubscribeAll() {
-        // Store current subscriptions before clearing (thread-safe)
         subscriptionsLock.lock()
         let subscriptionsToRestore = activeSubscriptions
-        activeSubscriptions.removeAll()
         subscriptionsLock.unlock()
 
-        // Recreate subscriptions based on purpose
-        for (_, purpose) in subscriptionsToRestore {
-            print("🔄 NostrSDKClient: Resubscribing: \(purpose)")
+        guard !subscriptionsToRestore.isEmpty else {
+            print("🔄 NostrSDKClient: No active subscriptions to restore")
+            return
+        }
 
-            if purpose == "streams" {
-                subscribeToStreams(limit: 50)
-            } else if purpose == "streams-filtered" {
-                // Will need to be re-triggered by StreamViewModel
-                print("   ⚠️ Filtered streams subscription needs external re-trigger")
-            } else if purpose.hasPrefix("chat-zaps-") {
-                let aTag = String(purpose.dropFirst("chat-zaps-".count))
-                subscribeToChatAndZaps(aTag: aTag)
-            } else if purpose.hasPrefix("follow-list-") {
-                let pubkeyPrefix = String(purpose.dropFirst("follow-list-".count))
-                print("   ⚠️ Follow list subscription \(pubkeyPrefix) needs external re-trigger")
-            }
-            // Other subscriptions may need external re-triggering
+        print("🔄 NostrSDKClient: Restoring \(subscriptionsToRestore.count) subscription(s)")
+
+        for (_, stored) in subscriptionsToRestore {
+            let newSubscriptionId = relayPool.subscribe(with: stored.filter, subscriptionId: stored.id)
+            subscriptionsLock.lock()
+            activeSubscriptions[newSubscriptionId] = stored
+            subscriptionsLock.unlock()
+            print("🔄 NostrSDKClient: Restored subscription \(stored.id.prefix(8))... (purpose: \(stored.purpose))")
         }
     }
 
@@ -380,9 +420,19 @@ class NostrSDKClient {
     func subscribe(with filter: Filter, purpose: String = "custom") -> String {
         let subscriptionId = relayPool.subscribe(with: filter)
         subscriptionsLock.lock()
-        activeSubscriptions[subscriptionId] = purpose
+        activeSubscriptions[subscriptionId] = StoredSubscription(id: subscriptionId, filter: filter, purpose: purpose)
         subscriptionsLock.unlock()
         return subscriptionId
+    }
+
+    /// Subscribe with an explicit subscription ID so reconnection can restore the exact same subscription.
+    @discardableResult
+    func subscribe(with filter: Filter, subscriptionId: String, purpose: String = "custom") -> String {
+        let actualId = relayPool.subscribe(with: filter, subscriptionId: subscriptionId)
+        subscriptionsLock.lock()
+        activeSubscriptions[actualId] = StoredSubscription(id: actualId, filter: filter, purpose: purpose)
+        subscriptionsLock.unlock()
+        return actualId
     }
 
     /// Close a subscription by ID
@@ -527,25 +577,58 @@ class NostrSDKClient {
 
     // MARK: - Profile Management
 
-    /// Add a callback for profile received events (supports multiple observers)
+    /// Add a callback for profile received events, keyed by subscription ID.
+    /// Using the same `subscriptionId` replaces any existing callback for that subscription.
+    func addProfileReceivedCallback(forSubscriptionId subscriptionId: String, _ callback: @escaping (Profile) -> Void) {
+        profileReceivedCallbacks[subscriptionId] = callback
+    }
+
+    /// Backward-compatible overload that stores the callback under a generated unique key.
     func addProfileReceivedCallback(_ callback: @escaping (Profile) -> Void) {
-        profileReceivedCallbacks.append(callback)
+        let key = "unkeyed-profile-\(UUID().uuidString)"
+        profileReceivedCallbacks[key] = callback
     }
 
-    /// Add a callback for chat message received events (supports multiple observers)
+    /// Add a callback for chat message received events, keyed by subscription ID.
+    /// Using the same `subscriptionId` replaces any existing callback for that subscription.
+    func addChatReceivedCallback(forSubscriptionId subscriptionId: String, _ callback: @escaping (ZapComment) -> Void) {
+        chatReceivedCallbacks[subscriptionId] = callback
+    }
+
+    /// Backward-compatible overload that stores the callback under a generated unique key.
     func addChatReceivedCallback(_ callback: @escaping (ZapComment) -> Void) {
-        chatReceivedCallbacks.append(callback)
+        let key = "unkeyed-chat-\(UUID().uuidString)"
+        chatReceivedCallbacks[key] = callback
     }
 
-    /// Add a callback for zap receipt received events (supports multiple observers)
+    /// Add a callback for zap receipt received events, keyed by subscription ID.
+    /// Using the same `subscriptionId` replaces any existing callback for that subscription.
+    func addZapReceivedCallback(forSubscriptionId subscriptionId: String, _ callback: @escaping (ZapComment) -> Void) {
+        zapReceivedCallbacks[subscriptionId] = callback
+    }
+
+    /// Backward-compatible overload that stores the callback under a generated unique key.
     func addZapReceivedCallback(_ callback: @escaping (ZapComment) -> Void) {
-        zapReceivedCallbacks.append(callback)
+        let key = "unkeyed-zap-\(UUID().uuidString)"
+        zapReceivedCallbacks[key] = callback
     }
 
-    /// Remove all chat/zap callbacks (call when cleaning up subscriptions)
-    func removeActivityCallbacks() {
-        chatReceivedCallbacks.removeAll()
-        zapReceivedCallbacks.removeAll()
+    /// Remove callbacks for a specific subscription ID.
+    func removeCallback(forSubscriptionId subscriptionId: String) {
+        profileReceivedCallbacks.removeValue(forKey: subscriptionId)
+        chatReceivedCallbacks.removeValue(forKey: subscriptionId)
+        zapReceivedCallbacks.removeValue(forKey: subscriptionId)
+    }
+
+    /// Remove chat/zap callbacks. If a subscription ID is provided, only that subscription's callbacks are removed.
+    func removeActivityCallbacks(forSubscriptionId subscriptionId: String? = nil) {
+        if let subscriptionId = subscriptionId {
+            chatReceivedCallbacks.removeValue(forKey: subscriptionId)
+            zapReceivedCallbacks.removeValue(forKey: subscriptionId)
+        } else {
+            chatReceivedCallbacks.removeAll()
+            zapReceivedCallbacks.removeAll()
+        }
     }
 
     /// Get cached profile for a pubkey
@@ -751,7 +834,7 @@ class NostrSDKClient {
         // Notify callbacks
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            for callback in self.profileReceivedCallbacks {
+            for callback in self.profileReceivedCallbacks.values {
                 callback(profile)
             }
         }
@@ -834,7 +917,7 @@ class NostrSDKClient {
         let callbacks = chatReceivedCallbacks
         print("📨 NostrSDKClient: Notifying \(callbacks.count) chat callback(s)")
         DispatchQueue.main.async {
-            for callback in callbacks {
+            for callback in callbacks.values {
                 callback(chatComment)
             }
         }
@@ -909,7 +992,7 @@ class NostrSDKClient {
         // Notify all callbacks
         let callbacks = zapReceivedCallbacks
         DispatchQueue.main.async {
-            for callback in callbacks {
+            for callback in callbacks.values {
                 callback(zapComment)
             }
         }

@@ -115,6 +115,9 @@ class NostrAuthManager: ObservableObject {
         }
     }
 
+    /// Stable subscription ID for the authenticated user's profile/follow-list data.
+    private static let userDataSubscriptionId = "user-data-auth"
+
     func fetchUserData(force: Bool = false) {
         guard let user = currentUser else { return }
 
@@ -126,8 +129,11 @@ class NostrAuthManager: ObservableObject {
         isLoadingProfile = true
         errorMessage = nil
 
-        // Setup callback for profile
-        nostrSDKClient.addProfileReceivedCallback { [weak self] profile in
+        // Remove any previous callback for this subscription ID to prevent duplicates
+        nostrSDKClient.removeCallback(forSubscriptionId: Self.userDataSubscriptionId)
+
+        // Setup callback for profile, keyed by subscription ID (replaces, not appends)
+        nostrSDKClient.addProfileReceivedCallback(forSubscriptionId: Self.userDataSubscriptionId) { [weak self] profile in
             DispatchQueue.main.async {
                 self?.currentProfile = profile
                 self?.isLoadingProfile = false
@@ -152,8 +158,9 @@ class NostrAuthManager: ObservableObject {
             }
         }
 
-        // Connect and fetch
-        nostrSDKClient.connectAndFetchUserData(pubkey: user.hexPubkey)
+        // Subscribe to user data on the shared client with a stable subscription ID
+        nostrSDKClient.connect()
+        nostrSDKClient.subscribeToUserData(pubkey: user.hexPubkey)
     }
 
     func login() {
