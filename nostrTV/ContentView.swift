@@ -35,6 +35,45 @@ struct CuratedLoadingView: View {
 }
 
 /// Empty state view for Following tab when user is not logged in
+/// Shown on the Following tab when the user is logged in but the list is empty.
+///
+/// An empty list previously rendered as a completely blank page, which made three
+/// very different situations indistinguishable — the follow list never loading, the
+/// follow list loading fine with nobody currently streaming, and the filter being
+/// broken. This states which one it is.
+struct FollowingNoStreamsView: View {
+    /// Number of pubkeys in the user's kind 3 follow list.
+    let followCount: Int
+
+    private var isFollowListMissing: Bool { followCount == 0 }
+
+    var body: some View {
+        VStack(spacing: 30) {
+            Spacer()
+
+            Image(systemName: isFollowListMissing ? "person.crop.circle.badge.questionmark" : "moon.zzz.fill")
+                .font(.system(size: 100))
+                .foregroundColor(.coveAccent.opacity(0.6))
+
+            Text(isFollowListMissing ? "Your follow list hasn't loaded" : "Nobody you follow is live")
+                .font(.coveSubheading)
+                .foregroundColor(.white)
+
+            Text(isFollowListMissing
+                 ? "We couldn't read your follow list from the relays. Check your connection, or open Profile to retry."
+                 : "You're following \(followCount) \(followCount == 1 ? "person" : "people"). None of them are streaming right now — check back later.")
+                .font(.coveBody)
+                .foregroundColor(.coveSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 80)
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.coveBackground)
+    }
+}
+
 struct FollowingEmptyStateView: View {
     let onLoginTap: () -> Void
 
@@ -519,6 +558,9 @@ struct ContentView: View {
                 // Following tab
                 NavigationView {
                     if authManager.isAuthenticated {
+                        if viewModel.categorizedStreams.isEmpty && viewModel.featuredStream == nil {
+                            FollowingNoStreamsView(followCount: viewModel.followListCount)
+                        } else {
                         StreamListView(
                             viewModel: viewModel,
                             categorizedStreams: viewModel.categorizedStreams,
@@ -551,6 +593,7 @@ struct ContentView: View {
 
                             self.selectedStream = streamWithProfile
                             self.showPlayer = true
+                        }
                         }
                     } else {
                         FollowingEmptyStateView(onLoginTap: {

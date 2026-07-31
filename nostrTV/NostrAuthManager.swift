@@ -60,6 +60,12 @@ class NostrAuthManager: ObservableObject {
             loadCachedProfile()
             isLoadingProfile = false
 
+            // Refresh profile and follow list from the relays. Restoring a session
+            // only rehydrates the cache; without this nothing ever subscribes for the
+            // user's kind 3, so an empty or stale cache left the Following tab blank
+            // until the user logged in again or opened Profile settings.
+            refreshUserDataAfterRestore()
+
             // Reconnect bunker client in background
             Task { @MainActor in
                 await restoreBunkerSession(bunkerSession)
@@ -72,6 +78,22 @@ class NostrAuthManager: ObservableObject {
             isAuthenticated = true
             loadCachedProfile()
             isLoadingProfile = false
+            refreshUserDataAfterRestore()
+        }
+    }
+
+    /// Fetch the user's profile and follow list after restoring a saved session.
+    ///
+    /// Mirrors the login-time path: connect the shared pool first so the subscription
+    /// is not issued against relays that have not begun connecting (Bug #14), then
+    /// fetch. Runs on the next main-loop turn because `init` has not finished yet and
+    /// `fetchUserData` reads `currentUser`.
+    private func refreshUserDataAfterRestore() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            print("🔄 NostrAuthManager: Refreshing profile and follow list after session restore")
+            self.nostrSDKClient.connect()
+            self.fetchUserData(force: true)
         }
     }
 
@@ -80,7 +102,19 @@ class NostrAuthManager: ObservableObject {
 
         do {
             let decoder = JSONDecoder()
-            currentProfile = try decoder.decode(Profile.self, from: profileData)
+            let cached = try decoder.decode(Profile.self, from: profileData)
+
+            // Only accept a cached profile that actually belongs to the signed-in
+            // account. A build that mis-assigned incoming profiles could have
+            // persisted someone else's here, and a stale entry would otherwise
+            // survive indefinitely and keep showing the wrong identity.
+            if let user = currentUser,
+               cached.pubkey.caseInsensitiveCompare(user.hexPubkey) != .orderedSame {
+                print("⚠️ NostrAuthManager: Cached profile belongs to \(cached.pubkey.prefix(8))… but the signed-in user is \(user.hexPubkey.prefix(8))…; discarding it")
+                UserDefaults.standard.removeObject(forKey: "nostrUserProfile")
+            } else {
+                currentProfile = cached
+            }
         } catch {
             print("\u{26A0}\u{FE0F} NostrAuthManager: Failed to decode cached profile, clearing it: \(error.localizedDescription)")
             UserDefaults.standard.removeObject(forKey: "nostrUserProfile")
@@ -137,10 +171,18 @@ class NostrAuthManager: ObservableObject {
 
         // Setup callback for profile, keyed by subscription ID (replaces, not appends)
         nostrSDKClient.addProfileReceivedCallback(forSubscriptionId: Self.userDataSubscriptionId) { [weak self] profile in
+            guard let self = self else { return }
+            // Every kind 0 event is delivered to every registered profile callback, and
+            // the app subscribes to profiles for the whole follow list. Without this
+            // check the logged-in identity was reassigned to each arriving profile in
+            // turn — the account appeared to cycle through the people it follows.
+            guard profile.pubkey.caseInsensitiveCompare(user.hexPubkey) == .orderedSame else {
+                return
+            }
             DispatchQueue.main.async {
-                self?.currentProfile = profile
-                self?.isLoadingProfile = false
-                self?.saveProfileToCache(profile)
+                self.currentProfile = profile
+                self.isLoadingProfile = false
+                self.saveProfileToCache(profile)
             }
         }
 
@@ -148,10 +190,17 @@ class NostrAuthManager: ObservableObject {
         // is delivered when this subscription's kind-3 events arrive. Using the
         // keyed API prevents StreamViewModel (or any other component) from
         // overwriting this handler via the legacy `onFollowListReceived` property.
-        nostrSDKClient.addFollowListReceivedCallback(forSubscriptionId: Self.userDataSubscriptionId) { [weak self] follows in
+        nostrSDKClient.addFollowListReceivedCallback(forSubscriptionId: Self.userDataSubscriptionId) { [weak self] authorPubkey, follows in
+            guard let self = self else { return }
+            // Kind 3 events for other pubkeys — notably the admin's, fetched at startup
+            // for the Curated tab — arrive on this same dispatch. Adopting one of those
+            // would silently replace the user's follow list, and cache it.
+            guard authorPubkey.caseInsensitiveCompare(user.hexPubkey) == .orderedSame else {
+                return
+            }
             DispatchQueue.main.async {
-                self?.followList = follows
-                self?.saveFollowListToCache(follows)
+                self.followList = follows
+                self.saveFollowListToCache(follows)
             }
         }
 

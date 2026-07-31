@@ -144,6 +144,39 @@ class NostrSDKClient {
     /// "`<subscription_id>` is an arbitrary, non-empty string of max length 64 chars."
     static let maxSubscriptionIdLength = 64
 
+    /// Resolve the host of a NIP-53 live event (kind 30311) from its tags.
+    ///
+    /// A `p` tag is a participant entry, not necessarily the host:
+    ///
+    ///     ["p", "<pubkey>", "<relay-url>", "<role>", "<proof>"]
+    ///
+    /// where the role is a displayable marker such as `Host`, `Speaker` or
+    /// `Participant`. Simply taking the first `p` tag picks a guest on any
+    /// multi-participant stream, which shows the wrong profile and hides the stream
+    /// from the Following tab, since that filter matches on the host pubkey.
+    ///
+    /// The role's position varies in practice — the relay URL is frequently empty or
+    /// omitted entirely — so the marker is matched anywhere in the tag's parameters
+    /// rather than at a fixed index.
+    ///
+    /// - Parameters:
+    ///   - tags: The event's tags.
+    ///   - eventAuthorPubkey: The event signer, used when no participant is listed.
+    /// - Returns: The host pubkey, the first participant, or the event author.
+    static func hostPubkey(fromTags tags: [Tag], eventAuthorPubkey: String) -> String {
+        let participantTags = tags.filter { $0.name == "p" }
+
+        if let host = participantTags.first(where: { tag in
+            tag.otherParameters.contains { $0.caseInsensitiveCompare("host") == .orderedSame }
+        }) {
+            return host.value
+        }
+
+        // No explicit Host marker: fall back to the first participant, then to the
+        // event signer (streams published by the host itself carry no p tag at all).
+        return participantTags.first?.value ?? eventAuthorPubkey
+    }
+
     // MARK: - Callbacks (matching NostrClient interface)
 
     /// Called when a live stream event (kind 30311) is received
@@ -154,7 +187,11 @@ class NostrSDKClient {
 
     /// Called when a follow list event (kind 3) is received, keyed by subscription ID.
     /// Using the same `subscriptionId` replaces any existing callback for that subscription.
-    private var followListReceivedCallbacks: [String: ([String]) -> Void] = [:]
+    /// Receives (author pubkey, follows). The author is essential: kind 3 events for
+    /// several different pubkeys flow through this one dispatch (the admin's list for
+    /// the Curated tab and the logged-in user's for Following), and a callback that
+    /// cannot tell them apart will happily adopt someone else's follow list.
+    private var followListReceivedCallbacks: [String: (String, [String]) -> Void] = [:]
 
     /// Special key used to back the backward-compatible `onFollowListReceived` property
     /// so it does not collide with subscription-keyed callbacks.
@@ -166,7 +203,7 @@ class NostrSDKClient {
     /// any subscription-keyed callbacks instead of overwriting them. Existing
     /// callers (e.g. StreamViewModel) that assign this property continue to work,
     /// while new callers should prefer `addFollowListReceivedCallback(forSubscriptionId:_:)`.
-    var onFollowListReceived: (([String]) -> Void)? {
+    var onFollowListReceived: ((String, [String]) -> Void)? {
         get {
             followListReceivedCallbacks[Self.legacyFollowListCallbackKey]
         }
@@ -613,8 +650,30 @@ class NostrSDKClient {
             print("❌ NostrSDKClient: Failed to create author-filtered streams filter")
             return nil
         }
-        let subId = subscribe(with: filter, purpose: "streams-filtered")
+        let subId = subscribe(with: filter, purpose: "streams-by-author")
         print("✅ NostrSDKClient: Subscribed to streams from \(authors.count) authors (limit: \(limit)): \(subId.prefix(8))...")
+        return subId
+    }
+
+    /// Subscribe to live streams where any of the given pubkeys is a tagged participant.
+    ///
+    /// The `authors` filter only matches the event signer. A stream published on
+    /// someone's behalf names the host in a `p` tag instead, so following the host
+    /// alone would not match an author-filtered subscription. This `#p` filter is the
+    /// relay-side counterpart to the host-or-author match the Following tab applies
+    /// locally.
+    /// - Parameters:
+    ///   - participants: Pubkeys to match against the event's `p` tags.
+    ///   - limit: Maximum stored events to return.
+    func subscribeToStreams(participants: [String], limit: Int = 50) -> String? {
+        guard !participants.isEmpty else { return nil }
+
+        guard let filter = Filter(kinds: [30311], tags: ["p": participants], limit: limit) else {
+            print("❌ NostrSDKClient: Failed to create participant-filtered streams filter")
+            return nil
+        }
+        let subId = subscribe(with: filter, purpose: "streams-by-participant")
+        print("✅ NostrSDKClient: Subscribed to streams tagging \(participants.count) participants (limit: \(limit)): \(subId.prefix(8))...")
         return subId
     }
 
@@ -688,7 +747,7 @@ class NostrSDKClient {
     /// Using the same `subscriptionId` replaces any existing callback for that subscription.
     /// This is the preferred API for new callers; it prevents one component from
     /// overwriting another component's handler (the failure mode that Bug #14 fixed).
-    func addFollowListReceivedCallback(forSubscriptionId subscriptionId: String, _ callback: @escaping ([String]) -> Void) {
+    func addFollowListReceivedCallback(forSubscriptionId subscriptionId: String, _ callback: @escaping (String, [String]) -> Void) {
         followListReceivedCallbacks[subscriptionId] = callback
     }
 
@@ -947,7 +1006,7 @@ class NostrSDKClient {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             for callback in self.followListReceivedCallbacks.values {
-                callback(follows)
+                callback(event.pubkey, follows)
             }
         }
     }
@@ -1159,9 +1218,20 @@ class NostrSDKClient {
         let imageURL = tagValue("image")
 
         // IMPORTANT: We need BOTH pubkeys for different purposes:
-        // 1. Host pubkey (p-tag): Used for profile display
+        // 1. Host pubkey (p-tag): Used for profile display and Following-tab filtering
         // 2. Event author pubkey (event.pubkey): Used for a-tag coordinate in chat subscriptions
-        let hostPubkey = tagValue("p") ?? event.pubkey  // Prefer p-tag, fallback to event author
+        //
+        // Per NIP-53 a `p` tag is a participant entry, not necessarily the host:
+        //   ["p", "<pubkey>", "<relay-url>", "<role>", "<proof>"]
+        // with role being a displayable marker such as Host, Speaker or Participant.
+        // Taking the first `p` tag therefore picked a guest on any multi-participant
+        // stream, which showed the wrong profile and — because Following matches on
+        // this pubkey — hid streams whose host the user actually follows.
+        //
+        // Prefer the participant explicitly marked as the host. The role's position
+        // varies (the relay URL is often empty or omitted), so match it anywhere in
+        // the tag's parameters rather than at a fixed index.
+        let hostPubkey = Self.hostPubkey(fromTags: event.tags, eventAuthorPubkey: event.pubkey)
         let eventAuthorPubkey = event.pubkey  // Always the event signer
 
         // Extract viewer count
