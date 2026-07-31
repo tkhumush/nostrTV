@@ -301,7 +301,6 @@ class NostrSDKClient {
     /// - Parameter urls: Relay URLs to ensure are present in the pool.
     func addRelays(_ urls: [String]) {
         let existingURLs = Set(relayPool.relays.map { $0.url.absoluteString })
-        var addedAny = false
 
         for urlString in urls {
             guard let url = URL(string: urlString),
@@ -310,20 +309,14 @@ class NostrSDKClient {
             do {
                 let relay = try Relay(url: url)
                 relayPool.add(relay: relay)
-                addedAny = true
                 print("🔌 NostrSDKClient: Added stream relay \(url.absoluteString)")
             } catch {
                 print("⚠️ NostrSDKClient: Skipping invalid stream relay \(urlString): \(error.localizedDescription)")
             }
         }
 
-        guard addedAny else { return }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            guard let self = self else { return }
-            print("🔄 NostrSDKClient: Re-emitting subscriptions to newly added relays")
-            self.resubscribeAll()
-        }
+        // No follow-up needed: each newly added relay receives the active
+        // subscriptions from relayStateDidChange once its socket is connected.
     }
 
     /// Disconnect from all relays.
@@ -439,6 +432,31 @@ class NostrSDKClient {
     }
 
     /// Resubscribe to all previously active subscriptions using stored filter state
+    /// Re-emit every active subscription to a single relay.
+    ///
+    /// Used when a relay reports `.connected`, so subscriptions created while it was
+    /// down are established rather than silently lost. Re-sending a REQ with an
+    /// existing subscription ID is idempotent — the relay replaces it.
+    private func resubscribeAll(to relay: Relay) {
+        subscriptionsLock.lock()
+        let subscriptionsToRestore = activeSubscriptions
+        subscriptionsLock.unlock()
+
+        guard !subscriptionsToRestore.isEmpty else { return }
+
+        var restored = 0
+        for (_, stored) in subscriptionsToRestore {
+            do {
+                _ = try relay.subscribe(with: stored.filter, subscriptionId: stored.id)
+                restored += 1
+            } catch {
+                print("⚠️ NostrSDKClient: Could not restore '\(stored.purpose)' on \(relay.url.absoluteString): \(error.localizedDescription)")
+            }
+        }
+
+        print("🔄 NostrSDKClient: Restored \(restored)/\(subscriptionsToRestore.count) subscription(s) on \(relay.url.absoluteString)")
+    }
+
     private func resubscribeAll() {
         subscriptionsLock.lock()
         let subscriptionsToRestore = activeSubscriptions
@@ -1539,6 +1557,14 @@ extension NostrSDKClient: RelayDelegate {
         switch state {
         case .connected:
             print("🔗 Relay connected: \(relay.url.absoluteString)")
+            // Re-emit our subscriptions to this relay now that its socket is actually
+            // up. RelayPool.subscribe fans out to every relay at call time and drops
+            // any that are not yet connected — Relay.subscribe throws .notConnected and
+            // the pool only logs it — so a relay that finishes its handshake after a
+            // subscription was created would otherwise never receive it, and nothing
+            // retried. Driving this off the connection event instead of a fixed delay
+            // is what makes recovery reliable.
+            resubscribeAll(to: relay)
         case .connecting:
             print("🔄 Relay connecting: \(relay.url.absoluteString)")
         case .notConnected:
