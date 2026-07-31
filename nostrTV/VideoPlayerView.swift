@@ -258,6 +258,11 @@ struct VideoPlayerView: View {
 
             // Start listening for chat and zaps (combined subscription)
             if let stream = stream {
+                // Defensive cleanup: stop any stale subscription from a previous stream
+                // before starting a new one. onDisappear is not guaranteed to fire before
+                // the next onAppear when fullScreenCover is dismissed and re-presented,
+                // so this prevents duplicate/stale subscriptions from accumulating.
+                activityManager.stopListening()
                 activityManager.startListening(for: stream, using: nostrSDKClient)
             }
 
