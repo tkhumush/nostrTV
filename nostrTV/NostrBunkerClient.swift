@@ -207,9 +207,15 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
     }
 
     /// Connect to relays for bunker communication
+    ///
+    /// - Note: This is the one intentional exception to the app's single-shared-client
+    ///   rule. A NIP-46 signer is reachable only on the relays named in its own bunker
+    ///   URI, which are supplied per login and generally are not the app's default
+    ///   relays, so the shared pool cannot serve this traffic. The pool is scoped to
+    ///   the bunker session and torn down by `disconnect()` below.
     private func connectToRelays(_ relayURLs: [String]) async throws {
         do {
-            // Create NostrSDKClient with the bunker relays
+            // Create a bunker-scoped NostrSDKClient with the relays from the bunker URI
             nostrSDKClient = try NostrSDKClient(relayURLs: relayURLs)
 
             // Setup message handler
@@ -284,7 +290,7 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
     /// Sign a Nostr event using the remote signer
     /// - Parameter event: Unsigned event with all fields except id and sig
     /// - Returns: Fully signed event
-    func signEvent(_ event: NostrEvent) async throws -> NostrEvent {
+    func signEvent(_ event: LegacyNostrEvent) async throws -> LegacyNostrEvent {
         try await ensureConnected()
 
         // Serialize event to JSON
@@ -306,7 +312,7 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
         guard let responseData = response.data(using: .utf8),
               let signedDict = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any],
               let signedEventData = try? JSONSerialization.data(withJSONObject: signedDict),
-              let signedEvent = try? JSONDecoder().decode(NostrEvent.self, from: signedEventData) else {
+              let signedEvent = try? JSONDecoder().decode(LegacyNostrEvent.self, from: signedEventData) else {
             throw BunkerError.invalidResponse
         }
 
@@ -434,7 +440,7 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
     }
 
     /// Handle incoming bunker message (kind 24133 event)
-    private func handleBunkerMessage(_ event: NostrEvent) async {
+    private func handleBunkerMessage(_ event: LegacyNostrEvent) async {
         do {
             guard let clientKeyPair = clientKeyPair,
                   let senderPubkey = event.pubkey,

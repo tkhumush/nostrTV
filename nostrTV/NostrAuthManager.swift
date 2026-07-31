@@ -82,7 +82,8 @@ class NostrAuthManager: ObservableObject {
             let decoder = JSONDecoder()
             currentProfile = try decoder.decode(Profile.self, from: profileData)
         } catch {
-            // Failed to decode cached profile
+            print("\u{26A0}\u{FE0F} NostrAuthManager: Failed to decode cached profile, clearing it: \(error.localizedDescription)")
+            UserDefaults.standard.removeObject(forKey: "nostrUserProfile")
         }
 
         // Load follow list
@@ -91,7 +92,8 @@ class NostrAuthManager: ObservableObject {
                 let decoder = JSONDecoder()
                 followList = try decoder.decode([String].self, from: followData)
             } catch {
-                // Failed to decode cached follow list
+                print("\u{26A0}\u{FE0F} NostrAuthManager: Failed to decode cached follow list, clearing it: \(error.localizedDescription)")
+                UserDefaults.standard.removeObject(forKey: "nostrUserFollowList")
             }
         }
     }
@@ -102,7 +104,7 @@ class NostrAuthManager: ObservableObject {
             let data = try encoder.encode(profile)
             UserDefaults.standard.set(data, forKey: "nostrUserProfile")
         } catch {
-            // Failed to encode profile
+            print("\u{26A0}\u{FE0F} NostrAuthManager: Failed to encode profile for cache: \(error.localizedDescription)")
         }
     }
 
@@ -112,7 +114,7 @@ class NostrAuthManager: ObservableObject {
             let data = try encoder.encode(follows)
             UserDefaults.standard.set(data, forKey: "nostrUserFollowList")
         } catch {
-            // Failed to encode follow list
+            print("\u{26A0}\u{FE0F} NostrAuthManager: Failed to encode follow list for cache: \(error.localizedDescription)")
         }
     }
 
@@ -321,7 +323,7 @@ class NostrAuthManager: ObservableObject {
     // MARK: - Event Signing
 
     /// Sign a Nostr event using the active auth method
-    func signEvent(_ event: NostrEvent) async throws -> NostrEvent {
+    func signEvent(_ event: LegacyNostrEvent) async throws -> LegacyNostrEvent {
         switch authMethod {
         case .bunker:
             guard let bunkerClient = bunkerClient else {

@@ -91,9 +91,9 @@ struct NostrEventValidator {
     // MARK: - Full Validation
 
     /// Perform full validation on an event including signature verification
-    /// - Parameter event: The NostrEvent to validate
+    /// - Parameter event: The LegacyNostrEvent to validate
     /// - Throws: EventValidationError if validation fails
-    static func validate(_ event: NostrEvent) throws {
+    static func validate(_ event: LegacyNostrEvent) throws {
         // 1. Validate required fields exist
         try validateRequiredFields(event)
 
@@ -111,9 +111,9 @@ struct NostrEventValidator {
     }
 
     /// Perform validation without signature verification (for trusted relay data)
-    /// - Parameter event: The NostrEvent to validate
+    /// - Parameter event: The LegacyNostrEvent to validate
     /// - Throws: EventValidationError if validation fails
-    static func validateWithoutSignature(_ event: NostrEvent) throws {
+    static func validateWithoutSignature(_ event: LegacyNostrEvent) throws {
         try validateRequiredFields(event)
         try validateTimestamp(event)
         try validateByKind(event)
@@ -122,7 +122,7 @@ struct NostrEventValidator {
     // MARK: - Field Validation
 
     /// Validate that all required fields are present
-    private static func validateRequiredFields(_ event: NostrEvent) throws {
+    private static func validateRequiredFields(_ event: LegacyNostrEvent) throws {
         guard event.id != nil, !event.id!.isEmpty else {
             throw EventValidationError.missingRequiredField("id")
         }
@@ -140,7 +140,7 @@ struct NostrEventValidator {
     // MARK: - Event ID Validation
 
     /// Verify that the event ID matches the SHA256 hash of the serialized event
-    private static func validateEventId(_ event: NostrEvent) throws {
+    private static func validateEventId(_ event: LegacyNostrEvent) throws {
         guard let eventId = event.id,
               let pubkey = event.pubkey,
               let createdAt = event.created_at else {
@@ -171,7 +171,7 @@ struct NostrEventValidator {
     // MARK: - Signature Validation
 
     /// Verify the Schnorr signature of an event
-    private static func validateSignature(_ event: NostrEvent) throws {
+    private static func validateSignature(_ event: LegacyNostrEvent) throws {
         guard let eventId = event.id,
               let pubkey = event.pubkey,
               let signature = event.sig else {
@@ -234,7 +234,7 @@ struct NostrEventValidator {
     // MARK: - Timestamp Validation
 
     /// Validate event timestamp is reasonable
-    private static func validateTimestamp(_ event: NostrEvent) throws {
+    private static func validateTimestamp(_ event: LegacyNostrEvent) throws {
         guard let createdAt = event.created_at else {
             throw EventValidationError.invalidTimestamp
         }
@@ -254,7 +254,7 @@ struct NostrEventValidator {
     // MARK: - Kind-Specific Validation
 
     /// Validate event based on its kind
-    private static func validateByKind(_ event: NostrEvent) throws {
+    private static func validateByKind(_ event: LegacyNostrEvent) throws {
         switch event.kind {
         case 0:
             try validateMetadataEvent(event)
@@ -271,7 +271,7 @@ struct NostrEventValidator {
     }
 
     /// Validate kind 0 (Metadata) event
-    private static func validateMetadataEvent(_ event: NostrEvent) throws {
+    private static func validateMetadataEvent(_ event: LegacyNostrEvent) throws {
         guard let content = event.content, !content.isEmpty else {
             // Empty content is technically valid but not useful
             return
@@ -285,7 +285,7 @@ struct NostrEventValidator {
     }
 
     /// Validate kind 30311 (Live Event) event
-    private static func validateLiveEventEvent(_ event: NostrEvent) throws {
+    private static func validateLiveEventEvent(_ event: LegacyNostrEvent) throws {
         // Required: d-tag for addressable event identifier
         guard event.tags.contains(where: { $0.first == "d" && $0.count > 1 }) else {
             throw EventValidationError.missingRequiredTag("d")
@@ -303,7 +303,7 @@ struct NostrEventValidator {
     }
 
     /// Validate kind 1311 (Live Chat) event
-    private static func validateLiveChatEvent(_ event: NostrEvent) throws {
+    private static func validateLiveChatEvent(_ event: LegacyNostrEvent) throws {
         // Required: a-tag referencing the stream
         guard let aTag = event.tags.first(where: { $0.first == "a" && $0.count > 1 }) else {
             throw EventValidationError.missingRequiredTag("a")
@@ -320,7 +320,7 @@ struct NostrEventValidator {
     }
 
     /// Validate kind 9735 (Zap Receipt) event
-    private static func validateZapReceiptEvent(_ event: NostrEvent) throws {
+    private static func validateZapReceiptEvent(_ event: LegacyNostrEvent) throws {
         // Required: bolt11 tag with Lightning invoice
         guard event.tags.contains(where: { $0.first == "bolt11" && $0.count > 1 }) else {
             throw EventValidationError.missingRequiredTag("bolt11")
@@ -350,7 +350,7 @@ extension NostrEventValidator {
     /// - Throws: EventValidationError if validation fails
     static func validate(_ event: NostrSDK.NostrEvent) throws {
         // Convert to our format for validation
-        let legacyEvent = NostrEvent(
+        let legacyEvent = LegacyNostrEvent(
             kind: event.kind.rawValue,
             tags: event.tags.map { [$0.name, $0.value] + $0.otherParameters },
             id: event.id,
@@ -365,7 +365,7 @@ extension NostrEventValidator {
 
     /// Validate without signature for NostrSDK events
     static func validateWithoutSignature(_ event: NostrSDK.NostrEvent) throws {
-        let legacyEvent = NostrEvent(
+        let legacyEvent = LegacyNostrEvent(
             kind: event.kind.rawValue,
             tags: event.tags.map { [$0.name, $0.value] + $0.otherParameters },
             id: event.id,
@@ -388,7 +388,7 @@ extension NostrEventValidator {
     ///   - events: Array of events to validate
     ///   - verifySignatures: Whether to verify signatures (slower but more secure)
     /// - Returns: Array of valid events
-    static func filterValid(_ events: [NostrEvent], verifySignatures: Bool = false) -> [NostrEvent] {
+    static func filterValid(_ events: [LegacyNostrEvent], verifySignatures: Bool = false) -> [LegacyNostrEvent] {
         return events.filter { event in
             do {
                 if verifySignatures {
@@ -413,12 +413,7 @@ extension NostrEventValidator {
     /// - Parameter aTag: The a-tag to normalize
     /// - Returns: Normalized a-tag with lowercase pubkey
     static func normalizeATag(_ aTag: String) -> String {
-        let parts = aTag.split(separator: ":", maxSplits: 2)
-        guard parts.count >= 3 else { return aTag.lowercased() }
-        let kind = parts[0]
-        let pubkey = parts[1].lowercased()
-        let dTag = parts[2]
-        return "\(kind):\(pubkey):\(dTag)"
+        ATag.normalize(aTag)
     }
 
     /// Construct an a-tag from stream components
@@ -427,19 +422,13 @@ extension NostrEventValidator {
     ///   - dTag: The d-tag identifier
     /// - Returns: Properly formatted a-tag
     static func constructATag(pubkey: String, dTag: String) -> String {
-        return "30311:\(pubkey.lowercased()):\(dTag)"
+        ATag.construct(pubkey: pubkey, dTag: dTag)
     }
 
     /// Validate and parse an a-tag
     /// - Parameter aTag: The a-tag to parse
     /// - Returns: Tuple of (kind, pubkey, dTag) or nil if invalid
     static func parseATag(_ aTag: String) -> (kind: Int, pubkey: String, dTag: String)? {
-        let parts = aTag.split(separator: ":", maxSplits: 2)
-        guard parts.count >= 3,
-              let kind = Int(parts[0]),
-              parts[1].count == 64 else {
-            return nil
-        }
-        return (kind, String(parts[1]).lowercased(), String(parts[2]))
+        ATag.parse(aTag)
     }
 }

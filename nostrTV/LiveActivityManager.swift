@@ -46,7 +46,7 @@ class LiveActivityManager: ObservableObject {
         // Create the "a" tag referencing the stream event
         // Format: "30311:<stream_author_pubkey>:<d_identifier>"
         let streamDTag = stream.streamID
-        let aTag = "30311:\(streamPubkey):\(streamDTag)"
+        let aTag = ATag.construct(pubkey: streamPubkey, dTag: streamDTag)
 
         // Prepare tags for kind 10312 (Presence Event)
         let tags: [[String]] = [
@@ -54,7 +54,7 @@ class LiveActivityManager: ObservableObject {
         ]
 
         // Create unsigned event
-        let unsignedEvent = NostrEvent(
+        let unsignedEvent = LegacyNostrEvent(
             kind: 10312,
             tags: tags,
             id: nil,
@@ -102,7 +102,7 @@ class LiveActivityManager: ObservableObject {
         // event with no 'a' tag, which clears the user's presence from any room
 
         // Create unsigned event with empty tags
-        let unsignedEvent = NostrEvent(
+        let unsignedEvent = LegacyNostrEvent(
             kind: 10312,
             tags: [],
             id: nil,
@@ -136,7 +136,7 @@ class LiveActivityManager: ObservableObject {
         ]
 
         // Create unsigned event
-        let unsignedEvent = NostrEvent(
+        let unsignedEvent = LegacyNostrEvent(
             kind: 1311,
             tags: tags,
             id: nil,
@@ -197,7 +197,7 @@ class LiveActivityManager: ObservableObject {
 
         // Create the "a" tag referencing the stream event
         let streamDTag = stream.streamID
-        let aTag = "30311:\(streamPubkey):\(streamDTag)"
+        let aTag = ATag.construct(pubkey: streamPubkey, dTag: streamDTag)
 
         // Prepare tags for kind 10312 (Presence Event)
         let tags: [[String]] = [
@@ -205,7 +205,7 @@ class LiveActivityManager: ObservableObject {
         ]
 
         // Create unsigned event
-        let unsignedEvent = NostrEvent(
+        let unsignedEvent = LegacyNostrEvent(
             kind: 10312,
             tags: tags,
             id: nil,
@@ -237,7 +237,7 @@ class LiveActivityManager: ObservableObject {
 
         // Create the "a" tag referencing the stream event
         let streamDTag = stream.streamID
-        let aTag = "30311:\(eventAuthorPubkey):\(streamDTag)"
+        let aTag = ATag.construct(pubkey: eventAuthorPubkey, dTag: streamDTag)
 
         // Prepare tags for kind 1311 (Live Chat Message)
         var tags: [[String]] = [
@@ -248,7 +248,7 @@ class LiveActivityManager: ObservableObject {
         tags.append(["p", eventAuthorPubkey])
 
         // Create unsigned event
-        let unsignedEvent = NostrEvent(
+        let unsignedEvent = LegacyNostrEvent(
             kind: 1311,
             tags: tags,
             id: nil,
