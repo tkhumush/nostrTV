@@ -40,9 +40,11 @@ struct Stream: Identifiable, Codable, Equatable {
         return status == "live"
     }
 
-    /// NIP-33 addressable event coordinate (for deletion matching)
+    /// NIP-33 addressable event coordinate (for deletion matching).
+    /// Normalized via `ATag` so it compares equal to coordinates carried by
+    /// kind 5 deletion events regardless of pubkey casing.
     var aTag: String {
-        "30311:\(eventAuthorPubkey ?? ""):\(streamID)"
+        ATag.construct(pubkey: eventAuthorPubkey ?? "", dTag: streamID)
     }
 
     var category: String {

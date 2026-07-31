@@ -54,7 +54,7 @@ class StreamActivityManager: ObservableObject {
         }
 
         self.nostrClient = client
-        self.currentStreamATag = "30311:\(authorPubkey.lowercased()):\(stream.streamID)"
+        self.currentStreamATag = ATag.construct(pubkey: authorPubkey, dTag: stream.streamID)
         let aTag = currentStreamATag!
 
         // Generate a unique subscription ID per listening session.
@@ -244,16 +244,7 @@ class StreamActivityManager: ObservableObject {
 
     /// Normalize aTag for consistent comparison
     private func normalizeATag(_ aTag: String) -> String {
-        let parts = aTag.split(separator: ":", maxSplits: 2)
-        guard parts.count >= 3 else {
-            return aTag.lowercased()
-        }
-
-        let kind = parts[0]
-        let pubkey = parts[1].lowercased()
-        let dTag = parts[2]
-
-        return "\(kind):\(pubkey):\(dTag)"
+        ATag.normalize(aTag)
     }
 }
 

@@ -186,7 +186,7 @@ class NostrSDKClient {
     private var chatReceivedCallbacks: [String: (ZapComment) -> Void] = [:]
 
     /// Called when a bunker message (kind 24133) is received
-    var onBunkerMessageReceived: ((NostrEvent) -> Void)?
+    var onBunkerMessageReceived: ((LegacyNostrEvent) -> Void)?
 
     /// Called when a deletion event (kind 5) targeting live streams is received
     var onDeletionReceived: ((Set<String>) -> Void)?
@@ -1044,9 +1044,9 @@ class NostrSDKClient {
     /// Handle kind 24133 (bunker message) events
     private func handleBunkerMessageEvent(_ event: NostrSDK.NostrEvent) {
 
-        // Convert SDK NostrEvent to our legacy NostrEvent struct
+        // Convert SDK NostrEvent to our LegacyNostrEvent struct
         // This is needed because NostrBunkerClient expects the old format
-        let legacyEvent = nostrTV.NostrEvent(
+        let legacyEvent = LegacyNostrEvent(
             kind: event.kind.rawValue,
             tags: event.tags.map { [$0.name, $0.value] + $0.otherParameters },
             id: event.id,
@@ -1064,10 +1064,17 @@ class NostrSDKClient {
 
     /// Handle kind 5 (deletion) events targeting live streams
     private func handleDeletionEvent(_ event: NostrSDK.NostrEvent) {
+        // Normalize via ATag so these compare equal to Stream.aTag, and require an
+        // exact author match: per NIP-09 an author may only delete their own
+        // events, and the previous `contains(event.pubkey)` substring test would
+        // also match a pubkey that merely appeared inside the d-tag.
+        let deleterPubkey = event.pubkey.lowercased()
         let deletedAddresses = event.tags
             .filter { $0.name == "a" }
             .compactMap { $0.value }
-            .filter { $0.hasPrefix("30311:") && $0.contains(event.pubkey) }
+            .compactMap { ATag.parse($0) }
+            .filter { $0.kind == ATag.liveEventKind && $0.pubkey == deleterPubkey }
+            .map { ATag.construct(pubkey: $0.pubkey, dTag: $0.dTag, kind: $0.kind) }
 
         guard !deletedAddresses.isEmpty else { return }
 
@@ -1236,10 +1243,10 @@ class NostrSDKClient {
         relayPool.publishEvent(event)
     }
 
-    /// Publish a legacy NostrEvent to all relays
-    /// - Parameter event: The legacy NostrEvent to publish
+    /// Publish a LegacyNostrEvent to all relays
+    /// - Parameter event: The LegacyNostrEvent to publish
     /// - Throws: Error if event serialization fails
-    func publishLegacyEvent(_ event: NostrEvent) throws {
+    func publishLegacyEvent(_ event: LegacyNostrEvent) throws {
         let eventDict: [String: Any] = [
             "id": event.id ?? "",
             "pubkey": event.pubkey ?? "",
@@ -1284,8 +1291,8 @@ class NostrSDKClient {
     ///   - content: The event content
     ///   - tags: The event tags
     ///   - keyPair: The keypair to sign with
-    /// - Returns: A signed NostrEvent (legacy format for compatibility)
-    func createSignedEvent(kind: Int, content: String, tags: [[String]] = [], using keyPair: NostrKeyPair) throws -> NostrEvent {
+    /// - Returns: A signed LegacyNostrEvent (legacy format for compatibility)
+    func createSignedEvent(kind: Int, content: String, tags: [[String]] = [], using keyPair: NostrKeyPair) throws -> LegacyNostrEvent {
         let pubkey = keyPair.publicKeyHex
         let created_at = Int(Date().timeIntervalSince1970)
 
@@ -1318,7 +1325,7 @@ class NostrSDKClient {
         let signatureHex = signature.hexString
 
         // Create the full signed event
-        var event = NostrEvent(kind: kind, tags: tags)
+        var event = LegacyNostrEvent(kind: kind, tags: tags)
         event.id = eventId
         event.pubkey = pubkey
         event.created_at = created_at

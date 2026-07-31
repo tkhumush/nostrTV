@@ -50,7 +50,7 @@ actor ImageCache {
                     return image
                 }
             } catch {
-                // Failed to load image
+                print("\u{26A0}\u{FE0F} ImageCache: Failed to load image: \(error.localizedDescription)")
             }
             return nil
         }
