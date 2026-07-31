@@ -328,7 +328,11 @@ class StreamViewModel: ObservableObject {
         if let subId = deletionsSubscriptionId {
             sdkClient.closeSubscription(subId)
         }
-        sdkClient.disconnect()
+        // Deliberately does NOT call sdkClient.disconnect(): the client is the
+        // shared app-level relay pool and outlives this view model. Disconnecting
+        // it here would permanently stop events for auth, chat and zaps too (see
+        // the note in NostrAuthManager.logout). Closing our own subscriptions
+        // above is the correct scope of cleanup.
     }
 
     // MARK: - Stream Management

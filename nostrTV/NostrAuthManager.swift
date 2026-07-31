@@ -305,8 +305,17 @@ class NostrAuthManager: ObservableObject {
         authMethod = nil
         errorMessage = nil
 
-        // Disconnect client
-        nostrSDKClient.disconnect()
+        // Retire only this manager's own subscription and callbacks.
+        //
+        // Deliberately does NOT call nostrSDKClient.disconnect(): that client is
+        // the shared app-level relay pool, also serving stream discovery, chat and
+        // zaps. Disconnecting it is unrecoverable without an app restart — it stops
+        // the heartbeat (so nothing triggers a reconnect), clears `cancellables`
+        // (and setupEventStream() only runs from init, so events stop being
+        // processed), and empties `activeSubscriptions` (so resubscribe has no
+        // filters to replay). Logging out must not take the whole app offline.
+        nostrSDKClient.closeSubscription(Self.userDataSubscriptionId)
+        nostrSDKClient.removeCallback(forSubscriptionId: Self.userDataSubscriptionId)
     }
 
     // MARK: - Event Signing
