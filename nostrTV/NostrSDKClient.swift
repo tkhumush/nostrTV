@@ -140,6 +140,10 @@ class NostrSDKClient {
     /// Non-fatal initialization error, if the client was created as an error fallback.
     private(set) var initError: Error?
 
+    /// Maximum subscription ID length permitted by NIP-01.
+    /// "`<subscription_id>` is an arbitrary, non-empty string of max length 64 chars."
+    static let maxSubscriptionIdLength = 64
+
     // MARK: - Callbacks (matching NostrClient interface)
 
     /// Called when a live stream event (kind 30311) is received
@@ -507,6 +511,16 @@ class NostrSDKClient {
     /// Subscribe with an explicit subscription ID so reconnection can restore the exact same subscription.
     @discardableResult
     func subscribe(with filter: Filter, subscriptionId: String, purpose: String = "custom") -> String {
+        // NIP-01 caps subscription IDs at 64 characters. Relays reject longer ones,
+        // and they do it silently from our side: the REQ simply never takes effect
+        // and no events ever arrive for that subscription. Fail loudly instead.
+        if subscriptionId.count > Self.maxSubscriptionIdLength {
+            assertionFailure("Subscription ID for '\(purpose)' is \(subscriptionId.count) chars, over the NIP-01 limit of \(Self.maxSubscriptionIdLength)")
+            print("❌ NostrSDKClient: Subscription ID for '\(purpose)' is \(subscriptionId.count) chars, "
+                  + "over the NIP-01 limit of \(Self.maxSubscriptionIdLength). Relays will reject this REQ "
+                  + "and no events will arrive: \(subscriptionId)")
+        }
+
         let actualId = relayPool.subscribe(with: filter, subscriptionId: subscriptionId)
         subscriptionsLock.lock()
         activeSubscriptions[actualId] = StoredSubscription(id: actualId, filter: filter, purpose: purpose)
