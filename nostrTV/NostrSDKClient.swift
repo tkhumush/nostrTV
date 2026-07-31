@@ -148,8 +148,32 @@ class NostrSDKClient {
     /// Called when a profile metadata event (kind 0) is received, keyed by subscription ID
     private var profileReceivedCallbacks: [String: (Profile) -> Void] = [:]
 
-    /// Called when a follow list event (kind 3) is received
-    var onFollowListReceived: (([String]) -> Void)?
+    /// Called when a follow list event (kind 3) is received, keyed by subscription ID.
+    /// Using the same `subscriptionId` replaces any existing callback for that subscription.
+    private var followListReceivedCallbacks: [String: ([String]) -> Void] = [:]
+
+    /// Special key used to back the backward-compatible `onFollowListReceived` property
+    /// so it does not collide with subscription-keyed callbacks.
+    private static let legacyFollowListCallbackKey = "legacy-onFollowListReceived"
+
+    /// Backward-compatible single closure for follow list events.
+    /// Setting it stores the closure under `legacyFollowListCallbackKey` in the
+    /// keyed `followListReceivedCallbacks` dictionary, so it is delivered alongside
+    /// any subscription-keyed callbacks instead of overwriting them. Existing
+    /// callers (e.g. StreamViewModel) that assign this property continue to work,
+    /// while new callers should prefer `addFollowListReceivedCallback(forSubscriptionId:_:)`.
+    var onFollowListReceived: (([String]) -> Void)? {
+        get {
+            followListReceivedCallbacks[Self.legacyFollowListCallbackKey]
+        }
+        set {
+            if let newValue = newValue {
+                followListReceivedCallbacks[Self.legacyFollowListCallbackKey] = newValue
+            } else {
+                followListReceivedCallbacks.removeValue(forKey: Self.legacyFollowListCallbackKey)
+            }
+        }
+    }
 
     /// Called when a user relay list (kind 10002) is received
     /// Each entry contains the relay URL and its read/write permissions per NIP-65
@@ -601,6 +625,20 @@ class NostrSDKClient {
         chatReceivedCallbacks[key] = callback
     }
 
+    /// Add a callback for follow list received events, keyed by subscription ID.
+    /// Using the same `subscriptionId` replaces any existing callback for that subscription.
+    /// This is the preferred API for new callers; it prevents one component from
+    /// overwriting another component's handler (the failure mode that Bug #14 fixed).
+    func addFollowListReceivedCallback(forSubscriptionId subscriptionId: String, _ callback: @escaping ([String]) -> Void) {
+        followListReceivedCallbacks[subscriptionId] = callback
+    }
+
+    /// Backward-compatible overload that stores the callback under a generated unique key.
+    func addFollowListReceivedCallback(_ callback: @escaping ([String]) -> Void) {
+        let key = "unkeyed-follow-list-\(UUID().uuidString)"
+        followListReceivedCallbacks[key] = callback
+    }
+
     /// Add a callback for zap receipt received events, keyed by subscription ID.
     /// Using the same `subscriptionId` replaces any existing callback for that subscription.
     func addZapReceivedCallback(forSubscriptionId subscriptionId: String, _ callback: @escaping (ZapComment) -> Void) {
@@ -614,8 +652,10 @@ class NostrSDKClient {
     }
 
     /// Remove callbacks for a specific subscription ID.
+    /// Removes profile, follow list, chat, AND zap callbacks registered under that key.
     func removeCallback(forSubscriptionId subscriptionId: String) {
         profileReceivedCallbacks.removeValue(forKey: subscriptionId)
+        followListReceivedCallbacks.removeValue(forKey: subscriptionId)
         chatReceivedCallbacks.removeValue(forKey: subscriptionId)
         zapReceivedCallbacks.removeValue(forKey: subscriptionId)
     }
@@ -852,8 +892,14 @@ class NostrSDKClient {
 
         print("📋 NostrSDKClient: Extracted \(follows.count) follows from kind 3 event")
 
+        // Notify all registered follow-list callbacks (keyed + legacy property).
+        // Iterating a copy of the values keeps the dictionary stable if a callback
+        // mutates it during iteration.
         DispatchQueue.main.async { [weak self] in
-            self?.onFollowListReceived?(follows)
+            guard let self = self else { return }
+            for callback in self.followListReceivedCallbacks.values {
+                callback(follows)
+            }
         }
     }
 

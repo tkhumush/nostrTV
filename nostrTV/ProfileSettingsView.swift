@@ -246,7 +246,12 @@ struct ProfileSettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.coveBackground)
         .onAppear {
-            // If profile is not loaded but user is authenticated, fetch it
+            // If profile is not loaded but user is authenticated, fetch it.
+            // With the Bug #14 fix, the primary profile fetch happens
+            // deterministically inside `authenticateWithBunker` (and on session
+            // restore). This call is a harmless refresh for the case where the
+            // profile is still missing — it is non-forcing, so it no-ops when
+            // a fetch is already in flight. It is NOT the primary fetch path.
             if authManager.currentProfile == nil && authManager.isAuthenticated {
                 authManager.fetchUserData()
             }

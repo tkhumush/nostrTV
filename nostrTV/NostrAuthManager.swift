@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import NostrSDK
 
 class NostrAuthManager: ObservableObject {
     @Published var isAuthenticated: Bool = false
@@ -141,8 +142,11 @@ class NostrAuthManager: ObservableObject {
             }
         }
 
-        // Setup callback for follow list
-        nostrSDKClient.onFollowListReceived = { [weak self] follows in
+        // Setup callback for follow list, keyed by the same subscription ID so it
+        // is delivered when this subscription's kind-3 events arrive. Using the
+        // keyed API prevents StreamViewModel (or any other component) from
+        // overwriting this handler via the legacy `onFollowListReceived` property.
+        nostrSDKClient.addFollowListReceivedCallback(forSubscriptionId: Self.userDataSubscriptionId) { [weak self] follows in
             DispatchQueue.main.async {
                 self?.followList = follows
                 self?.saveFollowListToCache(follows)
@@ -158,9 +162,26 @@ class NostrAuthManager: ObservableObject {
             }
         }
 
-        // Subscribe to user data on the shared client with a stable subscription ID
+        // Subscribe to user data on the shared client using the SAME subscription
+        // ID as the callbacks above. This is the Bug #14 fix: previously
+        // `subscribeToUserData(pubkey:)` generated a random UUID subscription ID,
+        // so the callback (keyed to `userDataSubscriptionId`) and the subscription
+        // were on different keys — the callback fired for every profile event but
+        // there was no guarantee a subscription for *this* pubkey was active when
+        // `authenticateWithBunker` completed. By making the subscription ID
+        // deterministic and equal to the callback key, the subscription and
+        // callback are linked: when the subscription fires, the callback receives
+        // the event.
+        guard let filter = Filter(authors: [user.hexPubkey], kinds: [0, 3], limit: 2) else {
+            print("❌ NostrAuthManager: Failed to create user data filter for \(user.hexPubkey.prefix(16))...")
+            isLoadingProfile = false
+            errorMessage = "Failed to load profile. Using cached data if available."
+            return
+        }
         nostrSDKClient.connect()
-        nostrSDKClient.subscribeToUserData(pubkey: user.hexPubkey)
+        nostrSDKClient.subscribe(with: filter,
+                                 subscriptionId: Self.userDataSubscriptionId,
+                                 purpose: "user-data-auth")
     }
 
     func login() {
@@ -197,7 +218,14 @@ class NostrAuthManager: ObservableObject {
         // Update user session
         currentUser = UserSession(nip05: "bunker:\(bunkerPubkey.prefix(8))...", hexPubkey: userPubkey)
 
-        // Fetch profile data
+        // Ensure the shared relay pool is connecting before we subscribe for the
+        // user's profile/follow list. Without this, `fetchUserData` may issue a
+        // subscription on a client whose relays have not started connecting yet,
+        // and the profile event can be missed until an app restart (Bug #14).
+        nostrSDKClient.connect()
+
+        // Fetch profile data — now deterministic: the subscription is created with
+        // `userDataSubscriptionId` as both the subscription ID and callback key.
         isLoadingProfile = true
         fetchUserData(force: true)
 
