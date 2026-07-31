@@ -452,8 +452,21 @@ struct ContentView: View {
 
     init(nostrSDKClient: NostrSDKClient) {
         self.nostrSDKClient = nostrSDKClient
-        let vm = StreamViewModel(nostrSDKClient: nostrSDKClient)
-        _viewModel = StateObject(wrappedValue: vm)
+        // NOTE: the StreamViewModel must be constructed *inside* the autoclosure.
+        //
+        // StateObject.init(wrappedValue:) takes an @autoclosure precisely so the
+        // object is built only once, on first render. Assigning it to a local
+        // first (`let vm = StreamViewModel(...)`) defeats that: SwiftUI
+        // re-initializes View structs freely, so a new view model was built on
+        // every init while StateObject kept only the first.
+        //
+        // That mattered because each extra instance ran setupCallbacks(), which
+        // assigns the single-closure `sdkClient.onStreamReceived` on the *shared*
+        // client. Last writer won — and the last writer was an instance SwiftUI
+        // immediately discarded, so its [weak self] went nil and every stream
+        // event was dropped. The retained view model never saw a stream, leaving
+        // `isInitialLoad` true and the Curated tab stuck on the loading spinner.
+        _viewModel = StateObject(wrappedValue: StreamViewModel(nostrSDKClient: nostrSDKClient))
     }
 
     var body: some View {
