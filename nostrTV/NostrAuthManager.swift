@@ -102,7 +102,19 @@ class NostrAuthManager: ObservableObject {
 
         do {
             let decoder = JSONDecoder()
-            currentProfile = try decoder.decode(Profile.self, from: profileData)
+            let cached = try decoder.decode(Profile.self, from: profileData)
+
+            // Only accept a cached profile that actually belongs to the signed-in
+            // account. A build that mis-assigned incoming profiles could have
+            // persisted someone else's here, and a stale entry would otherwise
+            // survive indefinitely and keep showing the wrong identity.
+            if let user = currentUser,
+               cached.pubkey.caseInsensitiveCompare(user.hexPubkey) != .orderedSame {
+                print("⚠️ NostrAuthManager: Cached profile belongs to \(cached.pubkey.prefix(8))… but the signed-in user is \(user.hexPubkey.prefix(8))…; discarding it")
+                UserDefaults.standard.removeObject(forKey: "nostrUserProfile")
+            } else {
+                currentProfile = cached
+            }
         } catch {
             print("\u{26A0}\u{FE0F} NostrAuthManager: Failed to decode cached profile, clearing it: \(error.localizedDescription)")
             UserDefaults.standard.removeObject(forKey: "nostrUserProfile")
@@ -159,10 +171,18 @@ class NostrAuthManager: ObservableObject {
 
         // Setup callback for profile, keyed by subscription ID (replaces, not appends)
         nostrSDKClient.addProfileReceivedCallback(forSubscriptionId: Self.userDataSubscriptionId) { [weak self] profile in
+            guard let self = self else { return }
+            // Every kind 0 event is delivered to every registered profile callback, and
+            // the app subscribes to profiles for the whole follow list. Without this
+            // check the logged-in identity was reassigned to each arriving profile in
+            // turn — the account appeared to cycle through the people it follows.
+            guard profile.pubkey.caseInsensitiveCompare(user.hexPubkey) == .orderedSame else {
+                return
+            }
             DispatchQueue.main.async {
-                self?.currentProfile = profile
-                self?.isLoadingProfile = false
-                self?.saveProfileToCache(profile)
+                self.currentProfile = profile
+                self.isLoadingProfile = false
+                self.saveProfileToCache(profile)
             }
         }
 
