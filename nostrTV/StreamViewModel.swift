@@ -12,6 +12,10 @@ class StreamViewModel: ObservableObject {
     @Published var isLoadingAdminFollowList: Bool = true // Track if we're loading the admin follow list
     @Published var isInitialLoad: Bool = true // Track if this is the initial load (no streams received yet)
 
+    /// Size of the user's kind 3 follow list. Surfaced so the Following tab can tell
+    /// "your follow list never loaded" apart from "nobody you follow is live".
+    @Published private(set) var followListCount: Int = 0
+
     // Shared NostrSDKClient injected from the app level. Exposed internally so
     // ContentView/VideoPlayerView can pass the same instance to other managers.
     let sdkClient: NostrSDKClient
@@ -330,7 +334,8 @@ class StreamViewModel: ObservableObject {
         }
 
         // Update admin follow list
-        adminFollowList = Set(follows)
+        // Hex pubkeys are case-insensitive; normalize so comparisons cannot miss.
+        adminFollowList = Set(follows.map { $0.lowercased() })
         isLoadingAdminFollowList = false
         saveAdminFollowListToCache(follows)
 
@@ -348,7 +353,9 @@ class StreamViewModel: ObservableObject {
     /// Update user follow list (called when user logs in)
     func updateFollowList(_ newFollowList: [String]) {
         let previousFollowList = followList
-        followList = Set(newFollowList)
+        // Hex pubkeys are case-insensitive; normalize so comparisons cannot miss.
+        followList = Set(newFollowList.map { $0.lowercased() })
+        followListCount = followList.count
 
         print("🔧 User follow list updated: \(newFollowList.count) users")
 
@@ -496,7 +503,7 @@ class StreamViewModel: ObservableObject {
         if !adminFollowList.isEmpty {
             discoverStreams = cleanBase.filter { stream in
                 guard let pubkey = stream.pubkey else { return false }
-                return adminFollowList.contains(pubkey)
+                return adminFollowList.contains(pubkey.lowercased())
             }
         } else {
             discoverStreams = []
@@ -512,10 +519,10 @@ class StreamViewModel: ObservableObject {
         let followingStreams: [Stream]
         if !followList.isEmpty {
             followingStreams = cleanBase.filter { stream in
-                if let hostPubkey = stream.pubkey, followList.contains(hostPubkey) {
+                if let hostPubkey = stream.pubkey, followList.contains(hostPubkey.lowercased()) {
                     return true
                 }
-                if let authorPubkey = stream.eventAuthorPubkey, followList.contains(authorPubkey) {
+                if let authorPubkey = stream.eventAuthorPubkey, followList.contains(authorPubkey.lowercased()) {
                     return true
                 }
                 return false
@@ -524,6 +531,15 @@ class StreamViewModel: ObservableObject {
             followingStreams = []
         }
         self.categorizedStreams = categorizeStreams(followingStreams)
+
+        // Diagnostic: a blank Following tab has several possible causes, and they are
+        // indistinguishable from the UI alone. Print the inputs to the filter.
+        print("👥 Following: \(followList.count) followed pubkey(s), \(cleanBase.count) candidate stream(s) → \(followingStreams.count) match(es)")
+        if followingStreams.isEmpty && !followList.isEmpty && !cleanBase.isEmpty {
+            let candidateAuthors = Set(cleanBase.compactMap { $0.eventAuthorPubkey })
+            let candidateHosts = Set(cleanBase.compactMap { $0.pubkey })
+            print("👥 Following: no overlap between the follow list and the \(candidateAuthors.count) author(s) / \(candidateHosts.count) host(s) currently streaming")
+        }
     }
 
     private func categorizeStreams(_ streamList: [Stream]) -> [StreamCategory] {
@@ -593,7 +609,7 @@ class StreamViewModel: ObservableObject {
             do {
                 let decoder = JSONDecoder()
                 let cachedList = try decoder.decode([String].self, from: cachedData)
-                adminFollowList = Set(cachedList)
+                adminFollowList = Set(cachedList.map { $0.lowercased() })
                 isLoadingAdminFollowList = false // Cache loaded, no longer loading
                 print("✅ Loaded cached admin follow list with \(cachedList.count) users (age: \(Int(cacheAge/60)) minutes)")
 
