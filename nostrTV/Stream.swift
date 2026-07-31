@@ -34,6 +34,14 @@ struct Stream: Identifiable, Codable, Equatable {
     let recording: String?  // Recording URL from "recording" tag
     let startsAt: Date?     // From "starts" tag (unix timestamp)
 
+    /// Relays this stream's chat lives on, from the NIP-53 "relays" tag.
+    ///
+    /// Kind 30311 announcements propagate widely, but the kind 1311 chat messages
+    /// and kind 9735 zap receipts for a stream are usually published only to these
+    /// relays. Without connecting to them the chat subscription is well-formed but
+    /// returns nothing. Defaults to empty for streams that omit the tag.
+    var relays: [String] = []
+
     var id: String { streamID }
 
     var isLive: Bool {

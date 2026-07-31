@@ -57,6 +57,16 @@ class StreamActivityManager: ObservableObject {
         self.currentStreamATag = ATag.construct(pubkey: authorPubkey, dTag: stream.streamID)
         let aTag = currentStreamATag!
 
+        // Join the stream's own relays before subscribing. Chat (1311) and zap
+        // receipts (9735) are usually published only there, not to our default
+        // relay set, so without this the subscription below matches nothing.
+        if !stream.relays.isEmpty {
+            print("📺 StreamActivityManager: Stream lists \(stream.relays.count) relay(s): \(stream.relays.joined(separator: ", "))")
+            client.addRelays(stream.relays)
+        } else {
+            print("📺 StreamActivityManager: Stream lists no relays; using the default pool only")
+        }
+
         // Generate a unique subscription ID per listening session.
         // Using a UUID suffix ensures that stopListening on an old StreamActivityManager
         // can never accidentally remove callbacks for a new one's subscription, even if

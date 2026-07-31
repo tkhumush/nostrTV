@@ -253,6 +253,49 @@ class NostrSDKClient {
         lastMessageTime = Date()
     }
 
+    /// Add relays to the shared pool, connecting any that are new.
+    ///
+    /// Used for NIP-53 stream relays: a stream's chat (kind 1311) and zap receipts
+    /// (kind 9735) are typically published only to the relays named in the event's
+    /// "relays" tag, which are usually not in our default set. Subscribing without
+    /// them yields a well-formed request that simply never matches anything.
+    ///
+    /// `RelayPool.add` de-duplicates by URL and connects automatically, so calling
+    /// this repeatedly with the same URLs is safe.
+    ///
+    /// A newly added relay is not connected yet, and `Relay.subscribe` throws
+    /// `.notConnected` (an error `RelayPool` swallows), so a subscription created
+    /// right now would silently skip it. After a short delay to let the socket come
+    /// up, all active subscriptions are re-emitted with their original IDs — which
+    /// is idempotent for relays that already have them.
+    /// - Parameter urls: Relay URLs to ensure are present in the pool.
+    func addRelays(_ urls: [String]) {
+        let existingURLs = Set(relayPool.relays.map { $0.url.absoluteString })
+        var addedAny = false
+
+        for urlString in urls {
+            guard let url = URL(string: urlString),
+                  !existingURLs.contains(url.absoluteString) else { continue }
+
+            do {
+                let relay = try Relay(url: url)
+                relayPool.add(relay: relay)
+                addedAny = true
+                print("🔌 NostrSDKClient: Added stream relay \(url.absoluteString)")
+            } catch {
+                print("⚠️ NostrSDKClient: Skipping invalid stream relay \(urlString): \(error.localizedDescription)")
+            }
+        }
+
+        guard addedAny else { return }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self = self else { return }
+            print("🔄 NostrSDKClient: Re-emitting subscriptions to newly added relays")
+            self.resubscribeAll()
+        }
+    }
+
     /// Disconnect from all relays.
     ///
     /// - Important: This is **terminal and not recoverable** by calling `connect()`
@@ -1121,6 +1164,15 @@ class NostrSDKClient {
         let gTags = event.tags.filter { $0.name == "g" }.compactMap { $0.value }
         let allTags = hashtags + gTags
 
+        // Extract the NIP-53 "relays" tag: a single tag carrying many values,
+        // e.g. ["relays", "wss://relay.one", "wss://relay.two"], so the first
+        // value and otherParameters are all relay URLs. This is where the
+        // stream's chat and zap events actually live.
+        let streamRelays: [String] = event.tags
+            .filter { $0.name == "relays" }
+            .flatMap { [$0.value] + $0.otherParameters }
+            .filter { $0.hasPrefix("wss://") || $0.hasPrefix("ws://") }
+
         // Extract recording URL and starts timestamp
         let recording = tagValue("recording")
         let startsAt: Date? = {
@@ -1171,7 +1223,8 @@ class NostrSDKClient {
             createdAt: createdAt,
             viewerCount: viewerCount,
             recording: recording,
-            startsAt: startsAt
+            startsAt: startsAt,
+            relays: streamRelays
         )
 
         // Notify callback
