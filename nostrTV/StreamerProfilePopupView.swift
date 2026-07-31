@@ -434,8 +434,8 @@ struct StreamerSideMenu: View {
         zapSubscriptionId = subscriptionId
         print("✅ Subscribed to zap receipts with ID: \(subscriptionId)")
 
-        // Set up callback for zap receipts (uses array-based callbacks, no overwriting)
-        nostrSDKClient.addZapReceivedCallback { zapComment in
+        // Set up callback for zap receipts, keyed by subscription ID for proper cleanup
+        nostrSDKClient.addZapReceivedCallback(forSubscriptionId: subscriptionId) { zapComment in
             Task { @MainActor [self] in
                 print("📨 Received zap receipt")
 
@@ -473,9 +473,10 @@ struct StreamerSideMenu: View {
         zapReceived = false
         generatedInvoice = nil
 
-        // Close the zap receipt subscription on the shared client
+        // Close the zap receipt subscription and remove its callback on the shared client
         if let subId = zapSubscriptionId {
             nostrSDKClient.closeSubscription(subId)
+            nostrSDKClient.removeCallback(forSubscriptionId: subId)
             zapSubscriptionId = nil
         }
     }
