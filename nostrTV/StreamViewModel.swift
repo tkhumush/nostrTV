@@ -532,13 +532,31 @@ class StreamViewModel: ObservableObject {
         }
         self.categorizedStreams = categorizeStreams(followingStreams)
 
-        // Diagnostic: a blank Following tab has several possible causes, and they are
-        // indistinguishable from the UI alone. Print the inputs to the filter.
-        print("👥 Following: \(followList.count) followed pubkey(s), \(cleanBase.count) candidate stream(s) → \(followingStreams.count) match(es)")
-        if followingStreams.isEmpty && !followList.isEmpty && !cleanBase.isEmpty {
-            let candidateAuthors = Set(cleanBase.compactMap { $0.eventAuthorPubkey })
-            let candidateHosts = Set(cleanBase.compactMap { $0.pubkey })
-            print("👥 Following: no overlap between the follow list and the \(candidateAuthors.count) author(s) / \(candidateHosts.count) host(s) currently streaming")
+        logFollowingDiagnostic(followed: followList.count,
+                               candidates: cleanBase.count,
+                               matched: followingStreams.count,
+                               candidateStreams: cleanBase)
+    }
+
+    /// Last reported (followed, candidates, matched) counts, so the Following
+    /// diagnostic is emitted only when the outcome actually changes.
+    /// updateCategorizedStreams runs on every incoming stream event, so logging
+    /// unconditionally floods the console during the initial burst.
+    private var lastFollowingDiagnostic: (followed: Int, candidates: Int, matched: Int)?
+
+    /// Report why the Following tab looks the way it does. A blank tab has several
+    /// possible causes that are indistinguishable from the UI alone.
+    private func logFollowingDiagnostic(followed: Int, candidates: Int, matched: Int, candidateStreams: [Stream]) {
+        let current = (followed: followed, candidates: candidates, matched: matched)
+        guard lastFollowingDiagnostic == nil || lastFollowingDiagnostic! != current else { return }
+        lastFollowingDiagnostic = current
+
+        print("👥 Following: \(followed) followed pubkey(s), \(candidates) candidate stream(s) → \(matched) match(es)")
+
+        if matched == 0 && followed > 0 && candidates > 0 {
+            let authors = Set(candidateStreams.compactMap { $0.eventAuthorPubkey })
+            let hosts = Set(candidateStreams.compactMap { $0.pubkey })
+            print("👥 Following: no overlap between the follow list and the \(authors.count) author(s) / \(hosts.count) host(s) currently streaming")
         }
     }
 

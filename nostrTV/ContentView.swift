@@ -491,20 +491,10 @@ struct ContentView: View {
 
     init(nostrSDKClient: NostrSDKClient) {
         self.nostrSDKClient = nostrSDKClient
-        // NOTE: the StreamViewModel must be constructed *inside* the autoclosure.
-        //
-        // StateObject.init(wrappedValue:) takes an @autoclosure precisely so the
-        // object is built only once, on first render. Assigning it to a local
-        // first (`let vm = StreamViewModel(...)`) defeats that: SwiftUI
-        // re-initializes View structs freely, so a new view model was built on
-        // every init while StateObject kept only the first.
-        //
-        // That mattered because each extra instance ran setupCallbacks(), which
-        // assigns the single-closure `sdkClient.onStreamReceived` on the *shared*
-        // client. Last writer won — and the last writer was an instance SwiftUI
-        // immediately discarded, so its [weak self] went nil and every stream
-        // event was dropped. The retained view model never saw a stream, leaving
-        // `isInitialLoad` true and the Curated tab stuck on the loading spinner.
+        // Construct inside the autoclosure. Assigning to a local first defeats
+        // StateObject's laziness: SwiftUI re-initializes View structs freely, so a
+        // new view model would be built on every init — and each one registers
+        // callbacks on the shared client, letting a discarded instance win.
         _viewModel = StateObject(wrappedValue: StreamViewModel(nostrSDKClient: nostrSDKClient))
     }
 
@@ -561,39 +551,39 @@ struct ContentView: View {
                         if viewModel.categorizedStreams.isEmpty && viewModel.featuredStream == nil {
                             FollowingNoStreamsView(followCount: viewModel.followListCount)
                         } else {
-                        StreamListView(
-                            viewModel: viewModel,
-                            categorizedStreams: viewModel.categorizedStreams,
-                            featuredStream: viewModel.featuredStream
-                        ) { url, lightningAddress, selectedStream in
-                            let player = AVPlayer(url: url)
-                            self.player = player
-                            self.selectedLightningAddress = lightningAddress
+                            StreamListView(
+                                viewModel: viewModel,
+                                categorizedStreams: viewModel.categorizedStreams,
+                                featuredStream: viewModel.featuredStream
+                            ) { url, lightningAddress, selectedStream in
+                                let player = AVPlayer(url: url)
+                                self.player = player
+                                self.selectedLightningAddress = lightningAddress
 
-                            // Attach profile to stream before passing to VideoPlayerView
-                            var streamWithProfile = selectedStream
-                            if let pubkey = selectedStream.pubkey, let profile = viewModel.getProfile(for: pubkey) {
-                                streamWithProfile = Stream(
-                                    streamID: selectedStream.streamID,
-                                    eventID: selectedStream.eventID,
-                                    title: selectedStream.title,
-                                    streaming_url: selectedStream.streaming_url,
-                                    imageURL: selectedStream.imageURL,
-                                    pubkey: selectedStream.pubkey,
-                                    eventAuthorPubkey: selectedStream.eventAuthorPubkey,
-                                    profile: profile,
-                                    status: selectedStream.status,
-                                    tags: selectedStream.tags,
-                                    createdAt: selectedStream.createdAt,
-                                    viewerCount: selectedStream.viewerCount,
-                                    recording: selectedStream.recording,
-                                    startsAt: selectedStream.startsAt
-                                )
+                                // Attach profile to stream before passing to VideoPlayerView
+                                var streamWithProfile = selectedStream
+                                if let pubkey = selectedStream.pubkey, let profile = viewModel.getProfile(for: pubkey) {
+                                    streamWithProfile = Stream(
+                                        streamID: selectedStream.streamID,
+                                        eventID: selectedStream.eventID,
+                                        title: selectedStream.title,
+                                        streaming_url: selectedStream.streaming_url,
+                                        imageURL: selectedStream.imageURL,
+                                        pubkey: selectedStream.pubkey,
+                                        eventAuthorPubkey: selectedStream.eventAuthorPubkey,
+                                        profile: profile,
+                                        status: selectedStream.status,
+                                        tags: selectedStream.tags,
+                                        createdAt: selectedStream.createdAt,
+                                        viewerCount: selectedStream.viewerCount,
+                                        recording: selectedStream.recording,
+                                        startsAt: selectedStream.startsAt
+                                    )
+                                }
+
+                                self.selectedStream = streamWithProfile
+                                self.showPlayer = true
                             }
-
-                            self.selectedStream = streamWithProfile
-                            self.showPlayer = true
-                        }
                         }
                     } else {
                         FollowingEmptyStateView(onLoginTap: {

@@ -406,29 +406,3 @@ extension NostrEventValidator {
 }
 
 // MARK: - aTag Utilities
-
-extension NostrEventValidator {
-
-    /// Normalize an a-tag for consistent lookups
-    /// - Parameter aTag: The a-tag to normalize
-    /// - Returns: Normalized a-tag with lowercase pubkey
-    static func normalizeATag(_ aTag: String) -> String {
-        ATag.normalize(aTag)
-    }
-
-    /// Construct an a-tag from stream components
-    /// - Parameters:
-    ///   - pubkey: The event author pubkey (not p-tag host pubkey)
-    ///   - dTag: The d-tag identifier
-    /// - Returns: Properly formatted a-tag
-    static func constructATag(pubkey: String, dTag: String) -> String {
-        ATag.construct(pubkey: pubkey, dTag: dTag)
-    }
-
-    /// Validate and parse an a-tag
-    /// - Parameter aTag: The a-tag to parse
-    /// - Returns: Tuple of (kind, pubkey, dTag) or nil if invalid
-    static func parseATag(_ aTag: String) -> (kind: Int, pubkey: String, dTag: String)? {
-        ATag.parse(aTag)
-    }
-}

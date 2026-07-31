@@ -150,14 +150,9 @@ class NostrSDKClient {
     ///
     ///     ["p", "<pubkey>", "<relay-url>", "<role>", "<proof>"]
     ///
-    /// where the role is a displayable marker such as `Host`, `Speaker` or
-    /// `Participant`. Simply taking the first `p` tag picks a guest on any
-    /// multi-participant stream, which shows the wrong profile and hides the stream
-    /// from the Following tab, since that filter matches on the host pubkey.
-    ///
-    /// The role's position varies in practice — the relay URL is frequently empty or
-    /// omitted entirely — so the marker is matched anywhere in the tag's parameters
-    /// rather than at a fixed index.
+    /// where the role is a marker such as `Host`, `Speaker` or `Participant`. Its
+    /// position varies — the relay URL is often empty or omitted — so the marker is
+    /// matched anywhere in the tag's parameters rather than at a fixed index.
     ///
     /// - Parameters:
     ///   - tags: The event's tags.
@@ -296,19 +291,13 @@ class NostrSDKClient {
 
     /// Add relays to the shared pool, connecting any that are new.
     ///
-    /// Used for NIP-53 stream relays: a stream's chat (kind 1311) and zap receipts
-    /// (kind 9735) are typically published only to the relays named in the event's
-    /// "relays" tag, which are usually not in our default set. Subscribing without
-    /// them yields a well-formed request that simply never matches anything.
+    /// Used for NIP-53 stream relays, where a stream's chat and zap receipts are
+    /// usually published. `RelayPool.add` de-duplicates by URL and connects
+    /// automatically, so repeat calls are safe.
     ///
-    /// `RelayPool.add` de-duplicates by URL and connects automatically, so calling
-    /// this repeatedly with the same URLs is safe.
-    ///
-    /// A newly added relay is not connected yet, and `Relay.subscribe` throws
-    /// `.notConnected` (an error `RelayPool` swallows), so a subscription created
-    /// right now would silently skip it. After a short delay to let the socket come
-    /// up, all active subscriptions are re-emitted with their original IDs — which
-    /// is idempotent for relays that already have them.
+    /// A newly added relay is not connected yet and `Relay.subscribe` throws
+    /// `.notConnected` — an error `RelayPool` swallows — so subscriptions are
+    /// re-emitted after a short delay with their original IDs.
     /// - Parameter urls: Relay URLs to ensure are present in the pool.
     func addRelays(_ urls: [String]) {
         let existingURLs = Set(relayPool.relays.map { $0.url.absoluteString })
@@ -339,17 +328,13 @@ class NostrSDKClient {
 
     /// Disconnect from all relays.
     ///
-    /// - Important: This is **terminal and not recoverable** by calling `connect()`
-    ///   again. It stops the heartbeat (nothing will detect silence and reconnect),
-    ///   clears `cancellables` — and `setupEventStream()` only runs from `init`, so
-    ///   incoming events stop being processed permanently — and empties
-    ///   `activeSubscriptions`, leaving `performReconnection()` no filters to replay.
-    ///
-    ///   Because this client is shared app-wide, calling it takes stream discovery,
-    ///   auth, chat and zaps offline until the process restarts. No component that
-    ///   merely *uses* the shared client should call this; scope cleanup to your own
-    ///   subscriptions via `closeSubscription(_:)` and `removeCallback(forSubscriptionId:)`.
-    ///   It currently has no callers, and is kept only for whole-app teardown.
+    /// - Important: **Terminal and not recoverable** by calling `connect()` again. It
+    ///   stops the heartbeat, clears `cancellables` (and `setupEventStream()` only
+    ///   runs from `init`), and empties `activeSubscriptions`. Because the client is
+    ///   shared app-wide this takes streams, auth, chat and zaps offline until the
+    ///   process restarts. Components using the shared client should scope cleanup to
+    ///   `closeSubscription(_:)` and `removeCallback(forSubscriptionId:)` instead.
+    ///   Has no callers; kept for whole-app teardown.
     func disconnect() {
         stopHeartbeat()
         relayPool.disconnect()
@@ -689,18 +674,6 @@ class NostrSDKClient {
         return subId
     }
 
-    /// Subscribe to chat (kind 1311) and zaps (kind 9735) for a specific stream by a-tag
-    /// - Parameter aTag: The stream's a-tag (format: "30311:<pubkey>:<d-tag>")
-    /// - Returns: Subscription ID for later closing, or nil if filter creation failed
-    func subscribeToChatAndZaps(aTag: String) -> String? {
-        guard let filter = Filter(kinds: [1311, 9735], tags: ["a": [aTag]], limit: 100) else {
-            print("❌ NostrSDKClient: Failed to create chat+zaps filter")
-            return nil
-        }
-        let subId = subscribe(with: filter, purpose: "chat-zaps-\(aTag.suffix(16))")
-        print("✅ NostrSDKClient: Subscribed to chat+zaps for \(aTag.suffix(20))...: \(subId.prefix(8))...")
-        return subId
-    }
 
     /// Subscribe to user profile (kind 0) and follow list (kind 3)
     /// - Parameter pubkey: The user's public key

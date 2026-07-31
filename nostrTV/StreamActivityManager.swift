@@ -67,16 +67,12 @@ class StreamActivityManager: ObservableObject {
             print("📺 StreamActivityManager: Stream lists no relays; using the default pool only")
         }
 
-        // Generate a unique subscription ID per listening session.
-        // The UUID suffix ensures that stopListening on an old StreamActivityManager
-        // can never accidentally remove callbacks for a new one's subscription, even if
-        // SwiftUI's @StateObject lifecycle causes old/new managers to overlap.
+        // Unique per listening session, so an old manager's stopListening cannot
+        // remove a new one's callbacks.
         //
-        // IMPORTANT: do not put the a-tag in this ID. NIP-01 caps subscription IDs at
-        // 64 characters, and an a-tag is 71 chars before its d-tag even starts
-        // ("30311:" + 64-char pubkey + ":"). Including it produced IDs of 90+ chars,
-        // which relays reject — so the REQ never took effect and neither chat nor zaps
-        // ever arrived. The UUID alone gives us the uniqueness we actually need.
+        // Do NOT put the a-tag in this ID: NIP-01 caps subscription IDs at 64 chars
+        // and an a-tag is 71 before its d-tag starts, so relays reject the REQ and
+        // no events ever arrive.
         let uuidSuffix = String(UUID().uuidString.prefix(8))
         let uniqueSubscriptionId = "chat-zaps-\(uuidSuffix)"
         assert(uniqueSubscriptionId.count <= 64, "Subscription ID exceeds the NIP-01 64-character limit")
@@ -169,7 +165,7 @@ class StreamActivityManager: ObservableObject {
         }
 
         // Check if this message is for our current stream
-        let normalizedMessageATag = normalizeATag(messageATag)
+        let normalizedMessageATag = ATag.normalize(messageATag)
         guard let ourATag = currentStreamATag, normalizedMessageATag == ourATag else {
             return
         }
@@ -220,7 +216,7 @@ class StreamActivityManager: ObservableObject {
         }
 
         // Check if this zap is for our current stream
-        let normalizedZapATag = normalizeATag(zapATag)
+        let normalizedZapATag = ATag.normalize(zapATag)
         guard let ourATag = currentStreamATag, normalizedZapATag == ourATag else {
             return
         }
@@ -257,11 +253,6 @@ class StreamActivityManager: ObservableObject {
         if isRelevant {
             updateTrigger += 1
         }
-    }
-
-    /// Normalize aTag for consistent comparison
-    private func normalizeATag(_ aTag: String) -> String {
-        ATag.normalize(aTag)
     }
 }
 
