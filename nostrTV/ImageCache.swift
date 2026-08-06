@@ -71,6 +71,14 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     @State private var image: UIImage?
     @State private var isLoading = false
 
+    /// URL of the most recently started load.
+    ///
+    /// Must be `@State` rather than a plain capture: a `Task` closes over a copy of
+    /// this struct, so by the time it finishes `self.url` still holds whatever it was
+    /// when the task started. `@State` reads through shared storage, so it reflects
+    /// the value now, which is what tells us whether the result is still wanted.
+    @State private var loadingURL: URL?
+
     init(
         url: URL?,
         @ViewBuilder content: @escaping (Image) -> Content,
@@ -97,6 +105,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
             if oldURL != newURL {
                 image = nil
                 isLoading = false
+                loadingURL = nil
             }
             loadImageIfNeeded()
         }
@@ -106,21 +115,27 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         guard let url = url, image == nil, !isLoading else { return }
 
         isLoading = true
-        Task {
-            // Check cache first
-            if let cachedImage = await ImageCache.shared.image(for: url) {
-                await MainActor.run {
-                    self.image = cachedImage
-                    self.isLoading = false
-                }
-                return
-            }
+        loadingURL = url
 
-            // Load image
+        Task {
+            // `loadImage` already returns the cached image when there is one, so the
+            // separate cache probe that used to run first only duplicated this path —
+            // and duplicated the clobbering bug below along with it.
             let loadedImage = await ImageCache.shared.loadImage(from: url)
+
             await MainActor.run {
-                self.image = loadedImage
-                self.isLoading = false
+                // Drop results for a URL we are no longer showing. Rows are recycled
+                // as the stream list updates, so a slow load for the previous row
+                // could otherwise finish last and overwrite the current image — or,
+                // on failure, overwrite it with nil and leave the row blank with
+                // nothing scheduled to retry.
+                guard loadingURL == url else { return }
+
+                // Never let a failed load erase what is already on screen.
+                if let loadedImage {
+                    image = loadedImage
+                }
+                isLoading = false
             }
         }
     }
