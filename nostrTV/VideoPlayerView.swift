@@ -17,22 +17,32 @@ struct VideoPlayerView: View {
     let nostrSDKClient: NostrSDKClient
     let authManager: NostrAuthManager
 
-    @State private var showZapMenu = false
-    @State private var showZapQR = false
-    @State private var selectedZapOption: ZapOption?
-    @State private var invoiceURI: String?
     @State private var presenceTimer: Timer?
     @State private var liveActivityManager: LiveActivityManager?
-    @State private var showStreamerProfile = false
     @StateObject private var activityManager: StreamActivityManager
     @State private var chatMessage = ""
     @State private var isChatVisible = true  // Track chat visibility
     @Environment(\.dismiss) private var dismiss
 
+    /// Which surface currently owns the screen.
+    ///
+    /// Previously the overlays were independent booleans with nothing stopping both
+    /// from being true, which would render two overlays as ZStack siblings competing
+    /// for focus. A single enum makes the states mutually exclusive by construction.
+    enum ActiveSurface: Hashable {
+        case chrome
+        case sideMenu
+    }
+
+    @State private var activeSurface: ActiveSurface = .chrome
+
     // Focus management for tvOS
     @FocusState private var focusedField: FocusableField?
     @Namespace private var focusNamespace
 
+    /// Controls in the player chrome. Overlays deliberately keep their own focus
+    /// state and namespace instead of extending this enum, so each surface owns a
+    /// self-contained focus scope.
     enum FocusableField: Hashable {
         case profileButton
         case toggleChatButton
@@ -70,7 +80,7 @@ struct VideoPlayerView: View {
                                 .foregroundColor(.coveSecondary.opacity(0.6))
 
                             // Stream info: profile pic + username + stream name + viewer count (clickable)
-                            Button(action: { showStreamerProfile = true }) {
+                            Button(action: { activeSurface = .sideMenu }) {
                                 HStack(spacing: 12) {
                                     // Profile picture
                                     if let profile = stream.profile, let pictureURL = profile.picture, let url = URL(string: pictureURL) {
@@ -131,6 +141,10 @@ struct VideoPlayerView: View {
                             }
                             .buttonStyle(.card)
                             .focused($focusedField, equals: .profileButton)
+                            // Pairs with the .onAppear assignment: states the intended
+                            // landing point declaratively rather than relying on the
+                            // focus engine's geometry heuristics.
+                            .prefersDefaultFocus(in: focusNamespace)
 
                             Spacer()
                         }
@@ -163,20 +177,31 @@ struct VideoPlayerView: View {
                     VideoPlayerContainer(
                         player: player,
                         stream: stream,
-                        onDismiss: { dismiss() }
+                        onDismiss: { dismiss() },
+                        shouldHandleMenuPress: {
+                            // Close the topmost surface rather than the player. Only
+                            // when nothing is layered above the chrome does Menu mean
+                            // "leave the stream".
+                            guard activeSurface != .chrome else { return false }
+                            activeSurface = .chrome
+                            return true
+                        }
                     )
                     .frame(maxWidth: .infinity)
 
-                    // Live chat column (17% - always present for focus stability)
-                    if let stream = stream {
+                    // Live chat column (17%)
+                    //
+                    // Rendered conditionally rather than collapsed to zero width and
+                    // opacity. allowsHitTesting(false) stops taps but does not remove a
+                    // view from the tvOS focus engine's candidate list, so the previous
+                    // approach let focus move invisibly into a hidden chat column.
+                    if isChatVisible, let stream = stream {
                         LiveChatView(
                             activityManager: activityManager,
                             stream: stream,
                             nostrClient: nostrSDKClient
                         )
-                        .frame(width: isChatVisible ? 375 : 0)
-                        .opacity(isChatVisible ? 1 : 0)
-                        .allowsHitTesting(isChatVisible)
+                        .frame(width: 375)
                         .background(Color.coveBackground)
                     }
                 }
@@ -204,6 +229,9 @@ struct VideoPlayerView: View {
                             },
                             onDismiss: {
                                 chatMessage = ""
+                                // Cancel previously cleared the text and left focus
+                                // wherever it was, with no defined landing point.
+                                focusedField = .toggleChatButton
                             }
                         )
                         .padding(.horizontal, 0)
@@ -214,29 +242,20 @@ struct VideoPlayerView: View {
                 .background(.ultraThinMaterial)
                 .focusSection()
             }  // Close VStack wrapper for banner + content
-
-            // QR code overlay (only shown when payment is being made)
-            if showZapQR, let option = selectedZapOption, let uri = invoiceURI {
-                ZapQRCodeView(
-                    invoiceURI: uri,
-                    zapOption: option,
-                    onDismiss: {
-                        showZapQR = false
-                        selectedZapOption = nil
-                        invoiceURI = nil
-                    }
-                )
-            }
+            // Scope the player chrome so it is one focus context, distinct from any
+            // overlay. focusNamespace was previously declared but never applied, which
+            // meant the chrome had no focus boundary at all.
+            .focusScope(focusNamespace)
 
             // Streamer profile side menu
-            if showStreamerProfile, let stream = stream {
+            if activeSurface == .sideMenu, let stream = stream {
                 StreamerProfilePopupView(
                     stream: stream,
                     authManager: authManager,
                     nostrSDKClient: nostrSDKClient,
-                    onDismiss: { showStreamerProfile = false }
+                    onDismiss: { activeSurface = .chrome }
                 )
-                .animation(.easeInOut(duration: 0.3), value: showStreamerProfile)
+                .animation(.easeInOut(duration: 0.3), value: activeSurface)
                 .zIndex(999)
             }
         }
@@ -283,15 +302,14 @@ struct VideoPlayerView: View {
                 focusedField = .toggleChatButton
             }
         }
-        .onChange(of: showZapQR) { oldValue, newValue in
-            // Restore focus when QR dismissed
-            if !newValue && oldValue {
-                focusedField = .profileButton
-            }
-        }
-        .onChange(of: showStreamerProfile) { oldValue, newValue in
-            // Restore focus when profile dismissed
-            if !newValue && oldValue {
+        .onChange(of: activeSurface) { oldValue, newValue in
+            // Restore focus to the chrome when an overlay closes.
+            //
+            // The delay matters: the side menu animates out over 0.3s, and assigning
+            // focus while it is still present can fail outright or bounce focus back
+            // into the disappearing overlay.
+            guard newValue == .chrome, oldValue != .chrome else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 focusedField = .profileButton
             }
         }
@@ -313,38 +331,6 @@ struct VideoPlayerView: View {
             // Stop presence timer
             presenceTimer?.invalidate()
             presenceTimer = nil
-        }
-    }
-
-    private func handleZapSelection(_ option: ZapOption) {
-        showZapMenu = false
-        selectedZapOption = option
-
-        guard let stream = stream,
-              let lightningAddress = lightningAddress else {
-            print("❌ Missing required data for zap")
-            return
-        }
-
-        // Generate zap request and show QR code
-        Task {
-            do {
-                let generator = ZapRequestGenerator(nostrSDKClient: nostrSDKClient, authManager: authManager)
-                let uri = try await generator.generateZapRequest(
-                    stream: stream,
-                    amount: option.amount,
-                    comment: option.message,
-                    lud16: lightningAddress
-                )
-
-                await MainActor.run {
-                    invoiceURI = uri
-                    showZapQR = true
-                }
-                // Zap receipts will arrive automatically via the persistent subscription
-            } catch {
-                print("❌ Failed to generate zap request: \(error)")
-            }
         }
     }
 
@@ -396,6 +382,10 @@ struct VideoPlayerView: View {
         // Clear input immediately for responsive feel
         chatMessage = ""
 
+        // Park focus somewhere known. Leaving it on the text field re-raises the tvOS
+        // keyboard, and leaving it unset lets the focus engine pick by geometry.
+        focusedField = .toggleChatButton
+
         Task {
             do {
                 try await liveActivityManager.sendChatMessage(messageText)
@@ -412,22 +402,36 @@ struct VideoPlayerContainer: UIViewControllerRepresentable {
     let stream: Stream?
     let onDismiss: () -> Void
 
+    /// Returns true if a Menu press was consumed by an overlay rather than meaning
+    /// "dismiss the player".
+    let shouldHandleMenuPress: () -> Bool
+
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = CustomAVPlayerViewController()
         controller.player = player
         controller.stream = stream
         controller.onDismiss = onDismiss
+        controller.shouldHandleMenuPress = shouldHandleMenuPress
         controller.player?.play()
         return controller
     }
 
-    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
+    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
+        // Rebind so the closure always sees current SwiftUI state rather than the
+        // values captured when the controller was first created.
+        (uiViewController as? CustomAVPlayerViewController)?.shouldHandleMenuPress = shouldHandleMenuPress
+    }
 }
 
 // Custom controller that disables the idle timer
 class CustomAVPlayerViewController: AVPlayerViewController {
     var stream: Stream?  // Stream being watched (for reference)
     var onDismiss: (() -> Void)?  // Closure to dismiss the view
+
+    /// Asked first on every Menu/Back press. Return true when SwiftUI handled it —
+    /// for example by closing an overlay — so the press is not treated as "dismiss
+    /// the player". Only when this returns false does the whole player go away.
+    var shouldHandleMenuPress: (() -> Bool)?
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
@@ -445,12 +449,15 @@ class CustomAVPlayerViewController: AVPlayerViewController {
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        // Handle Menu button press to dismiss the player
-        for press in presses {
-            if press.type == .menu {
-                onDismiss?()
-                return
+        // Offer the press to SwiftUI first. Previously this unconditionally dismissed
+        // the player, so pressing Menu with the side menu open tore down the whole
+        // player instead of just closing the overlay.
+        for press in presses where press.type == .menu {
+            if shouldHandleMenuPress?() == true {
+                return  // Consumed by an overlay
             }
+            onDismiss?()
+            return
         }
         super.pressesBegan(presses, with: event)
     }
@@ -489,6 +496,13 @@ struct ChatInputView: View {
                 .foregroundColor(.white)
                 .focused($focusedField, equals: .textField)
                 .frame(width: 241, height: 58)
+                // Let the tvOS keyboard send directly. Without this the only way to
+                // post was to dismiss the keyboard and navigate to the send button.
+                .submitLabel(.send)
+                .onSubmit {
+                    guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                    onSend()
+                }
 
             // Send button
             ChatActionButton(

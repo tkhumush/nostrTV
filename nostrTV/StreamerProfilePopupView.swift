@@ -35,6 +35,10 @@ struct StreamerProfilePopupView: View {
         .background(
             Color.coveBackground.opacity(0.7)
                 .ignoresSafeArea()
+                // Opacity does not remove the player chrome behind this from the focus
+                // engine's candidate list. contentShape gives the dimmed area a stable
+                // hit region so focus cannot pass through it to controls underneath.
+                .contentShape(Rectangle())
                 .onTapGesture { onDismiss() }
         )
     }
@@ -58,6 +62,22 @@ struct StreamerSideMenu: View {
     @State private var generatedInvoice: String?  // Store just the invoice string for matching
     @State private var zapSubscriptionId: String?
 
+    /// Controls inside the side menu that can hold focus.
+    ///
+    /// The menu owns its own focus state rather than sharing VideoPlayerView's:
+    /// `zIndex` only affects draw and hit-test order, so without a dedicated scope the
+    /// tvOS focus engine never moves focus into this overlay and the Siri Remote
+    /// cannot reach these controls.
+    enum MenuFocus: Hashable {
+        case closeButton
+        case zapAmount(Int)
+        case qrBackButton
+        case qrTryAgain
+    }
+
+    @Namespace private var menuNamespace
+    @FocusState private var focusedMenuItem: MenuFocus?
+
     // Zap amount options
     private let zapAmounts = [
         (amount: 21, emoji: "☕️", label: "Espresso"),
@@ -68,16 +88,25 @@ struct StreamerSideMenu: View {
     ]
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 30) {
+        // A plain VStack rather than a ScrollView: on tvOS a ScrollView is itself a
+        // focus participant and can swallow focus before its children get it. The menu
+        // content fits within the 600pt panel.
+        VStack(alignment: .leading, spacing: 30) {
                 // Close button - native Liquid Glass style
                 HStack {
                     Spacer()
                     Button(action: onClose) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 40))
+                            // .card gives the focus engine a real focusable target, and
+                            // the explicit frame keeps it above the 44pt minimum that a
+                            // bare Image would fall under.
+                            .frame(width: 60, height: 60)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.card)
+                    .focused($focusedMenuItem, equals: .closeButton)
+                    .prefersDefaultFocus(in: menuNamespace)
                 }
                 .padding(.horizontal, 30)
                 .padding(.top, 30)
@@ -213,6 +242,7 @@ struct StreamerSideMenu: View {
                                     isSelected: selectedAmount == option.amount,
                                     action: { handleAmountSelection(option.amount) }
                                 )
+                                .focused($focusedMenuItem, equals: .zapAmount(option.amount))
                             }
                         }
                         .padding(.horizontal, 30)
@@ -276,6 +306,7 @@ struct StreamerSideMenu: View {
                                     .tint(.coveAccent)
                                     .font(.system(size: 20))
                                     .controlSize(.large)
+                                    .focused($focusedMenuItem, equals: .qrTryAgain)
                                 }
                             } else if let qrImage = qrCodeImage {
                                 Image(uiImage: qrImage)
@@ -303,6 +334,7 @@ struct StreamerSideMenu: View {
                                 .buttonStyle(.bordered)
                                 .font(.system(size: 20))
                                 .controlSize(.large)
+                                .focused($focusedMenuItem, equals: .qrBackButton)
                             }
                         }
                         .frame(maxWidth: .infinity)
@@ -312,6 +344,29 @@ struct StreamerSideMenu: View {
                 }
 
                 Spacer(minLength: 20)
+        }
+        // Contain focus to the menu while it is open, and take focus on appear.
+        // The delay lets the 0.3s slide-in settle first — assigning focus mid-transition
+        // is unreliable.
+        .focusScope(menuNamespace)
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                if focusedMenuItem == nil {
+                    focusedMenuItem = .closeButton
+                }
+            }
+        }
+        // Entering and leaving the QR state swaps which controls exist, so move focus
+        // explicitly instead of leaving it on a control that just disappeared.
+        .onChange(of: showQRCode) { _, isShowingQR in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                focusedMenuItem = isShowingQR ? .qrBackButton : .closeButton
+            }
+        }
+        .onChange(of: errorMessage) { _, message in
+            guard message != nil else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                focusedMenuItem = .qrTryAgain
             }
         }
     }
