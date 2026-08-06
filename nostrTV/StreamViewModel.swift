@@ -157,7 +157,9 @@ class StreamViewModel: ObservableObject {
                     let existingDate = existingStream.createdAt ?? Date.distantPast
 
                     if newDate > existingDate {
-                        self.streams[existingIndex] = stream
+                        // Merge rather than replace: a republished event that omits a
+                        // tag would otherwise blank out what we are already showing.
+                        self.streams[existingIndex] = stream.preservingDisplayFields(from: existingStream)
                     }
                 } else {
                     self.streams.append(stream)

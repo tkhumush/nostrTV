@@ -23,7 +23,7 @@ struct Stream: Identifiable, Codable, Equatable {
     let eventID: String?  // The actual Nostr event ID (for zap references)
     let title: String
     let streaming_url: String
-    let imageURL: String?
+    var imageURL: String?
     let pubkey: String?  // Host pubkey (from p-tag) - used for profile display
     let eventAuthorPubkey: String?  // Event author pubkey (event signer) - used for a-tag coordinates
     let profile: Profile?
@@ -42,10 +42,33 @@ struct Stream: Identifiable, Codable, Equatable {
     /// returns nothing. Defaults to empty for streams that omit the tag.
     var relays: [String] = []
 
-    var id: String { streamID }
+    /// Matches the NIP-33 dedup key StreamViewModel uses (`eventAuthorPubkey` + `d`
+    /// tag).
+    ///
+    /// `streamID` alone is the `d` tag, which is only unique per author — two hosts
+    /// can publish the same one. Since dedup keeps both, a `ForEach` keyed on this
+    /// could see duplicate ids, which makes SwiftUI reuse and discard rows
+    /// unpredictably and was one source of images blinking out.
+    var id: String { "\(eventAuthorPubkey ?? ""):\(streamID)" }
 
     var isLive: Bool {
         return status == "live"
+    }
+
+    /// Carry forward display fields this event did not supply.
+    ///
+    /// Kind 30311 is replaceable and hosts republish it often — viewer counts and
+    /// status changes — but a republished event does not necessarily repeat every
+    /// tag it carried the first time. Swapping the stored stream out wholesale
+    /// therefore made the banner blink out the moment an update arrived without an
+    /// `image` tag, and it never came back until the host happened to send one again.
+    ///
+    /// Only fills gaps: a value the new event does supply always wins.
+    func preservingDisplayFields(from previous: Stream) -> Stream {
+        guard imageURL == nil else { return self }
+        var merged = self
+        merged.imageURL = previous.imageURL
+        return merged
     }
 
     /// NIP-33 addressable event coordinate (for deletion matching).
