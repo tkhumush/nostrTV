@@ -88,289 +88,311 @@ struct StreamerSideMenu: View {
     ]
 
     var body: some View {
-        // A plain VStack rather than a ScrollView: on tvOS a ScrollView is itself a
-        // focus participant and can swallow focus before its children get it. The menu
-        // content fits within the 600pt panel.
-        VStack(alignment: .leading, spacing: 30) {
-                // Close button - native Liquid Glass style
-                HStack {
-                    Spacer()
-                    Button(action: onClose) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 40))
-                            // .card gives the focus engine a real focusable target, and
-                            // the explicit frame keeps it above the 44pt minimum that a
-                            // bare Image would fall under.
-                            .frame(width: 60, height: 60)
-                            .contentShape(Rectangle())
+        // Scrolling, but driven explicitly.
+        //
+        // #36 removed the ScrollView because it competed for focus, on the assumption
+        // the content fit the panel. It does not — with all five zap amounts listed the
+        // menu is taller than the screen and the last row was clipped off the bottom.
+        //
+        // The answer is not to drop scrolling but to stop relying on the focus engine
+        // to do it: every focusable row carries an `.id`, and we scroll to whichever
+        // one currently holds focus.
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 30) {
+                    // Close button - native Liquid Glass style
+                    HStack {
+                        Spacer()
+                        Button(action: onClose) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 40))
+                                // .card gives the focus engine a real focusable target, and
+                                // the explicit frame keeps it above the 44pt minimum that a
+                                // bare Image would fall under.
+                                .frame(width: 60, height: 60)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.card)
+                        .focused($focusedMenuItem, equals: .closeButton)
+                        .prefersDefaultFocus(in: menuNamespace)
+                        .id(MenuFocus.closeButton)
                     }
-                    .buttonStyle(.card)
-                    .focused($focusedMenuItem, equals: .closeButton)
-                    .prefersDefaultFocus(in: menuNamespace)
-                }
-                .padding(.horizontal, 30)
-                .padding(.top, 30)
+                    .padding(.horizontal, 30)
+                    .padding(.top, 30)
 
-                // Profile Section
-                VStack(alignment: .center, spacing: 20) {
-                    if let profile = stream.profile {
-                        // Profile picture
-                        AsyncImage(url: URL(string: profile.picture ?? "")) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                                    .frame(width: 200, height: 200)
-                                    .clipShape(Circle())
-                            case .failure(_):
-                                Circle()
-                                    .fill(Color.coveOverlay)
-                                    .frame(width: 200, height: 200)
-                                    .overlay(
-                                        Image(systemName: "person.fill")
-                                            .font(.system(size: 80))
-                                            .foregroundColor(.gray)
-                                    )
-                            case .empty:
-                                ProgressView()
-                                    .frame(width: 200, height: 200)
-                            @unknown default:
-                                Circle()
-                                    .fill(Color.coveOverlay)
-                                    .frame(width: 200, height: 200)
+                    // Profile Section
+                    VStack(alignment: .center, spacing: 20) {
+                        if let profile = stream.profile {
+                            // Profile picture
+                            AsyncImage(url: URL(string: profile.picture ?? "")) { phase in
+                                switch phase {
+                                case .success(let image):
+                                    image
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                        .frame(width: 200, height: 200)
+                                        .clipShape(Circle())
+                                case .failure(_):
+                                    Circle()
+                                        .fill(Color.coveOverlay)
+                                        .frame(width: 200, height: 200)
+                                        .overlay(
+                                            Image(systemName: "person.fill")
+                                                .font(.system(size: 80))
+                                                .foregroundColor(.gray)
+                                        )
+                                case .empty:
+                                    ProgressView()
+                                        .frame(width: 200, height: 200)
+                                @unknown default:
+                                    Circle()
+                                        .fill(Color.coveOverlay)
+                                        .frame(width: 200, height: 200)
+                                }
                             }
-                        }
 
-                        // Display name
-                        Text(profile.displayNameOrName)
-                            .font(.system(size: 36, weight: .bold))
-                            .foregroundColor(.white)
+                            // Display name
+                            Text(profile.displayNameOrName)
+                                .font(.system(size: 36, weight: .bold))
+                                .foregroundColor(.white)
 
-                        // Username (@handle)
-                        if let name = profile.name {
-                            Text("@\(name)")
-                                .font(.system(size: 20))
-                                .foregroundColor(.gray)
-                        }
-
-                        // NIP-05 verification
-                        if let nip05 = profile.nip05, !nip05.isEmpty {
-                            HStack(spacing: 8) {
-                                Image(systemName: "checkmark.seal.fill")
-                                    .foregroundColor(.coveAccent)
-                                    .font(.system(size: 18))
-                                Text(nip05)
-                                    .font(.system(size: 18))
-                                    .foregroundColor(.coveAccent)
-                            }
-                        }
-
-                        // Bio/About - hidden when QR code is showing to make room
-                        if let about = profile.about, !about.isEmpty, !showQRCode {
-                            Text(about)
-                                .font(.system(size: 18))
-                                .foregroundColor(.white.opacity(0.8))
-                                .multilineTextAlignment(.center)
-                                .lineLimit(6)
-                                .padding(.horizontal, 20)
-                        }
-                    } else {
-                        // No profile available
-                        Circle()
-                            .fill(Color.coveOverlay)
-                            .frame(width: 200, height: 200)
-                            .overlay(
-                                Image(systemName: "person.fill")
-                                    .font(.system(size: 80))
+                            // Username (@handle)
+                            if let name = profile.name {
+                                Text("@\(name)")
+                                    .font(.system(size: 20))
                                     .foregroundColor(.gray)
-                            )
+                            }
 
-                        Text("Anonymous Streamer")
-                            .font(.system(size: 36, weight: .bold))
-                            .foregroundColor(.white)
+                            // NIP-05 verification
+                            if let nip05 = profile.nip05, !nip05.isEmpty {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "checkmark.seal.fill")
+                                        .foregroundColor(.coveAccent)
+                                        .font(.system(size: 18))
+                                    Text(nip05)
+                                        .font(.system(size: 18))
+                                        .foregroundColor(.coveAccent)
+                                }
+                            }
+
+                            // Bio/About - hidden when QR code is showing to make room
+                            if let about = profile.about, !about.isEmpty, !showQRCode {
+                                Text(about)
+                                    .font(.system(size: 18))
+                                    .foregroundColor(.white.opacity(0.8))
+                                    .multilineTextAlignment(.center)
+                                    .lineLimit(6)
+                                    .padding(.horizontal, 20)
+                            }
+                        } else {
+                            // No profile available
+                            Circle()
+                                .fill(Color.coveOverlay)
+                                .frame(width: 200, height: 200)
+                                .overlay(
+                                    Image(systemName: "person.fill")
+                                        .font(.system(size: 80))
+                                        .foregroundColor(.gray)
+                                )
+
+                            Text("Anonymous Streamer")
+                                .font(.system(size: 36, weight: .bold))
+                                .foregroundColor(.white)
+                        }
                     }
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 30)
-
-                Divider()
-                    .background(Color.coveOverlay)
+                    .frame(maxWidth: .infinity)
                     .padding(.horizontal, 30)
 
-                // Zap Section
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("\(CoveCopy.zapAction) to \(stream.profile?.displayNameOrName ?? "Streamer")")
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
+                    Divider()
+                        .background(Color.coveOverlay)
                         .padding(.horizontal, 30)
 
-                    if stream.profile?.lud16 == nil || stream.profile?.lud16?.isEmpty == true {
-                        VStack(spacing: 15) {
-                            Image(systemName: "exclamationmark.triangle")
-                                .font(.system(size: 40))
-                                .foregroundColor(.coveGold)
+                    // Zap Section
+                    VStack(alignment: .leading, spacing: 20) {
+                        Text("\(CoveCopy.zapAction) to \(stream.profile?.displayNameOrName ?? "Streamer")")
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 30)
 
-                            Text("This streamer hasn't set up Lightning yet")
-                                .font(.coveCaption)
-                                .foregroundColor(.coveGold)
-                                .multilineTextAlignment(.center)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 30)
-                    } else if !authManager.isAuthenticated {
-                        VStack(spacing: 15) {
-                            Image(systemName: "person.crop.circle.badge.exclamationmark")
-                                .font(.system(size: 40))
-                                .foregroundColor(.coveSecondary)
-
-                            Text("Sign in to send zaps")
-                                .font(.coveCaption)
-                                .foregroundColor(.coveSecondary)
-                                .multilineTextAlignment(.center)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 30)
-                    } else if !showQRCode {
-                        // Zap amount buttons
-                        VStack(spacing: 15) {
-                            ForEach(zapAmounts, id: \.amount) { option in
-                                ZapAmountButton(
-                                    emoji: option.emoji,
-                                    amount: option.amount,
-                                    label: option.label,
-                                    isSelected: selectedAmount == option.amount,
-                                    action: { handleAmountSelection(option.amount) }
-                                )
-                                .focused($focusedMenuItem, equals: .zapAmount(option.amount))
-                            }
-                        }
-                        .padding(.horizontal, 30)
-                    } else {
-                        // QR Code display
-                        VStack(spacing: 20) {
-                            // Amount display
-                            HStack(spacing: 8) {
-                                Text("⚡️")
-                                    .font(.system(size: 36))
-                                Text("\(selectedAmount ?? 0) sats")
-                                    .font(.system(size: 28, weight: .bold))
+                        if stream.profile?.lud16 == nil || stream.profile?.lud16?.isEmpty == true {
+                            VStack(spacing: 15) {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .font(.system(size: 40))
                                     .foregroundColor(.coveGold)
+
+                                Text("This streamer hasn't set up Lightning yet")
+                                    .font(.coveCaption)
+                                    .foregroundColor(.coveGold)
+                                    .multilineTextAlignment(.center)
                             }
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 30)
+                        } else if !authManager.isAuthenticated {
+                            VStack(spacing: 15) {
+                                Image(systemName: "person.crop.circle.badge.exclamationmark")
+                                    .font(.system(size: 40))
+                                    .foregroundColor(.coveSecondary)
 
-                            if zapReceived {
-                                // Success state - Zap received!
-                                VStack(spacing: 20) {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .font(.system(size: 100))
-                                        .foregroundColor(.coveAccent)
-                                        .scaleEffect(1.0)
-                                        .animation(.spring(response: 0.5, dampingFraction: 0.6), value: zapReceived)
-
-                                    Text("Zap Received!")
-                                        .font(.system(size: 36, weight: .bold, design: .rounded))
-                                        .foregroundColor(.coveGold)
-
-                                    Text("Thank you for supporting \(stream.profile?.displayNameOrName ?? "the streamer")!")
-                                        .font(.system(size: 20))
-                                        .foregroundColor(.white.opacity(0.8))
-                                        .multilineTextAlignment(.center)
-                                        .padding(.horizontal, 20)
-                                }
-                                .padding(.vertical, 60)
-                            } else if isGenerating {
-                                ProgressView()
-                                    .scaleEffect(1.5)
-                                Text(CoveCopy.generatingQR)
+                                Text("Sign in to send zaps")
                                     .font(.coveCaption)
                                     .foregroundColor(.coveSecondary)
-                            } else if let error = errorMessage {
-                                // Error state
-                                VStack(spacing: 15) {
-                                    Image(systemName: "exclamationmark.triangle")
-                                        .font(.system(size: 40))
+                                    .multilineTextAlignment(.center)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 30)
+                        } else if !showQRCode {
+                            // Zap amount buttons
+                            VStack(spacing: 15) {
+                                ForEach(zapAmounts, id: \.amount) { option in
+                                    ZapAmountButton(
+                                        emoji: option.emoji,
+                                        amount: option.amount,
+                                        label: option.label,
+                                        isSelected: selectedAmount == option.amount,
+                                        action: { handleAmountSelection(option.amount) }
+                                    )
+                                    .focused($focusedMenuItem, equals: .zapAmount(option.amount))
+                                    .id(MenuFocus.zapAmount(option.amount))
+                                }
+                            }
+                            .padding(.horizontal, 30)
+                        } else {
+                            // QR Code display
+                            VStack(spacing: 20) {
+                                // Amount display
+                                HStack(spacing: 8) {
+                                    Text("⚡️")
+                                        .font(.system(size: 36))
+                                    Text("\(selectedAmount ?? 0) sats")
+                                        .font(.system(size: 28, weight: .bold))
                                         .foregroundColor(.coveGold)
+                                }
 
-                                    Text(error)
-                                        .font(.coveCaption)
-                                        .foregroundColor(.white)
-                                        .multilineTextAlignment(.center)
+                                if zapReceived {
+                                    // Success state - Zap received!
+                                    VStack(spacing: 20) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.system(size: 100))
+                                            .foregroundColor(.coveAccent)
+                                            .scaleEffect(1.0)
+                                            .animation(.spring(response: 0.5, dampingFraction: 0.6), value: zapReceived)
 
-                                    Button("Try Again") {
-                                        errorMessage = nil
-                                        if let amount = selectedAmount {
-                                            handleAmountSelection(amount)
-                                        }
+                                        Text("Zap Received!")
+                                            .font(.system(size: 36, weight: .bold, design: .rounded))
+                                            .foregroundColor(.coveGold)
+
+                                        Text("Thank you for supporting \(stream.profile?.displayNameOrName ?? "the streamer")!")
+                                            .font(.system(size: 20))
+                                            .foregroundColor(.white.opacity(0.8))
+                                            .multilineTextAlignment(.center)
+                                            .padding(.horizontal, 20)
                                     }
-                                    .buttonStyle(.borderedProminent)
-                                    .tint(.coveAccent)
+                                    .padding(.vertical, 60)
+                                } else if isGenerating {
+                                    ProgressView()
+                                        .scaleEffect(1.5)
+                                    Text(CoveCopy.generatingQR)
+                                        .font(.coveCaption)
+                                        .foregroundColor(.coveSecondary)
+                                } else if let error = errorMessage {
+                                    // Error state
+                                    VStack(spacing: 15) {
+                                        Image(systemName: "exclamationmark.triangle")
+                                            .font(.system(size: 40))
+                                            .foregroundColor(.coveGold)
+
+                                        Text(error)
+                                            .font(.coveCaption)
+                                            .foregroundColor(.white)
+                                            .multilineTextAlignment(.center)
+
+                                        Button("Try Again") {
+                                            errorMessage = nil
+                                            if let amount = selectedAmount {
+                                                handleAmountSelection(amount)
+                                            }
+                                        }
+                                        .buttonStyle(.borderedProminent)
+                                        .tint(.coveAccent)
+                                        .font(.system(size: 20))
+                                        .controlSize(.large)
+                                        .focused($focusedMenuItem, equals: .qrTryAgain)
+                                        .id(MenuFocus.qrTryAgain)
+                                    }
+                                } else if let qrImage = qrCodeImage {
+                                    Image(uiImage: qrImage)
+                                        .interpolation(.none)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 400, height: 400)
+                                        .background(Color.white)
+                                        .cornerRadius(20)
+                                        .shadow(color: .coveGold.opacity(0.3), radius: 15)
+                                }
+
+                                // Instructions (hide when zap received)
+                                if !zapReceived {
+                                    Text(CoveCopy.scanToZap)
+                                        .font(.coveCaption)
+                                        .foregroundColor(.coveSecondary)
+                                }
+
+                                // Back button (hide when zap received - will auto-dismiss)
+                                if errorMessage == nil && !zapReceived {
+                                    Button("Back", action: {
+                                        cleanupZapState()
+                                    })
+                                    .buttonStyle(.bordered)
                                     .font(.system(size: 20))
                                     .controlSize(.large)
-                                    .focused($focusedMenuItem, equals: .qrTryAgain)
+                                    .focused($focusedMenuItem, equals: .qrBackButton)
+                                    .id(MenuFocus.qrBackButton)
                                 }
-                            } else if let qrImage = qrCodeImage {
-                                Image(uiImage: qrImage)
-                                    .interpolation(.none)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 400, height: 400)
-                                    .background(Color.white)
-                                    .cornerRadius(20)
-                                    .shadow(color: .coveGold.opacity(0.3), radius: 15)
                             }
-
-                            // Instructions (hide when zap received)
-                            if !zapReceived {
-                                Text(CoveCopy.scanToZap)
-                                    .font(.coveCaption)
-                                    .foregroundColor(.coveSecondary)
-                            }
-
-                            // Back button (hide when zap received - will auto-dismiss)
-                            if errorMessage == nil && !zapReceived {
-                                Button("Back", action: {
-                                    cleanupZapState()
-                                })
-                                .buttonStyle(.bordered)
-                                .font(.system(size: 20))
-                                .controlSize(.large)
-                                .focused($focusedMenuItem, equals: .qrBackButton)
-                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 30)
+                            .offset(y: -15)  // Move QR code section up by 15 pixels
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 30)
-                        .offset(y: -15)  // Move QR code section up by 15 pixels
+                    }
+
+                    Spacer(minLength: 20)
+                }
+            }
+            // Treat the menu as a single focus region, and resolve the close button's
+            // `prefersDefaultFocus(in:)` against this namespace.
+            //
+            // `focusScope` is not a barrier and does not hold focus here; it works only
+            // because VideoPlayerView disables the chrome while this menu is up, leaving
+            // nothing else on screen for the focus engine to choose.
+            .focusSection()
+            .focusScope(menuNamespace)
+            // Keep the focused row on screen. Without this the bottom zap amounts sit
+            // below the fold and cannot be read while they are selected.
+            .onChange(of: focusedMenuItem) { _, item in
+                guard let item else { return }
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    proxy.scrollTo(item, anchor: .center)
+                }
+            }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    if focusedMenuItem == nil {
+                        focusedMenuItem = .closeButton
                     }
                 }
-
-                Spacer(minLength: 20)
-        }
-        // Treat the menu as a single focus region, and resolve the close button's
-        // `prefersDefaultFocus(in:)` against this namespace.
-        //
-        // `focusScope` is not a barrier and does not hold focus here; it works only
-        // because VideoPlayerView disables the chrome while this menu is up, leaving
-        // nothing else on screen for the focus engine to choose.
-        .focusSection()
-        .focusScope(menuNamespace)
-        .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                if focusedMenuItem == nil {
-                    focusedMenuItem = .closeButton
+            }
+            // Entering and leaving the QR state swaps which controls exist, so move focus
+            // explicitly instead of leaving it on a control that just disappeared.
+            .onChange(of: showQRCode) { _, isShowingQR in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    focusedMenuItem = isShowingQR ? .qrBackButton : .closeButton
                 }
             }
-        }
-        // Entering and leaving the QR state swaps which controls exist, so move focus
-        // explicitly instead of leaving it on a control that just disappeared.
-        .onChange(of: showQRCode) { _, isShowingQR in
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                focusedMenuItem = isShowingQR ? .qrBackButton : .closeButton
-            }
-        }
-        .onChange(of: errorMessage) { _, message in
-            guard message != nil else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                focusedMenuItem = .qrTryAgain
+            .onChange(of: errorMessage) { _, message in
+                guard message != nil else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    focusedMenuItem = .qrTryAgain
+                }
             }
         }
     }

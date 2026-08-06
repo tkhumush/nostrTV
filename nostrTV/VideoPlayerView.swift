@@ -267,6 +267,14 @@ struct VideoPlayerView: View {
                     nostrSDKClient: nostrSDKClient,
                     onDismiss: { activeSurface = .chrome }
                 )
+                // Menu/Back returns to the player rather than leaving the stream.
+                //
+                // `shouldHandleMenuPress` on the player controller cannot cover this:
+                // once focus is inside this overlay the press never reaches that
+                // controller, it goes to the SwiftUI hosting controller, which
+                // dismisses the whole player. `onExitCommand` is the tvOS hook that
+                // fires while focus is within this view.
+                .onExitCommand { activeSurface = .chrome }
                 .animation(.easeInOut(duration: 0.3), value: activeSurface)
                 .zIndex(999)
             }
