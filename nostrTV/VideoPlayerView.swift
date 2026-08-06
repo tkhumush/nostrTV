@@ -177,6 +177,9 @@ struct VideoPlayerView: View {
                     VideoPlayerContainer(
                         player: player,
                         stream: stream,
+                        // SwiftUI's `.disabled` does not cross into a UIKit controller,
+                        // so the player is told separately to stop taking focus.
+                        isInteractive: activeSurface == .chrome,
                         onDismiss: { dismiss() },
                         shouldHandleMenuPress: {
                             // Close the topmost surface rather than the player. Only
@@ -242,10 +245,19 @@ struct VideoPlayerView: View {
                 .background(.ultraThinMaterial)
                 .focusSection()
             }  // Close VStack wrapper for banner + content
-            // Scope the player chrome so it is one focus context, distinct from any
-            // overlay. focusNamespace was previously declared but never applied, which
-            // meant the chrome had no focus boundary at all.
+            // Scope the chrome so `prefersDefaultFocus(in:)` resolves against it.
+            //
+            // Note this does NOT keep focus inside the chrome — `focusScope` only
+            // scopes default-focus preferences, it is not a barrier. Keeping an
+            // overlay's focus out is the job of `.disabled` below.
             .focusScope(focusNamespace)
+            // While an overlay is up, take the entire chrome out of the focus engine.
+            //
+            // Nothing softer works: opacity, `allowsHitTesting`, `contentShape`, and
+            // `zIndex` all leave a view focusable, so the Siri Remote kept landing on
+            // the chrome and the player transport instead of the overlay on top.
+            // `.disabled` is the modifier that actually removes focus candidacy.
+            .disabled(activeSurface != .chrome)
 
             // Streamer profile side menu
             if activeSurface == .sideMenu, let stream = stream {
@@ -400,6 +412,12 @@ struct VideoPlayerView: View {
 struct VideoPlayerContainer: UIViewControllerRepresentable {
     let player: AVPlayer
     let stream: Stream?
+
+    /// False while an overlay owns the screen. AVPlayerViewController shows transport
+    /// controls by default and is the strongest focus magnet on screen, so it has to be
+    /// stood down explicitly or it wins focus over anything layered above it.
+    let isInteractive: Bool
+
     let onDismiss: () -> Void
 
     /// Returns true if a Menu press was consumed by an overlay rather than meaning
@@ -420,6 +438,15 @@ struct VideoPlayerContainer: UIViewControllerRepresentable {
         // Rebind so the closure always sees current SwiftUI state rather than the
         // values captured when the controller was first created.
         (uiViewController as? CustomAVPlayerViewController)?.shouldHandleMenuPress = shouldHandleMenuPress
+
+        // The transport controls are the player's only focusable content, so hiding
+        // them is what takes it out of the focus engine. Playback is unaffected.
+        //
+        // Deliberately NOT setting `view.isUserInteractionEnabled = false` here: this
+        // controller is also what routes Menu presses to `shouldHandleMenuPress`, and
+        // a view that cannot take interaction may stop receiving them — which would
+        // break closing the overlay with Menu, the case that matters most.
+        uiViewController.showsPlaybackControls = isInteractive
     }
 }
 

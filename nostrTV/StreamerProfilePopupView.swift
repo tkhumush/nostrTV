@@ -35,9 +35,9 @@ struct StreamerProfilePopupView: View {
         .background(
             Color.coveBackground.opacity(0.7)
                 .ignoresSafeArea()
-                // Opacity does not remove the player chrome behind this from the focus
-                // engine's candidate list. contentShape gives the dimmed area a stable
-                // hit region so focus cannot pass through it to controls underneath.
+                // Gives the dimmed area a stable hit region for the tap-to-dismiss
+                // gesture. This does not affect focus — the chrome behind is kept out
+                // of the focus engine by `.disabled` in VideoPlayerView, not here.
                 .contentShape(Rectangle())
                 .onTapGesture { onDismiss() }
         )
@@ -345,9 +345,13 @@ struct StreamerSideMenu: View {
 
                 Spacer(minLength: 20)
         }
-        // Contain focus to the menu while it is open, and take focus on appear.
-        // The delay lets the 0.3s slide-in settle first — assigning focus mid-transition
-        // is unreliable.
+        // Treat the menu as a single focus region, and resolve the close button's
+        // `prefersDefaultFocus(in:)` against this namespace.
+        //
+        // `focusScope` is not a barrier and does not hold focus here; it works only
+        // because VideoPlayerView disables the chrome while this menu is up, leaving
+        // nothing else on screen for the focus engine to choose.
+        .focusSection()
         .focusScope(menuNamespace)
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
