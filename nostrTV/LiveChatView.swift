@@ -160,8 +160,8 @@ private struct ChatMessageRow: View {
                         .foregroundColor(.coveSecondary)
                 }
 
-                // Message content
-                Text(message.message)
+                // Message content, with `nostr:` mentions resolved to names
+                messageContent
                     .font(.system(size: 16))
                     .foregroundColor(.white)
                     .fixedSize(horizontal: false, vertical: true)
@@ -171,6 +171,46 @@ private struct ChatMessageRow: View {
         .padding(.horizontal, 8)
         .background(Color.coveOverlay.opacity(0.5))
         .cornerRadius(CoveUI.smallCornerRadius)
+        .onAppear {
+            // Fetch any mentioned profile we do not have yet. Done here rather than
+            // while building the body so rendering stays free of side effects; the
+            // client debounces and deduplicates, so repeat rows are cheap. When a
+            // profile lands, `updateTrigger` re-renders and the name fills in.
+            for pubkey in NostrMention.mentionedPubkeys(in: message.message)
+            where nostrClient.getProfile(for: pubkey) == nil {
+                nostrClient.requestProfile(for: pubkey)
+            }
+        }
+    }
+
+    /// Message text with mentions shown as the tagged person's name.
+    ///
+    /// Built by concatenating `Text` rather than as separate views so the message still
+    /// wraps as one paragraph, with mentions styled inline.
+    private var messageContent: Text {
+        NostrMention.parse(message.message).reduce(Text("")) { result, segment in
+            switch segment {
+            case .text(let plain):
+                return result + Text(plain)
+            case .mention(let pubkey, let identifier):
+                return result + Text(mentionLabel(pubkey: pubkey, identifier: identifier))
+                    .foregroundColor(.coveAccent)
+                    .fontWeight(.semibold)
+            }
+        }
+    }
+
+    /// Display name for a mention, falling back to a truncated identifier.
+    ///
+    /// The fallback covers both a profile still in flight and someone who has never
+    /// published one — neither should render as sixty characters of base32.
+    private func mentionLabel(pubkey: String, identifier: String) -> String {
+        if let profile = nostrClient.getProfile(for: pubkey) {
+            if let name = profile.displayName ?? profile.name, !name.isEmpty {
+                return "@\(name)"
+            }
+        }
+        return "@\(identifier.prefix(10))…"
     }
 
     private func timeString(from date: Date) -> String {
