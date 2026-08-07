@@ -37,6 +37,16 @@ private struct StoredSubscription {
     let id: String
     let filter: Filter
     let purpose: String
+
+    /// A query rather than a feed.
+    ///
+    /// Feeds (streams, chat, zaps) stay open for as long as the user is watching.
+    /// Queries — "what is this pubkey's profile?" — are finished the moment the relay
+    /// says it has sent everything stored, and should be closed then. Leaving them
+    /// open is what let profile lookups accumulate one REQ per stranger encountered,
+    /// with no upper bound, until relays started closing subscriptions to stay under
+    /// their per-connection cap.
+    let isOneShot: Bool
 }
 
 /// A wrapper around NostrSDK's RelayPool that provides the same interface as the legacy NostrClient.
@@ -74,6 +84,35 @@ class NostrSDKClient {
     /// Pending profile requests (deduplication)
     private var pendingProfileRequests: Set<String> = []
     private let pendingRequestsQueue = DispatchQueue(label: "com.nostrtv.sdk.pendingRequests")
+
+    /// One-shot subscriptions that already have a close scheduled, so the first
+    /// relay's EOSE arms the timer and the rest do not re-arm it.
+    private var oneShotClosesScheduled: Set<String> = []
+
+    /// Grace period between the first EOSE and actually closing a one-shot.
+    ///
+    /// EOSE is per relay, not per subscription. Closing the instant the fastest relay
+    /// finishes would discard whatever the slower ones were still about to send, so we
+    /// give them a moment to answer before hanging up.
+    private static let oneShotCloseGrace: TimeInterval = 2.0
+
+    /// Pubkeys waiting to be folded into the next batched profile fetch.
+    ///
+    /// Chat calls `requestProfile` one sender at a time. Issuing a REQ per call is what
+    /// made a busy room open dozens of subscriptions; collecting them over a short
+    /// window turns that into a single query.
+    private var profileFetchQueue: Set<String> = []
+    private var profileFetchFlushScheduled = false
+    private static let profileFetchDebounce: TimeInterval = 0.3
+
+    /// Pubkeys we asked about and got nothing back for.
+    ///
+    /// Absence is an answer worth remembering. Without this, anyone who has never
+    /// published a kind 0 is re-requested every time the pending marker expires — for
+    /// an active chatter with no profile, forever.
+    private var profileMisses: [String: Date] = [:]
+    private static let profileMissBackoff: TimeInterval = 60 * 60
+    private static let profileMissGrace: TimeInterval = 8.0
 
     /// Rate limiter for relay requests
     private let rateLimiter = RelayRateLimiter()
@@ -446,6 +485,10 @@ class NostrSDKClient {
 
         var restored = 0
         for (_, stored) in subscriptionsToRestore {
+            // Never replay a query. A one-shot has already been answered; re-emitting
+            // it to every relay that connects would reissue completed profile lookups
+            // for the life of the process.
+            guard !stored.isOneShot else { continue }
             do {
                 _ = try relay.subscribe(with: stored.filter, subscriptionId: stored.id)
                 restored += 1
@@ -470,6 +513,7 @@ class NostrSDKClient {
         print("🔄 NostrSDKClient: Restoring \(subscriptionsToRestore.count) subscription(s)")
 
         for (_, stored) in subscriptionsToRestore {
+            guard !stored.isOneShot else { continue }
             let newSubscriptionId = relayPool.subscribe(with: stored.filter, subscriptionId: stored.id)
             subscriptionsLock.lock()
             activeSubscriptions[newSubscriptionId] = stored
@@ -547,17 +591,19 @@ class NostrSDKClient {
     /// - Parameter filter: NostrSDK Filter object
     /// - Returns: Subscription ID for later reference
     @discardableResult
-    func subscribe(with filter: Filter, purpose: String = "custom") -> String {
+    func subscribe(with filter: Filter, purpose: String = "custom", oneShot: Bool = false) -> String {
         let subscriptionId = relayPool.subscribe(with: filter)
         subscriptionsLock.lock()
-        activeSubscriptions[subscriptionId] = StoredSubscription(id: subscriptionId, filter: filter, purpose: purpose)
+        activeSubscriptions[subscriptionId] = StoredSubscription(
+            id: subscriptionId, filter: filter, purpose: purpose, isOneShot: oneShot
+        )
         subscriptionsLock.unlock()
         return subscriptionId
     }
 
     /// Subscribe with an explicit subscription ID so reconnection can restore the exact same subscription.
     @discardableResult
-    func subscribe(with filter: Filter, subscriptionId: String, purpose: String = "custom") -> String {
+    func subscribe(with filter: Filter, subscriptionId: String, purpose: String = "custom", oneShot: Bool = false) -> String {
         // NIP-01 caps subscription IDs at 64 characters. Relays reject longer ones,
         // and they do it silently from our side: the REQ simply never takes effect
         // and no events ever arrive for that subscription. Fail loudly instead.
@@ -570,7 +616,9 @@ class NostrSDKClient {
 
         let actualId = relayPool.subscribe(with: filter, subscriptionId: subscriptionId)
         subscriptionsLock.lock()
-        activeSubscriptions[actualId] = StoredSubscription(id: actualId, filter: filter, purpose: purpose)
+        activeSubscriptions[actualId] = StoredSubscription(
+            id: actualId, filter: filter, purpose: purpose, isOneShot: oneShot
+        )
         subscriptionsLock.unlock()
         return actualId
     }
@@ -848,40 +896,63 @@ class NostrSDKClient {
         }
     }
 
-    /// Request profile metadata for a pubkey
+    /// Request profile metadata for a pubkey.
+    ///
+    /// Does not issue a REQ on its own. The pubkey joins a short debounce window and
+    /// goes out with everything else requested in the same moment, as one query.
     func requestProfile(for pubkey: String) {
-        // Check rate limit
-        guard rateLimiter.shouldAllowRequest() else {
-            // Queue for later
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.requestProfile(for: pubkey)
+        enqueueProfileFetch([pubkey])
+    }
+
+    /// Collect pubkeys over a short window, then fetch them together.
+    private func enqueueProfileFetch(_ pubkeys: [String]) {
+        pendingRequestsQueue.async { [weak self] in
+            guard let self = self else { return }
+
+            self.profileFetchQueue.formUnion(pubkeys)
+
+            guard !self.profileFetchFlushScheduled else { return }
+            self.profileFetchFlushScheduled = true
+
+            self.pendingRequestsQueue.asyncAfter(deadline: .now() + Self.profileFetchDebounce) { [weak self] in
+                guard let self = self else { return }
+                self.profileFetchFlushScheduled = false
+
+                let batch = Array(self.profileFetchQueue)
+                self.profileFetchQueue.removeAll()
+                guard !batch.isEmpty else { return }
+
+                // Hop off this queue: `requestProfiles` takes it with `sync`, and this
+                // queue is serial — calling it from here would deadlock.
+                DispatchQueue.global().async {
+                    self.requestProfiles(for: batch)
+                }
             }
-            return
         }
+    }
 
-        // Deduplicate requests
-        var shouldRequest = false
-        pendingRequestsQueue.sync {
-            if !pendingProfileRequests.contains(pubkey) {
-                pendingProfileRequests.insert(pubkey)
-                shouldRequest = true
-            }
+    /// Close a one-shot subscription once a relay reports it has sent everything stored.
+    private func scheduleOneShotCloseIfNeeded(_ subscriptionId: String) {
+        subscriptionsLock.lock()
+        let shouldSchedule = activeSubscriptions[subscriptionId]?.isOneShot == true
+            && !oneShotClosesScheduled.contains(subscriptionId)
+        if shouldSchedule {
+            oneShotClosesScheduled.insert(subscriptionId)
         }
+        subscriptionsLock.unlock()
 
-        guard shouldRequest else { return }
+        guard shouldSchedule else { return }
 
-        // Subscribe to profile
-        guard let filter = Filter(authors: [pubkey], kinds: [0], limit: 1) else {
-            return
-        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + Self.oneShotCloseGrace) { [weak self] in
+            guard let self = self else { return }
+            self.closeSubscription(subscriptionId)
+            self.removeCallback(forSubscriptionId: subscriptionId)
 
-        subscribe(with: filter, purpose: "profile-\(pubkey.prefix(8))")
+            self.subscriptionsLock.lock()
+            self.oneShotClosesScheduled.remove(subscriptionId)
+            self.subscriptionsLock.unlock()
 
-        // Clear pending after timeout
-        DispatchQueue.global().asyncAfter(deadline: .now() + 30) { [weak self] in
-            self?.pendingRequestsQueue.async {
-                self?.pendingProfileRequests.remove(pubkey)
-            }
+            print("🧹 NostrSDKClient: Closed one-shot subscription \(subscriptionId.prefix(8))… after EOSE")
         }
     }
 
@@ -891,8 +962,17 @@ class NostrSDKClient {
         // Filter out already cached and pending profiles
         var uncachedPubkeys: [String] = []
         pendingRequestsQueue.sync {
+            let now = Date()
             uncachedPubkeys = pubkeys.filter { pubkey in
-                !pendingProfileRequests.contains(pubkey) && getProfile(for: pubkey) == nil
+                guard !pendingProfileRequests.contains(pubkey), getProfile(for: pubkey) == nil else {
+                    return false
+                }
+                // Recently asked and heard nothing: do not keep asking.
+                if let missedAt = profileMisses[pubkey],
+                   now.timeIntervalSince(missedAt) < Self.profileMissBackoff {
+                    return false
+                }
+                return true
             }
         }
 
@@ -928,8 +1008,21 @@ class NostrSDKClient {
                     return
                 }
 
-                self.subscribe(with: filter, purpose: "profiles-batch-\(index)")
+                // One-shot: closed as soon as the relays report end-of-stored-events.
+                self.subscribe(with: filter, purpose: "profiles-batch-\(index)", oneShot: true)
                 print("📋 NostrSDKClient: Requested \(batch.count) profiles in batch \(index)")
+
+                // Whatever has not arrived by now is treated as absent rather than
+                // pending, so it is not re-requested the moment the marker expires.
+                DispatchQueue.global().asyncAfter(deadline: .now() + Self.profileMissGrace) { [weak self] in
+                    guard let self = self else { return }
+                    self.pendingRequestsQueue.async {
+                        let now = Date()
+                        for pubkey in batch where self.getProfile(for: pubkey) == nil {
+                            self.profileMisses[pubkey] = now
+                        }
+                    }
+                }
             }
         }
 
@@ -972,9 +1065,11 @@ class NostrSDKClient {
         // Cache profile
         cacheProfile(profile, for: pubkey)
 
-        // Remove from pending
+        // Remove from pending, and clear any recorded miss — this pubkey has a profile
+        // after all, so a later lookup should not be suppressed by the backoff.
         pendingRequestsQueue.async { [weak self] in
             self?.pendingProfileRequests.remove(pubkey)
+            self?.profileMisses.removeValue(forKey: pubkey)
         }
 
         // Notify callbacks
@@ -1590,6 +1685,7 @@ extension NostrSDKClient: RelayDelegate {
         case .eose(let subscriptionId):
             print("📭 Relay \(relay.url.absoluteString) end of stored events for \(subscriptionId) "
                   + "(purpose: \(purpose(forSubscriptionId: subscriptionId))) — live events follow")
+            scheduleOneShotCloseIfNeeded(subscriptionId)
 
         case .ok(let eventId, let success, let message):
             if !success {
