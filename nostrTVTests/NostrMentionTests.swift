@@ -10,6 +10,7 @@
 //
 
 import Testing
+import NostrSDK
 @testable import nostrTV
 
 struct NostrMentionTests {
@@ -70,12 +71,61 @@ struct NostrMentionTests {
         #expect(NostrMention.parse(broken) == [.text(broken)])
     }
 
+    /// The spec vector is short. Real mentions carry relay hints (TLV type 1), which
+    /// make the identifier several times longer and add TLV entries after the pubkey.
+    @Test func decodesRealWorldNprofileWithRelayHints() throws {
+        struct Coder: MetadataCoding {}
+        let metadata = Metadata(
+            pubkey: Self.hex,
+            relays: ["wss://relay.damus.io", "wss://relay.primal.net", "wss://nos.lol"]
+        )
+        let identifier = try Coder().encodedIdentifier(with: metadata, identifierType: .profile)
+
+        #expect(NostrMention.pubkey(fromIdentifier: identifier) == Self.hex)
+        #expect(NostrMention.parse("hi nostr:\(identifier) there") == [
+            .text("hi "),
+            .mention(pubkey: Self.hex, identifier: identifier),
+            .text(" there")
+        ])
+    }
+
     @Test func plainTextIsUntouched() {
         #expect(NostrMention.parse("no mentions here") == [.text("no mentions here")])
     }
 
     @Test func collectsMentionedPubkeysWithoutDuplicates() {
         let content = "nostr:\(Self.npub) nostr:\(Self.nprofile)"
-        #expect(NostrMention.mentionedPubkeys(in: content) == [Self.hex])
+        #expect(NostrMention.mentionTargets(in: content).map(\.pubkey) == [Self.hex])
+    }
+
+    /// The relay hints are the reason nprofile exists instead of npub — dropping them
+    /// leaves anyone who is not on the default relays permanently unresolved.
+    @Test func keepsRelayHintsFromNprofile() throws {
+        struct Coder: MetadataCoding {}
+        let hints = ["wss://relay.damus.io", "wss://nos.lol"]
+        let identifier = try Coder().encodedIdentifier(
+            with: Metadata(pubkey: Self.hex, relays: hints), identifierType: .profile
+        )
+
+        #expect(NostrMention.relayHints(fromIdentifier: identifier) == hints)
+        #expect(NostrMention.mentionTargets(in: "nostr:\(identifier)") == [
+            .init(pubkey: Self.hex, relays: hints)
+        ])
+    }
+
+    /// An npub carries no hints, and must not invent any.
+    @Test func npubHasNoRelayHints() {
+        #expect(NostrMention.relayHints(fromIdentifier: Self.npub).isEmpty)
+    }
+
+    /// Hints are untrusted input; anything that is not a websocket URL is dropped.
+    @Test func rejectsNonWebsocketRelayHints() throws {
+        struct Coder: MetadataCoding {}
+        let identifier = try Coder().encodedIdentifier(
+            with: Metadata(pubkey: Self.hex, relays: ["https://evil.example", "wss://relay.damus.io"]),
+            identifierType: .profile
+        )
+
+        #expect(NostrMention.relayHints(fromIdentifier: identifier) == ["wss://relay.damus.io"])
     }
 }

@@ -176,9 +176,16 @@ private struct ChatMessageRow: View {
             // while building the body so rendering stays free of side effects; the
             // client debounces and deduplicates, so repeat rows are cheap. When a
             // profile lands, `updateTrigger` re-renders and the name fills in.
-            for pubkey in NostrMention.mentionedPubkeys(in: message.message)
-            where nostrClient.getProfile(for: pubkey) == nil {
-                nostrClient.requestProfile(for: pubkey)
+            for target in NostrMention.mentionTargets(in: message.message)
+            where nostrClient.getProfile(for: target.pubkey) == nil {
+                // Follow the nprofile's relay hints. Someone tagged this way is often
+                // not on our default relays — carrying hints is the entire reason the
+                // identifier exists rather than a plain npub — so without this their
+                // metadata is never found and the mention stays unresolved.
+                if !target.relays.isEmpty {
+                    nostrClient.addRelays(target.relays)
+                }
+                nostrClient.requestProfile(for: target.pubkey)
             }
         }
     }

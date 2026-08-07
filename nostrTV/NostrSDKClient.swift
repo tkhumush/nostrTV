@@ -96,6 +96,14 @@ class NostrSDKClient {
     /// give them a moment to answer before hanging up.
     private static let oneShotCloseGrace: TimeInterval = 2.0
 
+    /// Backstop for a one-shot that no relay ever answers.
+    ///
+    /// EOSE is the fast path. Without this, a query no relay responds to would sit in
+    /// `activeSubscriptions` forever and be re-emitted on every reconnect — the
+    /// accumulation this whole mechanism exists to prevent. Comfortably longer than a
+    /// newly hinted relay needs to connect and reply.
+    private static let oneShotFallbackTimeout: TimeInterval = 20.0
+
     /// Pubkeys waiting to be folded into the next batched profile fetch.
     ///
     /// Chat calls `requestProfile` one sender at a time. Issuing a REQ per call is what
@@ -485,10 +493,11 @@ class NostrSDKClient {
 
         var restored = 0
         for (_, stored) in subscriptionsToRestore {
-            // Never replay a query. A one-shot has already been answered; re-emitting
-            // it to every relay that connects would reissue completed profile lookups
-            // for the life of the process.
-            guard !stored.isOneShot else { continue }
+            // One-shots are included on purpose. A completed query has already been
+            // removed from `activeSubscriptions` by `closeSubscription`, so anything
+            // still here is unanswered — and a relay that just connected is exactly who
+            // might answer it. This is what makes nprofile relay hints work: the hinted
+            // relay is added after the query was issued, and only receives it on connect.
             do {
                 _ = try relay.subscribe(with: stored.filter, subscriptionId: stored.id)
                 restored += 1
@@ -513,7 +522,6 @@ class NostrSDKClient {
         print("🔄 NostrSDKClient: Restoring \(subscriptionsToRestore.count) subscription(s)")
 
         for (_, stored) in subscriptionsToRestore {
-            guard !stored.isOneShot else { continue }
             let newSubscriptionId = relayPool.subscribe(with: stored.filter, subscriptionId: stored.id)
             subscriptionsLock.lock()
             activeSubscriptions[newSubscriptionId] = stored
@@ -598,6 +606,7 @@ class NostrSDKClient {
             id: subscriptionId, filter: filter, purpose: purpose, isOneShot: oneShot
         )
         subscriptionsLock.unlock()
+        if oneShot { scheduleOneShotFallbackClose(subscriptionId) }
         return subscriptionId
     }
 
@@ -620,6 +629,7 @@ class NostrSDKClient {
             id: actualId, filter: filter, purpose: purpose, isOneShot: oneShot
         )
         subscriptionsLock.unlock()
+        if oneShot { scheduleOneShotFallbackClose(actualId) }
         return actualId
     }
 
@@ -928,6 +938,23 @@ class NostrSDKClient {
                     self.requestProfiles(for: batch)
                 }
             }
+        }
+    }
+
+    /// Close a one-shot even if no relay ever reports EOSE.
+    private func scheduleOneShotFallbackClose(_ subscriptionId: String) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + Self.oneShotFallbackTimeout) { [weak self] in
+            guard let self = self else { return }
+
+            self.subscriptionsLock.lock()
+            let stillOpen = self.activeSubscriptions[subscriptionId] != nil
+            self.subscriptionsLock.unlock()
+            guard stillOpen else { return }
+
+            self.closeSubscription(subscriptionId)
+            self.removeCallback(forSubscriptionId: subscriptionId)
+            print("🧹 NostrSDKClient: Closed one-shot subscription \(subscriptionId.prefix(8))… "
+                  + "(no EOSE within \(Int(Self.oneShotFallbackTimeout))s)")
         }
     }
 

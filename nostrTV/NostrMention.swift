@@ -74,13 +74,48 @@ enum NostrMention {
         return segments
     }
 
-    /// Every pubkey mentioned in the content, deduplicated.
-    static func mentionedPubkeys(in content: String) -> [String] {
+    /// Someone tagged in a message, and where to look for them.
+    struct MentionTarget: Equatable {
+        let pubkey: String
+
+        /// Relay hints carried by an `nprofile` (NIP-19 TLV type 1) — the relays where
+        /// that person's metadata "is more likely to be found". Empty for `npub`, which
+        /// carries no hints at all.
+        let relays: [String]
+    }
+
+    /// Untrusted input: hints arrive inside chat content written by anyone. Cap how many
+    /// relays a single mention can talk us into connecting to.
+    private static let maxRelayHints = 4
+
+    /// Everyone mentioned in the content, deduplicated by pubkey.
+    static func mentionTargets(in content: String) -> [MentionTarget] {
         var seen = Set<String>()
-        return parse(content).compactMap { segment in
-            guard case .mention(let pubkey, _) = segment, seen.insert(pubkey).inserted else { return nil }
-            return pubkey
+        var targets: [MentionTarget] = []
+
+        for case .mention(let pubkey, let identifier) in parse(content)
+        where seen.insert(pubkey).inserted {
+            targets.append(MentionTarget(pubkey: pubkey, relays: relayHints(fromIdentifier: identifier)))
         }
+
+        return targets
+    }
+
+    /// Relay hints from an `nprofile`, filtered to websocket URLs.
+    ///
+    /// The scheme check is not decoration: these strings come from message content, so
+    /// anything that is not a relay URL has no business being handed to the relay pool.
+    static func relayHints(fromIdentifier identifier: String) -> [String] {
+        guard identifier.hasPrefix("nprofile1"),
+              let relays = (try? decoder.decodedMetadata(from: identifier))?.relays else {
+            return []
+        }
+
+        return Array(
+            relays
+                .filter { $0.hasPrefix("wss://") || $0.hasPrefix("ws://") }
+                .prefix(maxRelayHints)
+        )
     }
 
     /// Resolve a bech32 identifier to a hex pubkey, or nil if it does not decode.
