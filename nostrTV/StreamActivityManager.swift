@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import NostrSDK
 
 /// Manages live chat messages and zap receipts for a stream with a single subscription
 /// Uses #a tag filtering to get both kinds in one request
@@ -44,52 +45,104 @@ class StreamActivityManager: ObservableObject {
             return
         }
 
-        self.nostrClient = client
-        self.currentStreamATag = "30311:\(authorPubkey.lowercased()):\(stream.streamID)"
+        let requestedATag = ATag.construct(pubkey: authorPubkey, dTag: stream.streamID)
 
-        // Close any existing subscription first
-        closeSubscription()
+        // Already listening to this exact stream: do nothing.
+        //
+        // This must be a no-op rather than a restart. VideoPlayerView calls this from
+        // onAppear, which fires repeatedly while the player is open — device logs
+        // showed ten distinct chat-zaps subscriptions inside ten minutes. Restarting
+        // tears down the live subscription and clears chatMessages/zapComments, so
+        // arriving messages were wiped every ~30 seconds and chat only ever showed
+        // the batch of stored events fetched right after (re)entering the stream.
+        if subscriptionId != nil, currentStreamATag == requestedATag {
+            print("📺 StreamActivityManager: Already listening to \(stream.streamID); keeping the existing subscription")
+            return
+        }
+
+        // Switching to a different stream: tear the old subscription down first.
+        if subscriptionId != nil {
+            print("📺 StreamActivityManager: Switching streams, stopping previous subscription")
+            stopListening()
+        }
+
+        self.nostrClient = client
+        self.currentStreamATag = requestedATag
+        let aTag = requestedATag
+
+        // Join the stream's own relays before subscribing. Chat (1311) and zap
+        // receipts (9735) are usually published only there, not to our default
+        // relay set, so without this the subscription below matches nothing.
+        if !stream.relays.isEmpty {
+            print("📺 StreamActivityManager: Stream lists \(stream.relays.count) relay(s): \(stream.relays.joined(separator: ", "))")
+            client.addRelays(stream.relays)
+        } else {
+            print("📺 StreamActivityManager: Stream lists no relays; using the default pool only")
+        }
+
+        // Unique per listening session, so an old manager's stopListening cannot
+        // remove a new one's callbacks.
+        //
+        // Do NOT put the a-tag in this ID: NIP-01 caps subscription IDs at 64 chars
+        // and an a-tag is 71 before its d-tag starts, so relays reject the REQ and
+        // no events ever arrive.
+        let uuidSuffix = String(UUID().uuidString.prefix(8))
+        let uniqueSubscriptionId = "chat-zaps-\(uuidSuffix)"
+        assert(uniqueSubscriptionId.count <= 64, "Subscription ID exceeds the NIP-01 64-character limit")
 
         // Clear existing data
         chatMessages = []
         zapComments = []
 
-        // Remove any previous callbacks before adding new ones
-        client.removeActivityCallbacks()
+        // Store the new unique subscription ID and use it consistently for callbacks,
+        // subscription, and cleanup.
+        subscriptionId = uniqueSubscriptionId
 
-        // Set up callbacks for both chat and zaps (array-based, no overwriting)
-        client.addChatReceivedCallback { [weak self] chatComment in
+        // Remove any stale callbacks for this subscription ID before adding new ones.
+        // (Safe no-op if none exist; the unique ID makes collisions impossible.)
+        client.removeActivityCallbacks(forSubscriptionId: uniqueSubscriptionId)
+
+        // Set up callbacks for both chat and zaps, keyed by the unique subscription ID
+        client.addChatReceivedCallback(forSubscriptionId: uniqueSubscriptionId) { [weak self] chatComment in
             Task { @MainActor in
                 self?.handleChatReceived(chatComment)
             }
         }
 
-        client.addZapReceivedCallback { [weak self] zapComment in
+        client.addZapReceivedCallback(forSubscriptionId: uniqueSubscriptionId) { [weak self] zapComment in
             Task { @MainActor in
                 self?.handleZapReceived(zapComment)
             }
         }
 
         // Listen for profile arrivals so the UI updates when profiles load
-        client.addProfileReceivedCallback { [weak self] profile in
+        client.addProfileReceivedCallback(forSubscriptionId: uniqueSubscriptionId) { [weak self] profile in
             Task { @MainActor in
                 self?.handleProfileReceived(profile)
             }
         }
 
-        // Subscribe to both kinds with a single request using the new helper
-        subscriptionId = client.subscribeToChatAndZaps(aTag: currentStreamATag!)
+        // Subscribe to both kinds with a single request using the unique subscription ID
+        guard let filter = Filter(kinds: [1311, 9735], tags: ["a": [aTag]], limit: 100) else {
+            print("❌ StreamActivityManager: Failed to create chat+zaps filter")
+            return
+        }
+        let subId = client.subscribe(with: filter, subscriptionId: uniqueSubscriptionId, purpose: "chat-zaps")
+        subscriptionId = subId
 
         print("📺 StreamActivityManager: Started listening for \(stream.streamID)")
-        print("   aTag: \(currentStreamATag ?? "nil")")
-        print("   subscriptionId: \(subscriptionId ?? "nil")")
+        print("   aTag: \(aTag)")
+        print("   subscriptionId: \(subId)")
     }
 
     /// Stop listening - closes the subscription and clears data
     func stopListening() {
         print("📺 StreamActivityManager: Stopping")
-        closeSubscription()
-        nostrClient?.removeActivityCallbacks()
+        if let subId = subscriptionId {
+            nostrClient?.closeSubscription(subId)
+            nostrClient?.removeCallback(forSubscriptionId: subId)
+        }
+        subscriptionId = nil
         chatMessages = []
         zapComments = []
         currentStreamATag = nil
@@ -117,17 +170,6 @@ class StreamActivityManager: ObservableObject {
 
     // MARK: - Private Methods
 
-    /// Close the current subscription
-    private func closeSubscription() {
-        guard let subId = subscriptionId, let client = nostrClient else {
-            return
-        }
-
-        client.closeSubscription(subId)
-        print("📪 StreamActivityManager: Closed subscription \(subId.prefix(8))...")
-        subscriptionId = nil
-    }
-
     /// Handle a received chat message (kind 1311)
     private func handleChatReceived(_ chatComment: ZapComment) {
         // Validate the message is for our stream
@@ -136,7 +178,7 @@ class StreamActivityManager: ObservableObject {
         }
 
         // Check if this message is for our current stream
-        let normalizedMessageATag = normalizeATag(messageATag)
+        let normalizedMessageATag = ATag.normalize(messageATag)
         guard let ourATag = currentStreamATag, normalizedMessageATag == ourATag else {
             return
         }
@@ -187,7 +229,7 @@ class StreamActivityManager: ObservableObject {
         }
 
         // Check if this zap is for our current stream
-        let normalizedZapATag = normalizeATag(zapATag)
+        let normalizedZapATag = ATag.normalize(zapATag)
         guard let ourATag = currentStreamATag, normalizedZapATag == ourATag else {
             return
         }
@@ -224,20 +266,6 @@ class StreamActivityManager: ObservableObject {
         if isRelevant {
             updateTrigger += 1
         }
-    }
-
-    /// Normalize aTag for consistent comparison
-    private func normalizeATag(_ aTag: String) -> String {
-        let parts = aTag.split(separator: ":", maxSplits: 2)
-        guard parts.count >= 3 else {
-            return aTag.lowercased()
-        }
-
-        let kind = parts[0]
-        let pubkey = parts[1].lowercased()
-        let dTag = parts[2]
-
-        return "\(kind):\(pubkey):\(dTag)"
     }
 }
 

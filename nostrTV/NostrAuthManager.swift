@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import NostrSDK
 
 class NostrAuthManager: ObservableObject {
     @Published var isAuthenticated: Bool = false
@@ -21,12 +22,30 @@ class NostrAuthManager: ObservableObject {
     private var nostrSDKClient: NostrSDKClient
     private let bunkerSessionManager = BunkerSessionManager()
 
-    init() {
-        // Initialize NostrSDKClient
-        do {
-            self.nostrSDKClient = try NostrSDKClient()
-        } catch {
-            fatalError("Failed to initialize NostrSDKClient: \(error)")
+    /// Initialize with an optional shared NostrSDKClient.
+    /// When `nostrSDKClient` is provided, it is used directly so the auth manager
+    /// shares the same relay pool as the rest of the app. If it is nil or creation
+    /// fails, a non-fatal error client is created and an error message is surfaced.
+    init(nostrSDKClient: NostrSDKClient? = nil) {
+        if let client = nostrSDKClient {
+            self.nostrSDKClient = client
+        } else {
+            // Fallback for code paths that still instantiate without injection.
+            // This should not happen at the app level anymore.
+            do {
+                self.nostrSDKClient = try NostrSDKClient()
+            } catch {
+                print("❌ NostrAuthManager: Failed to initialize NostrSDKClient: \(error)")
+                self.nostrSDKClient = NostrSDKClient.errorClient(
+                    message: "Failed to initialize relay pool: \(error.localizedDescription)"
+                )
+                self.errorMessage = "Relay connection unavailable. Please restart the app."
+            }
+        }
+
+        // Surface any pre-existing shared-client initialization error
+        if let initError = self.nostrSDKClient.initError {
+            self.errorMessage = initError.localizedDescription
         }
 
         // Check for bunker session and restore if exists
@@ -41,6 +60,12 @@ class NostrAuthManager: ObservableObject {
             loadCachedProfile()
             isLoadingProfile = false
 
+            // Refresh profile and follow list from the relays. Restoring a session
+            // only rehydrates the cache; without this nothing ever subscribes for the
+            // user's kind 3, so an empty or stale cache left the Following tab blank
+            // until the user logged in again or opened Profile settings.
+            refreshUserDataAfterRestore()
+
             // Reconnect bunker client in background
             Task { @MainActor in
                 await restoreBunkerSession(bunkerSession)
@@ -53,6 +78,22 @@ class NostrAuthManager: ObservableObject {
             isAuthenticated = true
             loadCachedProfile()
             isLoadingProfile = false
+            refreshUserDataAfterRestore()
+        }
+    }
+
+    /// Fetch the user's profile and follow list after restoring a saved session.
+    ///
+    /// Mirrors the login-time path: connect the shared pool first so the subscription
+    /// is not issued against relays that have not begun connecting (Bug #14), then
+    /// fetch. Runs on the next main-loop turn because `init` has not finished yet and
+    /// `fetchUserData` reads `currentUser`.
+    private func refreshUserDataAfterRestore() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            print("🔄 NostrAuthManager: Refreshing profile and follow list after session restore")
+            self.nostrSDKClient.connect()
+            self.fetchUserData(force: true)
         }
     }
 
@@ -61,9 +102,22 @@ class NostrAuthManager: ObservableObject {
 
         do {
             let decoder = JSONDecoder()
-            currentProfile = try decoder.decode(Profile.self, from: profileData)
+            let cached = try decoder.decode(Profile.self, from: profileData)
+
+            // Only accept a cached profile that actually belongs to the signed-in
+            // account. A build that mis-assigned incoming profiles could have
+            // persisted someone else's here, and a stale entry would otherwise
+            // survive indefinitely and keep showing the wrong identity.
+            if let user = currentUser,
+               cached.pubkey.caseInsensitiveCompare(user.hexPubkey) != .orderedSame {
+                print("⚠️ NostrAuthManager: Cached profile belongs to \(cached.pubkey.prefix(8))… but the signed-in user is \(user.hexPubkey.prefix(8))…; discarding it")
+                UserDefaults.standard.removeObject(forKey: "nostrUserProfile")
+            } else {
+                currentProfile = cached
+            }
         } catch {
-            // Failed to decode cached profile
+            print("\u{26A0}\u{FE0F} NostrAuthManager: Failed to decode cached profile, clearing it: \(error.localizedDescription)")
+            UserDefaults.standard.removeObject(forKey: "nostrUserProfile")
         }
 
         // Load follow list
@@ -72,7 +126,8 @@ class NostrAuthManager: ObservableObject {
                 let decoder = JSONDecoder()
                 followList = try decoder.decode([String].self, from: followData)
             } catch {
-                // Failed to decode cached follow list
+                print("\u{26A0}\u{FE0F} NostrAuthManager: Failed to decode cached follow list, clearing it: \(error.localizedDescription)")
+                UserDefaults.standard.removeObject(forKey: "nostrUserFollowList")
             }
         }
     }
@@ -83,7 +138,7 @@ class NostrAuthManager: ObservableObject {
             let data = try encoder.encode(profile)
             UserDefaults.standard.set(data, forKey: "nostrUserProfile")
         } catch {
-            // Failed to encode profile
+            print("\u{26A0}\u{FE0F} NostrAuthManager: Failed to encode profile for cache: \(error.localizedDescription)")
         }
     }
 
@@ -93,9 +148,12 @@ class NostrAuthManager: ObservableObject {
             let data = try encoder.encode(follows)
             UserDefaults.standard.set(data, forKey: "nostrUserFollowList")
         } catch {
-            // Failed to encode follow list
+            print("\u{26A0}\u{FE0F} NostrAuthManager: Failed to encode follow list for cache: \(error.localizedDescription)")
         }
     }
+
+    /// Stable subscription ID for the authenticated user's profile/follow-list data.
+    private static let userDataSubscriptionId = "user-data-auth"
 
     func fetchUserData(force: Bool = false) {
         guard let user = currentUser else { return }
@@ -108,20 +166,41 @@ class NostrAuthManager: ObservableObject {
         isLoadingProfile = true
         errorMessage = nil
 
-        // Setup callback for profile
-        nostrSDKClient.addProfileReceivedCallback { [weak self] profile in
+        // Remove any previous callback for this subscription ID to prevent duplicates
+        nostrSDKClient.removeCallback(forSubscriptionId: Self.userDataSubscriptionId)
+
+        // Setup callback for profile, keyed by subscription ID (replaces, not appends)
+        nostrSDKClient.addProfileReceivedCallback(forSubscriptionId: Self.userDataSubscriptionId) { [weak self] profile in
+            guard let self = self else { return }
+            // Every kind 0 event is delivered to every registered profile callback, and
+            // the app subscribes to profiles for the whole follow list. Without this
+            // check the logged-in identity was reassigned to each arriving profile in
+            // turn — the account appeared to cycle through the people it follows.
+            guard profile.pubkey.caseInsensitiveCompare(user.hexPubkey) == .orderedSame else {
+                return
+            }
             DispatchQueue.main.async {
-                self?.currentProfile = profile
-                self?.isLoadingProfile = false
-                self?.saveProfileToCache(profile)
+                self.currentProfile = profile
+                self.isLoadingProfile = false
+                self.saveProfileToCache(profile)
             }
         }
 
-        // Setup callback for follow list
-        nostrSDKClient.onFollowListReceived = { [weak self] follows in
+        // Setup callback for follow list, keyed by the same subscription ID so it
+        // is delivered when this subscription's kind-3 events arrive. Using the
+        // keyed API prevents StreamViewModel (or any other component) from
+        // overwriting this handler via the legacy `onFollowListReceived` property.
+        nostrSDKClient.addFollowListReceivedCallback(forSubscriptionId: Self.userDataSubscriptionId) { [weak self] authorPubkey, follows in
+            guard let self = self else { return }
+            // Kind 3 events for other pubkeys — notably the admin's, fetched at startup
+            // for the Curated tab — arrive on this same dispatch. Adopting one of those
+            // would silently replace the user's follow list, and cache it.
+            guard authorPubkey.caseInsensitiveCompare(user.hexPubkey) == .orderedSame else {
+                return
+            }
             DispatchQueue.main.async {
-                self?.followList = follows
-                self?.saveFollowListToCache(follows)
+                self.followList = follows
+                self.saveFollowListToCache(follows)
             }
         }
 
@@ -134,8 +213,26 @@ class NostrAuthManager: ObservableObject {
             }
         }
 
-        // Connect and fetch
-        nostrSDKClient.connectAndFetchUserData(pubkey: user.hexPubkey)
+        // Subscribe to user data on the shared client using the SAME subscription
+        // ID as the callbacks above. This is the Bug #14 fix: previously
+        // `subscribeToUserData(pubkey:)` generated a random UUID subscription ID,
+        // so the callback (keyed to `userDataSubscriptionId`) and the subscription
+        // were on different keys — the callback fired for every profile event but
+        // there was no guarantee a subscription for *this* pubkey was active when
+        // `authenticateWithBunker` completed. By making the subscription ID
+        // deterministic and equal to the callback key, the subscription and
+        // callback are linked: when the subscription fires, the callback receives
+        // the event.
+        guard let filter = Filter(authors: [user.hexPubkey], kinds: [0, 3], limit: 2) else {
+            print("❌ NostrAuthManager: Failed to create user data filter for \(user.hexPubkey.prefix(16))...")
+            isLoadingProfile = false
+            errorMessage = "Failed to load profile. Using cached data if available."
+            return
+        }
+        nostrSDKClient.connect()
+        nostrSDKClient.subscribe(with: filter,
+                                 subscriptionId: Self.userDataSubscriptionId,
+                                 purpose: "user-data-auth")
     }
 
     func login() {
@@ -172,7 +269,14 @@ class NostrAuthManager: ObservableObject {
         // Update user session
         currentUser = UserSession(nip05: "bunker:\(bunkerPubkey.prefix(8))...", hexPubkey: userPubkey)
 
-        // Fetch profile data
+        // Ensure the shared relay pool is connecting before we subscribe for the
+        // user's profile/follow list. Without this, `fetchUserData` may issue a
+        // subscription on a client whose relays have not started connecting yet,
+        // and the profile event can be missed until an app restart (Bug #14).
+        nostrSDKClient.connect()
+
+        // Fetch profile data — now deterministic: the subscription is created with
+        // `userDataSubscriptionId` as both the subscription ID and callback key.
         isLoadingProfile = true
         fetchUserData(force: true)
 
@@ -252,14 +356,23 @@ class NostrAuthManager: ObservableObject {
         authMethod = nil
         errorMessage = nil
 
-        // Disconnect client
-        nostrSDKClient.disconnect()
+        // Retire only this manager's own subscription and callbacks.
+        //
+        // Deliberately does NOT call nostrSDKClient.disconnect(): that client is
+        // the shared app-level relay pool, also serving stream discovery, chat and
+        // zaps. Disconnecting it is unrecoverable without an app restart — it stops
+        // the heartbeat (so nothing triggers a reconnect), clears `cancellables`
+        // (and setupEventStream() only runs from init, so events stop being
+        // processed), and empties `activeSubscriptions` (so resubscribe has no
+        // filters to replay). Logging out must not take the whole app offline.
+        nostrSDKClient.closeSubscription(Self.userDataSubscriptionId)
+        nostrSDKClient.removeCallback(forSubscriptionId: Self.userDataSubscriptionId)
     }
 
     // MARK: - Event Signing
 
     /// Sign a Nostr event using the active auth method
-    func signEvent(_ event: NostrEvent) async throws -> NostrEvent {
+    func signEvent(_ event: LegacyNostrEvent) async throws -> LegacyNostrEvent {
         switch authMethod {
         case .bunker:
             guard let bunkerClient = bunkerClient else {

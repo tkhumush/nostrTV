@@ -63,7 +63,7 @@ class ZapRequestGenerator {
         // Add event coordinate (a tag) for kind 30311 live streaming events
         // Format: 30311:<author-pubkey>:<d-tag>
         if let recipientPubkey = stream.pubkey {
-            tags.append(["a", "30311:\(recipientPubkey):\(stream.streamID)"])
+            tags.append(["a", ATag.construct(pubkey: recipientPubkey, dTag: stream.streamID)])
         }
 
         // Add kind tag (k tag) to reference the kind of event being zapped
@@ -74,7 +74,7 @@ class ZapRequestGenerator {
         }
 
         // Create unsigned event
-        let unsignedEvent = NostrEvent(
+        let unsignedEvent = LegacyNostrEvent(
             kind: 9734,
             tags: tags,
             id: nil,

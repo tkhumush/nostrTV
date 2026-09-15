@@ -35,6 +35,45 @@ struct CuratedLoadingView: View {
 }
 
 /// Empty state view for Following tab when user is not logged in
+/// Shown on the Following tab when the user is logged in but the list is empty.
+///
+/// An empty list previously rendered as a completely blank page, which made three
+/// very different situations indistinguishable — the follow list never loading, the
+/// follow list loading fine with nobody currently streaming, and the filter being
+/// broken. This states which one it is.
+struct FollowingNoStreamsView: View {
+    /// Number of pubkeys in the user's kind 3 follow list.
+    let followCount: Int
+
+    private var isFollowListMissing: Bool { followCount == 0 }
+
+    var body: some View {
+        VStack(spacing: 30) {
+            Spacer()
+
+            Image(systemName: isFollowListMissing ? "person.crop.circle.badge.questionmark" : "moon.zzz.fill")
+                .font(.system(size: 100))
+                .foregroundColor(.coveAccent.opacity(0.6))
+
+            Text(isFollowListMissing ? "Your follow list hasn't loaded" : "Nobody you follow is live")
+                .font(.coveSubheading)
+                .foregroundColor(.white)
+
+            Text(isFollowListMissing
+                 ? "We couldn't read your follow list from the relays. Check your connection, or open Profile to retry."
+                 : "You're following \(followCount) \(followCount == 1 ? "person" : "people"). None of them are streaming right now — check back later.")
+                .font(.coveBody)
+                .foregroundColor(.coveSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 80)
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.coveBackground)
+    }
+}
+
 struct FollowingEmptyStateView: View {
     let onLoginTap: () -> Void
 
@@ -445,9 +484,18 @@ struct ContentView: View {
     @State private var showProfilePage = true  // Kept for ProfileSettingsView binding
     @State private var showLoginSheet = false
 
-    init() {
-        let vm = StreamViewModel()
-        _viewModel = StateObject(wrappedValue: vm)
+    /// The shared NostrSDKClient created at the app level.
+    /// ContentView passes it into StreamViewModel and forwards it to any child
+    /// views/managers that need relay access (VideoPlayerView, LiveActivityManager, etc.).
+    private let nostrSDKClient: NostrSDKClient
+
+    init(nostrSDKClient: NostrSDKClient) {
+        self.nostrSDKClient = nostrSDKClient
+        // Construct inside the autoclosure. Assigning to a local first defeats
+        // StateObject's laziness: SwiftUI re-initializes View structs freely, so a
+        // new view model would be built on every init — and each one registers
+        // callbacks on the shared client, letting a discarded instance win.
+        _viewModel = StateObject(wrappedValue: StreamViewModel(nostrSDKClient: nostrSDKClient))
     }
 
     var body: some View {
@@ -500,38 +548,42 @@ struct ContentView: View {
                 // Following tab
                 NavigationView {
                     if authManager.isAuthenticated {
-                        StreamListView(
-                            viewModel: viewModel,
-                            categorizedStreams: viewModel.categorizedStreams,
-                            featuredStream: viewModel.featuredStream
-                        ) { url, lightningAddress, selectedStream in
-                            let player = AVPlayer(url: url)
-                            self.player = player
-                            self.selectedLightningAddress = lightningAddress
+                        if viewModel.categorizedStreams.isEmpty && viewModel.featuredStream == nil {
+                            FollowingNoStreamsView(followCount: viewModel.followListCount)
+                        } else {
+                            StreamListView(
+                                viewModel: viewModel,
+                                categorizedStreams: viewModel.categorizedStreams,
+                                featuredStream: viewModel.featuredStream
+                            ) { url, lightningAddress, selectedStream in
+                                let player = AVPlayer(url: url)
+                                self.player = player
+                                self.selectedLightningAddress = lightningAddress
 
-                            // Attach profile to stream before passing to VideoPlayerView
-                            var streamWithProfile = selectedStream
-                            if let pubkey = selectedStream.pubkey, let profile = viewModel.getProfile(for: pubkey) {
-                                streamWithProfile = Stream(
-                                    streamID: selectedStream.streamID,
-                                    eventID: selectedStream.eventID,
-                                    title: selectedStream.title,
-                                    streaming_url: selectedStream.streaming_url,
-                                    imageURL: selectedStream.imageURL,
-                                    pubkey: selectedStream.pubkey,
-                                    eventAuthorPubkey: selectedStream.eventAuthorPubkey,
-                                    profile: profile,
-                                    status: selectedStream.status,
-                                    tags: selectedStream.tags,
-                                    createdAt: selectedStream.createdAt,
-                                    viewerCount: selectedStream.viewerCount,
-                                    recording: selectedStream.recording,
-                                    startsAt: selectedStream.startsAt
-                                )
+                                // Attach profile to stream before passing to VideoPlayerView
+                                var streamWithProfile = selectedStream
+                                if let pubkey = selectedStream.pubkey, let profile = viewModel.getProfile(for: pubkey) {
+                                    streamWithProfile = Stream(
+                                        streamID: selectedStream.streamID,
+                                        eventID: selectedStream.eventID,
+                                        title: selectedStream.title,
+                                        streaming_url: selectedStream.streaming_url,
+                                        imageURL: selectedStream.imageURL,
+                                        pubkey: selectedStream.pubkey,
+                                        eventAuthorPubkey: selectedStream.eventAuthorPubkey,
+                                        profile: profile,
+                                        status: selectedStream.status,
+                                        tags: selectedStream.tags,
+                                        createdAt: selectedStream.createdAt,
+                                        viewerCount: selectedStream.viewerCount,
+                                        recording: selectedStream.recording,
+                                        startsAt: selectedStream.startsAt
+                                    )
+                                }
+
+                                self.selectedStream = streamWithProfile
+                                self.showPlayer = true
                             }
-
-                            self.selectedStream = streamWithProfile
-                            self.showPlayer = true
                         }
                     } else {
                         FollowingEmptyStateView(onLoginTap: {
@@ -553,7 +605,7 @@ struct ContentView: View {
         .ignoresSafeArea()
         .fullScreenCover(isPresented: $showPlayer) {
             if let player = player {
-                VideoPlayerView(player: player, lightningAddress: selectedLightningAddress, stream: selectedStream, nostrSDKClient: viewModel.sdkClient, authManager: authManager)
+                VideoPlayerView(player: player, lightningAddress: selectedLightningAddress, stream: selectedStream, nostrSDKClient: nostrSDKClient, authManager: authManager)
                     .ignoresSafeArea()
             }
         }

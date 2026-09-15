@@ -12,7 +12,14 @@ class StreamViewModel: ObservableObject {
     @Published var isLoadingAdminFollowList: Bool = true // Track if we're loading the admin follow list
     @Published var isInitialLoad: Bool = true // Track if this is the initial load (no streams received yet)
 
-    private var nostrSDKClient: NostrSDKClient
+    /// Size of the user's kind 3 follow list. Surfaced so the Following tab can tell
+    /// "your follow list never loaded" apart from "nobody you follow is live".
+    @Published private(set) var followListCount: Int = 0
+
+    // Shared NostrSDKClient injected from the app level. Exposed internally so
+    // ContentView/VideoPlayerView can pass the same instance to other managers.
+    let sdkClient: NostrSDKClient
+
     private var followList: Set<String> = [] // User follow list - Use Set for O(1) lookups
     private var adminFollowList: Set<String> = [] // Admin follow list for Discover tab
     private var deletedStreamAddresses: Set<String> = [] // Tracks kind 5 deletions
@@ -22,6 +29,21 @@ class StreamViewModel: ObservableObject {
     private var profilesSubscriptionId: String? // kind 0 - filtered by authors, limit 30
     private var streamsSubscriptionId: String?  // kind 30311 - unfiltered, pipeline handles filtering
     private var deletionsSubscriptionId: String? // kind 5 - stream deletion events
+
+    /// kind 30311 subscriptions scoped to the user's follow list (by author and by p-tag).
+    ///
+    /// The unfiltered subscription above asks for the most recent streams globally, so a
+    /// followed stream only appears if it happens to land in that window. These ask the
+    /// relays directly for streams belonging to people the user follows, so the Following
+    /// tab does not compete with global volume.
+    private var followingStreamsSubscriptionIds: [String] = []
+
+    /// Pubkeys per follow-list subscription.
+    ///
+    /// Follow lists routinely run to hundreds or thousands of entries, and relays impose
+    /// their own limits on filter size — rejecting an over-large REQ silently, exactly
+    /// like the NIP-01 subscription ID limit did. Chunking keeps each filter modest.
+    private let followFilterChunkSize = 200
 
     // Stream collection size limit to prevent unbounded memory growth
     private let maxStreamCount = 200
@@ -57,11 +79,6 @@ class StreamViewModel: ObservableObject {
         return AdminConfig.primaryAdmin
     }
 
-    /// Expose the NostrSDKClient for use by other components
-    var sdkClient: NostrSDKClient {
-        return nostrSDKClient
-    }
-
     /// Get the featured stream for Following tab (live stream with most viewers from pipeline-filtered streams)
     var featuredStream: Stream? {
         let liveStreams = categorizedStreams.flatMap { $0.streams }.filter { $0.isLive }
@@ -74,16 +91,27 @@ class StreamViewModel: ObservableObject {
         return liveStreams.max(by: { $0.viewerCount < $1.viewerCount })
     }
 
-    init() {
+    /// Initialize with an optional shared NostrSDKClient.
+    /// When `nostrSDKClient` is provided, it is used directly so stream discovery
+    /// shares the same relay pool as auth/chat/zaps. If it is nil or creation fails,
+    /// a non-fatal error client is created and subscriptions are skipped.
+    init(nostrSDKClient: NostrSDKClient? = nil) {
         print("🚀 StreamViewModel: Initializing...")
-        // Initialize NostrSDKClient
-        do {
-            print("🔧 StreamViewModel: Creating NostrSDKClient...")
-            self.nostrSDKClient = try NostrSDKClient()
-            print("✅ StreamViewModel: NostrSDKClient created successfully")
-        } catch {
-            print("❌ StreamViewModel: Failed to initialize NostrSDKClient: \(error)")
-            fatalError("Failed to initialize NostrSDKClient: \(error)")
+
+        if let client = nostrSDKClient {
+            self.sdkClient = client
+        } else {
+            // Fallback for code paths that still instantiate without injection.
+            do {
+                print("🔧 StreamViewModel: Creating NostrSDKClient...")
+                self.sdkClient = try NostrSDKClient()
+                print("✅ StreamViewModel: NostrSDKClient created successfully")
+            } catch {
+                print("❌ StreamViewModel: Failed to initialize NostrSDKClient: \(error)")
+                self.sdkClient = NostrSDKClient.errorClient(
+                    message: "Failed to initialize relay pool: \(error.localizedDescription)"
+                )
+            }
         }
 
         setupCallbacks()
@@ -99,11 +127,9 @@ class StreamViewModel: ObservableObject {
         startSubscriptions()
     }
 
-    // MARK: - Callback Setup
-
     private func setupCallbacks() {
         // Handle incoming streams — NIP-33 dedup (eventAuthorPubkey + d-tag)
-        nostrSDKClient.onStreamReceived = { [weak self] stream in
+        sdkClient.onStreamReceived = { [weak self] stream in
             DispatchQueue.main.async {
                 guard let self = self else { return }
 
@@ -131,7 +157,9 @@ class StreamViewModel: ObservableObject {
                     let existingDate = existingStream.createdAt ?? Date.distantPast
 
                     if newDate > existingDate {
-                        self.streams[existingIndex] = stream
+                        // Merge rather than replace: a republished event that omits a
+                        // tag would otherwise blank out what we are already showing.
+                        self.streams[existingIndex] = stream.preservingDisplayFields(from: existingStream)
                     }
                 } else {
                     self.streams.append(stream)
@@ -145,7 +173,7 @@ class StreamViewModel: ObservableObject {
         }
 
         // Handle deletion events (kind 5) targeting live streams
-        nostrSDKClient.onDeletionReceived = { [weak self] addresses in
+        sdkClient.onDeletionReceived = { [weak self] addresses in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.deletedStreamAddresses.formUnion(addresses)
@@ -155,10 +183,16 @@ class StreamViewModel: ObservableObject {
             }
         }
 
-        // Handle follow list received (for admin follow list fetch)
-        nostrSDKClient.onFollowListReceived = { [weak self] follows in
+        // Handle follow list received (for admin follow list fetch).
+        // Kind 3 events for other pubkeys — notably the logged-in user's, fetched by
+        // NostrAuthManager — arrive on this same callback, so accept only the admin's.
+        sdkClient.onFollowListReceived = { [weak self] authorPubkey, follows in
+            guard let self = self else { return }
+            guard authorPubkey.caseInsensitiveCompare(self.adminPubkey) == .orderedSame else {
+                return
+            }
             DispatchQueue.main.async {
-                self?.handleAdminFollowListReceived(follows)
+                self.handleAdminFollowListReceived(follows)
             }
         }
     }
@@ -167,7 +201,16 @@ class StreamViewModel: ObservableObject {
 
     private func startSubscriptions() {
         print("🔧 StreamViewModel: Starting subscriptions...")
-        nostrSDKClient.connect()
+
+        // Skip subscriptions if the shared client failed to initialize
+        guard sdkClient.initError == nil else {
+            print("⚠️ StreamViewModel: Shared NostrSDKClient is in error state, skipping subscriptions")
+            isLoadingAdminFollowList = false
+            isInitialLoad = false
+            return
+        }
+
+        sdkClient.connect()
 
         // Wait for relay connections to establish
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
@@ -177,7 +220,7 @@ class StreamViewModel: ObservableObject {
             self.createStreamsSubscription()
 
             // Subscribe to deletion events (kind 5 targeting 30311)
-            self.deletionsSubscriptionId = self.nostrSDKClient.subscribeToDeletions()
+            self.deletionsSubscriptionId = self.sdkClient.subscribeToDeletions()
 
             // If we have cached admin follow list, create profiles subscription
             if !self.adminFollowList.isEmpty {
@@ -202,15 +245,49 @@ class StreamViewModel: ObservableObject {
         // Close existing subscription if any
         if let existingSubId = streamsSubscriptionId {
             print("📪 Closing existing streams subscription: \(existingSubId.prefix(8))...")
-            nostrSDKClient.closeSubscription(existingSubId)
+            sdkClient.closeSubscription(existingSubId)
             streamsSubscriptionId = nil
         }
 
-        streamsSubscriptionId = nostrSDKClient.subscribeToStreams(limit: 50)
+        streamsSubscriptionId = sdkClient.subscribeToStreams(limit: 50)
         print("✅ Created unfiltered streams subscription: \(streamsSubscriptionId?.prefix(8) ?? "nil")")
     }
 
     /// Create profiles subscription (kind 0) filtered by author list
+    /// Subscribe to kind 30311 events belonging to the user's follow list.
+    ///
+    /// Two filters per chunk, mirroring the host-or-author match the Following tab
+    /// applies locally: `authors` catches streams a followed user published, and `#p`
+    /// catches streams that tag a followed user as host or participant but were
+    /// published by someone else.
+    private func createFollowingStreamsSubscriptions() {
+        // Close any previous follow-list subscriptions first
+        for subId in followingStreamsSubscriptionIds {
+            print("📪 Closing following-streams subscription: \(subId.prefix(8))...")
+            sdkClient.closeSubscription(subId)
+        }
+        followingStreamsSubscriptionIds = []
+
+        guard !followList.isEmpty else {
+            print("ℹ️ No follow list; skipping follow-list stream subscriptions")
+            return
+        }
+
+        let pubkeys = Array(followList)
+        for chunkStart in stride(from: 0, to: pubkeys.count, by: followFilterChunkSize) {
+            let chunk = Array(pubkeys[chunkStart..<min(chunkStart + followFilterChunkSize, pubkeys.count)])
+
+            if let authorSubId = sdkClient.subscribeToStreams(authors: chunk, limit: 100) {
+                followingStreamsSubscriptionIds.append(authorSubId)
+            }
+            if let participantSubId = sdkClient.subscribeToStreams(participants: chunk, limit: 100) {
+                followingStreamsSubscriptionIds.append(participantSubId)
+            }
+        }
+
+        print("✅ Created \(followingStreamsSubscriptionIds.count) follow-list stream subscription(s) for \(pubkeys.count) pubkeys")
+    }
+
     private func createProfilesSubscription(authors: [String]) {
         guard !authors.isEmpty else {
             print("⚠️ Cannot create profiles subscription with empty author list")
@@ -220,12 +297,12 @@ class StreamViewModel: ObservableObject {
         // Close existing subscription if any
         if let existingSubId = profilesSubscriptionId {
             print("📪 Closing existing profiles subscription: \(existingSubId.prefix(8))...")
-            nostrSDKClient.closeSubscription(existingSubId)
+            sdkClient.closeSubscription(existingSubId)
             profilesSubscriptionId = nil
         }
 
         // Profiles subscription - limit 30
-        profilesSubscriptionId = nostrSDKClient.subscribeToProfiles(authors: authors)
+        profilesSubscriptionId = sdkClient.subscribeToProfiles(authors: authors)
         print("✅ Created profiles subscription for \(authors.count) authors: \(profilesSubscriptionId?.prefix(8) ?? "nil")")
     }
 
@@ -234,7 +311,7 @@ class StreamViewModel: ObservableObject {
         print("🔧 Fetching admin follow list from primary admin...")
 
         // Subscribe to admin's follow list
-        adminFollowSubscriptionId = nostrSDKClient.subscribeToFollowList(for: adminPubkey)
+        adminFollowSubscriptionId = sdkClient.subscribeToFollowList(for: adminPubkey)
         print("✅ Subscribed to admin follow list: \(adminFollowSubscriptionId?.prefix(8) ?? "nil")")
 
         // Set a timeout to stop loading after 30 seconds if fetch fails
@@ -254,12 +331,13 @@ class StreamViewModel: ObservableObject {
         // Close the admin follow list subscription - we only need it once
         if let subId = adminFollowSubscriptionId {
             print("📪 Closing admin follow list subscription (received data): \(subId.prefix(8))...")
-            nostrSDKClient.closeSubscription(subId)
+            sdkClient.closeSubscription(subId)
             adminFollowSubscriptionId = nil
         }
 
         // Update admin follow list
-        adminFollowList = Set(follows)
+        // Hex pubkeys are case-insensitive; normalize so comparisons cannot miss.
+        adminFollowList = Set(follows.map { $0.lowercased() })
         isLoadingAdminFollowList = false
         saveAdminFollowListToCache(follows)
 
@@ -277,7 +355,9 @@ class StreamViewModel: ObservableObject {
     /// Update user follow list (called when user logs in)
     func updateFollowList(_ newFollowList: [String]) {
         let previousFollowList = followList
-        followList = Set(newFollowList)
+        // Hex pubkeys are case-insensitive; normalize so comparisons cannot miss.
+        followList = Set(newFollowList.map { $0.lowercased() })
+        followListCount = followList.count
 
         print("🔧 User follow list updated: \(newFollowList.count) users")
 
@@ -285,6 +365,12 @@ class StreamViewModel: ObservableObject {
         if followList != previousFollowList && !followList.isEmpty {
             let combinedAuthors = getCombinedAuthorList()
             createProfilesSubscription(authors: combinedAuthors)
+        }
+
+        // Ask the relays directly for streams from the follow list. Rebuild whenever the
+        // list changes, including when it empties on logout (which tears these down).
+        if followList != previousFollowList {
+            createFollowingStreamsSubscriptions()
         }
 
         // Re-categorize streams with new follow filter
@@ -301,18 +387,25 @@ class StreamViewModel: ObservableObject {
     deinit {
         // Close all active subscriptions
         if let subId = profilesSubscriptionId {
-            nostrSDKClient.closeSubscription(subId)
+            sdkClient.closeSubscription(subId)
         }
         if let subId = streamsSubscriptionId {
-            nostrSDKClient.closeSubscription(subId)
+            sdkClient.closeSubscription(subId)
         }
         if let subId = adminFollowSubscriptionId {
-            nostrSDKClient.closeSubscription(subId)
+            sdkClient.closeSubscription(subId)
         }
         if let subId = deletionsSubscriptionId {
-            nostrSDKClient.closeSubscription(subId)
+            sdkClient.closeSubscription(subId)
         }
-        nostrSDKClient.disconnect()
+        for subId in followingStreamsSubscriptionIds {
+            sdkClient.closeSubscription(subId)
+        }
+        // Deliberately does NOT call sdkClient.disconnect(): the client is the
+        // shared app-level relay pool and outlives this view model. Disconnecting
+        // it here would permanently stop events for auth, chat and zaps too (see
+        // the note in NostrAuthManager.logout). Closing our own subscriptions
+        // above is the correct scope of cleanup.
     }
 
     // MARK: - Stream Management
@@ -368,7 +461,7 @@ class StreamViewModel: ObservableObject {
     }
 
     func getProfile(for pubkey: String) -> Profile? {
-        return nostrSDKClient.getProfile(for: pubkey)
+        return sdkClient.getProfile(for: pubkey)
     }
 
     private func updateCategorizedStreams() {
@@ -402,7 +495,7 @@ class StreamViewModel: ObservableObject {
         let pubkeys = cleanBase.compactMap { $0.pubkey }
         let uniquePubkeys = Array(Set(pubkeys))
         if !uniquePubkeys.isEmpty {
-            nostrSDKClient.requestProfiles(for: uniquePubkeys)
+            sdkClient.requestProfiles(for: uniquePubkeys)
         }
 
         // === SPLIT INTO TABS ===
@@ -412,24 +505,61 @@ class StreamViewModel: ObservableObject {
         if !adminFollowList.isEmpty {
             discoverStreams = cleanBase.filter { stream in
                 guard let pubkey = stream.pubkey else { return false }
-                return adminFollowList.contains(pubkey)
+                return adminFollowList.contains(pubkey.lowercased())
             }
         } else {
             discoverStreams = []
         }
         self.allCategorizedStreams = categorizeStreams(discoverStreams)
 
-        // Following: filter by user follow list
+        // Following: filter by user follow list.
+        //
+        // Match either the host (p-tag participant marked Host) or the event author.
+        // Streams published by the host directly carry no p tag, so the host identity
+        // lives in eventAuthorPubkey; streams published on someone's behalf carry both.
+        // Checking only one field silently hid followed streams of the other shape.
         let followingStreams: [Stream]
         if !followList.isEmpty {
             followingStreams = cleanBase.filter { stream in
-                guard let pubkey = stream.pubkey else { return false }
-                return followList.contains(pubkey)
+                if let hostPubkey = stream.pubkey, followList.contains(hostPubkey.lowercased()) {
+                    return true
+                }
+                if let authorPubkey = stream.eventAuthorPubkey, followList.contains(authorPubkey.lowercased()) {
+                    return true
+                }
+                return false
             }
         } else {
             followingStreams = []
         }
         self.categorizedStreams = categorizeStreams(followingStreams)
+
+        logFollowingDiagnostic(followed: followList.count,
+                               candidates: cleanBase.count,
+                               matched: followingStreams.count,
+                               candidateStreams: cleanBase)
+    }
+
+    /// Last reported (followed, candidates, matched) counts, so the Following
+    /// diagnostic is emitted only when the outcome actually changes.
+    /// updateCategorizedStreams runs on every incoming stream event, so logging
+    /// unconditionally floods the console during the initial burst.
+    private var lastFollowingDiagnostic: (followed: Int, candidates: Int, matched: Int)?
+
+    /// Report why the Following tab looks the way it does. A blank tab has several
+    /// possible causes that are indistinguishable from the UI alone.
+    private func logFollowingDiagnostic(followed: Int, candidates: Int, matched: Int, candidateStreams: [Stream]) {
+        let current = (followed: followed, candidates: candidates, matched: matched)
+        guard lastFollowingDiagnostic == nil || lastFollowingDiagnostic! != current else { return }
+        lastFollowingDiagnostic = current
+
+        print("👥 Following: \(followed) followed pubkey(s), \(candidates) candidate stream(s) → \(matched) match(es)")
+
+        if matched == 0 && followed > 0 && candidates > 0 {
+            let authors = Set(candidateStreams.compactMap { $0.eventAuthorPubkey })
+            let hosts = Set(candidateStreams.compactMap { $0.pubkey })
+            print("👥 Following: no overlap between the follow list and the \(authors.count) author(s) / \(hosts.count) host(s) currently streaming")
+        }
     }
 
     private func categorizeStreams(_ streamList: [Stream]) -> [StreamCategory] {
@@ -499,7 +629,7 @@ class StreamViewModel: ObservableObject {
             do {
                 let decoder = JSONDecoder()
                 let cachedList = try decoder.decode([String].self, from: cachedData)
-                adminFollowList = Set(cachedList)
+                adminFollowList = Set(cachedList.map { $0.lowercased() })
                 isLoadingAdminFollowList = false // Cache loaded, no longer loading
                 print("✅ Loaded cached admin follow list with \(cachedList.count) users (age: \(Int(cacheAge/60)) minutes)")
 
