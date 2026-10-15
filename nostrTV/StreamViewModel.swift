@@ -53,13 +53,10 @@ class StreamViewModel: ObservableObject {
     /// Maximum age for stream events (24 hours)
     private static let maxStreamAgeSeconds: TimeInterval = 24 * 60 * 60
 
-    /// Check if a URL is a playable stream URL (matches zap.stream's canPlayUrl)
+    /// Keep recognized broadcasts discoverable, including those whose format
+    /// needs an explanation rather than an AVPlayer failure on selection.
     private static func canPlayURL(_ url: String) -> Bool {
-        guard !url.isEmpty,
-              !url.contains("localhost"),
-              !url.contains("127.0.0.1"),
-              let components = URLComponents(string: url) else { return false }
-        return components.path.contains(".m3u8") || components.scheme == "moq"
+        StreamPlayback.isDiscoverable(url)
     }
 
     /// Check if a stream has any playable URL (streaming or recording)
@@ -484,7 +481,7 @@ class StreamViewModel: ObservableObject {
         // Step 1: Age filter — discard events older than 24 hours
         let ageFiltered = streams.filter { Self.isWithinAgeWindow($0) }
 
-        // Step 2: Playability filter — must have valid .m3u8 or moq: URL
+        // Step 2: Keep recognized media sources; selection explains unsupported transports.
         let playable = ageFiltered.filter { Self.canPlayStream($0) }
 
         // Step 3: Remove deleted streams (kind 5)

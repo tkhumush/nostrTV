@@ -52,7 +52,9 @@ struct VideoPlayerView: View {
                         .accessibilityHidden(surface != .playbackOptions)
                         if surface == .cinema {
                             Button { revealControls() } label: { Color.black.opacity(0.001).contentShape(Rectangle()) }
-                                .buttonStyle(.plain).focused($focusedControl, equals: .cinemaSurface)
+                                .buttonStyle(CinemaSurfaceStyle())
+                                .focused($focusedControl, equals: .cinemaSurface)
+                                .focusEffectDisabled()
                                 .accessibilityLabel("Show player controls")
                                 .accessibilityIdentifier("cinema-surface")
                                 .onMoveCommand { _ in revealControls() }
@@ -243,6 +245,12 @@ struct VideoPlayerView: View {
             isSending = false
         }
     }
+}
+
+/// Even `.plain` paints a focus highlight on tvOS. This remote target must
+/// receive Select/Back/directional input without adding anything over the movie.
+private struct CinemaSurfaceStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { configuration.label }
 }
 
 /// Keep playback state in sync with remote commands and AVPlayer buffering.

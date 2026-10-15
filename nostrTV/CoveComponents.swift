@@ -47,10 +47,11 @@ struct CoveAvatar: View {
 }
 
 struct CoveArtwork: View {
-    let url: String?
+    let urls: [URL]
+    let streamID: String
     var body: some View {
         GeometryReader { geometry in
-            CachedAsyncImage(url: URL(string: url ?? "")) { image in
+            CachedAsyncImage(urls: urls, preserveImageFor: streamID) { image in
                 image.resizable().scaledToFill()
             } placeholder: {
                 ZStack {

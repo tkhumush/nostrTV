@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 final class CoveNavigationTests: XCTestCase {
     @MainActor
@@ -38,6 +39,12 @@ final class CoveNavigationTests: XCTestCase {
         XCTAssertTrue(app.buttons["cinema-surface"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["In good company"].exists)
         XCTAssertTrue(app.buttons["cinema-surface"].hasFocus)
+        let cinemaScreenshot = app.screenshot()
+        let cinemaImage = XCTAttachment(screenshot: cinemaScreenshot)
+        cinemaImage.name = "Cove Cinema"
+        cinemaImage.lifetime = .keepAlways
+        add(cinemaImage)
+        assertUntintedVideo(cinemaScreenshot.image)
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(cinema.waitForExistence(timeout: 5))
         XCTAssertTrue(cinema.hasFocus)
@@ -78,5 +85,23 @@ final class CoveNavigationTests: XCTestCase {
             XCUIRemote.shared.press(direction)
         }
         XCTAssertTrue(element.hasFocus, "Remote navigation should reach \(element.identifier)")
+    }
+
+    /// The offline player is black. A standard tvOS button focus fill over the
+    /// cinema surface turns this gray even though the button label is clear.
+    private func assertUntintedVideo(_ image: UIImage) {
+        guard let source = image.cgImage else { return XCTFail("Missing screenshot pixels") }
+        var pixels = [UInt8](repeating: 0, count: 8 * 8 * 4)
+        pixels.withUnsafeMutableBytes { buffer in
+            let context = CGContext(data: buffer.baseAddress, width: 8, height: 8, bitsPerComponent: 8,
+                bytesPerRow: 8 * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.draw(source, in: CGRect(x: 0, y: 0, width: 8, height: 8))
+        }
+        for (x, y) in [(2, 2), (5, 2), (2, 5), (5, 5)] {
+            let offset = (y * 8 + x) * 4
+            XCTAssertLessThan(pixels[offset..<offset + 3].max()!, 12,
+                "Cinema must not paint a focus tint over the video")
+        }
     }
 }

@@ -41,6 +41,7 @@ struct Stream: Identifiable, Codable, Equatable {
     /// relays. Without connecting to them the chat subscription is well-formed but
     /// returns nothing. Defaults to empty for streams that omit the tag.
     var relays: [String] = []
+    var thumbnailURL: String? = nil
 
     /// Matches the NIP-33 dedup key StreamViewModel uses (`eventAuthorPubkey` + `d`
     /// tag).
@@ -61,7 +62,11 @@ struct Stream: Identifiable, Codable, Equatable {
                streaming_url: streaming_url, imageURL: imageURL, pubkey: pubkey,
                eventAuthorPubkey: eventAuthorPubkey, profile: profile ?? self.profile,
                status: status, tags: tags, createdAt: createdAt, viewerCount: viewerCount,
-               recording: recording, startsAt: startsAt, relays: relays)
+               recording: recording, startsAt: startsAt, relays: relays, thumbnailURL: thumbnailURL)
+    }
+
+    func artworkURLs(profile: Profile?) -> [URL] {
+        ArtworkSource.urls([imageURL, thumbnailURL, (profile ?? self.profile)?.picture])
     }
 
     /// Carry forward display fields this event did not supply.
@@ -74,9 +79,9 @@ struct Stream: Identifiable, Codable, Equatable {
     ///
     /// Only fills gaps: a value the new event does supply always wins.
     func preservingDisplayFields(from previous: Stream) -> Stream {
-        guard imageURL == nil else { return self }
         var merged = self
-        merged.imageURL = previous.imageURL
+        if ArtworkSource.urls([imageURL]).isEmpty { merged.imageURL = previous.imageURL }
+        if ArtworkSource.urls([thumbnailURL]).isEmpty { merged.thumbnailURL = previous.thumbnailURL }
         return merged
     }
 

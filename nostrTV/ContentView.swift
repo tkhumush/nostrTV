@@ -10,6 +10,7 @@ struct ContentView: View {
     @State private var showPlayer = false
     @State private var showLoginSheet = false
     @State private var showProfilePage = true
+    @State private var playbackError: String?
     private let nostrSDKClient: NostrSDKClient
     enum Page: String, CaseIterable { case discover = "Discover", following = "Following", profile = "Your space" }
 
@@ -53,6 +54,11 @@ struct ContentView: View {
             }
         }
         .fullScreenCover(isPresented: $showLoginSheet) { WelcomeView(authManager: authManager) }
+        .alert("Stream unavailable", isPresented: Binding(get: { playbackError != nil }, set: { if !$0 { playbackError = nil } })) {
+            Button("OK", role: .cancel) { playbackError = nil }
+        } message: {
+            Text(playbackError ?? "")
+        }
         .onAppear { viewModel.updateFollowList(authManager.followList) }
         .onChange(of: authManager.followList) { _, list in viewModel.updateFollowList(list) }
         .onChange(of: authManager.isAuthenticated) { _, authenticated in if authenticated { showLoginSheet = false } }
@@ -87,7 +93,11 @@ struct ContentView: View {
     }
 
     private func watch(_ stream: Stream) {
-        guard let url = URL(string: stream.isLive ? stream.streaming_url : (stream.recording ?? stream.streaming_url)) else { return }
+        let source = stream.isLive ? stream.streaming_url : (stream.recording ?? stream.streaming_url)
+        guard let url = StreamPlayback.nativeURL(source) else {
+            playbackError = StreamPlayback.unavailableMessage(for: source)
+            return
+        }
         selectedStream = stream.attachingProfile(stream.pubkey.flatMap { viewModel.getProfile(for: $0) })
         #if DEBUG
         player = CoveUITestSupport.enabled ? AVPlayer() : AVPlayer(url: url)
@@ -199,7 +209,7 @@ struct FeaturedStreamCardView: View {
     let onWatch: () -> Void
     var body: some View {
         ZStack(alignment: .leading) {
-            CoveArtwork(url: stream.imageURL ?? profile?.picture)
+            CoveArtwork(urls: stream.artworkURLs(profile: profile), streamID: stream.id)
             LinearGradient(stops: [.init(color: .coveBackground, location: 0), .init(color: .coveBackground.opacity(0.9), location: 0.3), .init(color: .clear, location: 1)], startPoint: .leading, endPoint: .trailing)
             LinearGradient(colors: [.clear, .coveBackground], startPoint: .center, endPoint: .bottom)
             VStack(alignment: .leading, spacing: 23) {
@@ -230,7 +240,7 @@ struct StreamRowView: View {
     var body: some View {
         Button(action: onWatch) {
             VStack(alignment: .leading, spacing: 18) {
-                CoveArtwork(url: stream.imageURL ?? profile?.picture)
+                CoveArtwork(urls: stream.artworkURLs(profile: profile), streamID: stream.id)
                     .aspectRatio(16 / 9, contentMode: .fit)
                     .overlay(alignment: .topLeading) { CoveLiveBadge(live: stream.isLive).padding(16).background(Color.coveBackground.opacity(0.8)).clipShape(RoundedRectangle(cornerRadius: 8)).padding(16) }
                     .clipShape(RoundedRectangle(cornerRadius: 14))

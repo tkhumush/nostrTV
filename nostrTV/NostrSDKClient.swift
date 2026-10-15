@@ -1332,7 +1332,11 @@ class NostrSDKClient {
         // Extract stream metadata from tags
         let title = tagValue("title")
         let summary = tagValue("summary")
-        let streamURL = tagValue("streaming") ?? tagValue("streaming_url")
+        // Announcements can include MoQ before HLS. Select from every advertised
+        // source rather than sending the first URL to a player that cannot open it.
+        let streamURL = StreamPlayback.preferredSource(event.tags
+            .filter { $0.name == "streaming" || $0.name == "streaming_url" }
+            .compactMap { $0.value })
         let streamID = tagValue("d")
         let status = tagValue("status") ?? "unknown"
         let imageURL = tagValue("image")
@@ -1428,7 +1432,8 @@ class NostrSDKClient {
             viewerCount: viewerCount,
             recording: recording,
             startsAt: startsAt,
-            relays: streamRelays
+            relays: streamRelays,
+            thumbnailURL: tagValue("thumb")
         )
 
         // Notify callback
