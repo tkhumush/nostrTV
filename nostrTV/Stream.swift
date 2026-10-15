@@ -55,6 +55,15 @@ struct Stream: Identifiable, Codable, Equatable {
         return status == "live"
     }
 
+    /// Enrich the selected stream without losing the relays that carry its chat.
+    func attachingProfile(_ profile: Profile?) -> Stream {
+        Stream(streamID: streamID, eventID: eventID, title: title,
+               streaming_url: streaming_url, imageURL: imageURL, pubkey: pubkey,
+               eventAuthorPubkey: eventAuthorPubkey, profile: profile ?? self.profile,
+               status: status, tags: tags, createdAt: createdAt, viewerCount: viewerCount,
+               recording: recording, startsAt: startsAt, relays: relays)
+    }
+
     /// Carry forward display fields this event did not supply.
     ///
     /// Kind 30311 is replaceable and hosts republish it often — viewer counts and

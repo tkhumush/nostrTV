@@ -114,6 +114,16 @@ class StreamViewModel: ObservableObject {
             }
         }
 
+        #if DEBUG
+        if CoveUITestSupport.enabled {
+            streams = CoveUITestSupport.streams
+            allCategorizedStreams = [StreamCategory(name: "Live", streams: streams)]
+            isInitialLoad = false
+            isLoadingAdminFollowList = false
+            return
+        }
+        #endif
+
         setupCallbacks()
 
         print("🔧 StreamViewModel init - isLoadingAdminFollowList: \(isLoadingAdminFollowList)")
@@ -354,6 +364,9 @@ class StreamViewModel: ObservableObject {
 
     /// Update user follow list (called when user logs in)
     func updateFollowList(_ newFollowList: [String]) {
+        #if DEBUG
+        if CoveUITestSupport.enabled { return }
+        #endif
         let previousFollowList = followList
         // Hex pubkeys are case-insensitive; normalize so comparisons cannot miss.
         followList = Set(newFollowList.map { $0.lowercased() })

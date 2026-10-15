@@ -21,7 +21,11 @@ struct StreamViewerApp: App {
         // back to an error-state client rather than crashing the app.
         var client: NostrSDKClient
         do {
+            #if DEBUG
+            client = CoveUITestSupport.enabled ? try NostrSDKClient(relayURLs: []) : try NostrSDKClient()
+            #else
             client = try NostrSDKClient()
+            #endif
         } catch {
             print("❌ Failed to initialize shared NostrSDKClient: \(error)")
             client = NostrSDKClient.errorClient(message: "Failed to initialize relay pool: \(error.localizedDescription)")
