@@ -48,6 +48,10 @@ class NostrAuthManager: ObservableObject {
             self.errorMessage = initError.localizedDescription
         }
 
+        #if DEBUG
+        if CoveUITestSupport.enabled { return }
+        #endif
+
         // Check for bunker session and restore if exists
         if let bunkerSession = bunkerSessionManager.loadSession(),
            let userPubkey = bunkerSession.userPubkey {

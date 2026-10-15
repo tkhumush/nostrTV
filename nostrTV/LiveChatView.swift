@@ -1,96 +1,91 @@
-//
-//  LiveChatView.swift
-//  nostrTV
-//
-//  Created by Claude Code
-//
-
 import SwiftUI
 
-/// Vertical live chat view similar to Twitch/YouTube chat
-/// Displays chat messages in chronological order with auto-scroll
 struct LiveChatView: View {
     @ObservedObject var activityManager: StreamActivityManager
     let stream: Stream
     let nostrClient: NostrSDKClient
+    @State private var followsLive = true
+    @FocusState private var focusedEntry: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var shouldAutoScroll = true
+    private var entries: [CoveChatEntry] {
+        (activityManager.chatMessages.map(CoveChatEntry.message) + activityManager.zapComments.map(CoveChatEntry.zap))
+            .sorted { $0.timestamp == $1.timestamp ? $0.id < $1.id : $0.timestamp < $1.timestamp }
+    }
 
     var body: some View {
-        // StreamActivityManager stores chat messages for the stream it's listening to
-        let messages = activityManager.chatMessages
-
-        // Force view refresh when activity changes
-        let _ = activityManager.updateTrigger
-
-        VStack(spacing: 0) {
-            // Messages
-            if messages.isEmpty {
-                // Empty state
-                VStack(spacing: 12) {
-                    Image(systemName: "bubble.left.and.bubble.right")
-                        .font(.system(size: 50))
-                        .foregroundColor(.coveAccent.opacity(0.4))
-                    Text(CoveCopy.noMessages)
-                        .font(.coveCaption)
-                        .foregroundColor(.coveSecondary)
-                    Text(CoveCopy.noMessagesSub)
-                        .font(.coveSmall)
-                        .foregroundColor(.coveSecondary.opacity(0.7))
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.coveBackground)
+        VStack(alignment: .leading, spacing: 0) {
+            if entries.isEmpty {
+                VStack(alignment: .leading, spacing: 18) {
+                    Image(systemName: "bubble.left.and.bubble.right").font(.system(size: 40)).foregroundStyle(Color.coveAccent)
+                    Text("It’s quiet in here.").font(.coveBody)
+                    Text("Be the first to say hello.").font(.coveCaption).foregroundStyle(Color.coveSecondary)
+                }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else {
                 ScrollViewReader { proxy in
-                    ScrollView {
-                        // Spacer pushes content to the bottom like a chat app
-                        Spacer(minLength: 0)
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(messages) { message in
-                                ChatMessageRow(
-                                    message: message,
-                                    nostrClient: nostrClient,
-                                    updateTrigger: activityManager.updateTrigger
-                                )
-                                .id(message.id)
-                            }
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.top, 8)
-                        .padding(.bottom, 8)
-
-                        // Invisible anchor at the very bottom
-                        Color.clear
-                            .frame(height: 1)
-                            .id("bottom")
-                    }
-                    .focusable(false)  // Prevent ScrollView from capturing focus
-                    .background(Color.coveBackground)
-                    .defaultScrollAnchor(.bottom)
-                    .onChange(of: activityManager.updateTrigger) { _, _ in
-                        if let lastMessage = messages.last {
-                            // Small delay lets the layout engine place the new row
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                                withAnimation(.easeOut(duration: 0.2)) {
-                                    proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                    VStack(spacing: 12) {
+                        Button {
+                            followsLive.toggle()
+                            if followsLive { focusedEntry = nil; proxy.scrollTo("chat-bottom", anchor: .bottom) }
+                        } label: {
+                            Label(followsLive ? "Read history" : "Jump to live", systemImage: followsLive ? "clock" : "arrow.down")
+                        }.buttonStyle(CoveButtonStyle()).padding(.top, 16)
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 24) {
+                                ForEach(entries) { entry in
+                                    Group {
+                                        switch entry {
+                                        case .message(let message):
+                                            ChatMessageRow(message: message, nostrClient: nostrClient, updateTrigger: activityManager.updateTrigger)
+                                        case .zap(let zap):
+                                            zapRow(zap)
+                                        }
+                                    }
+                                    .padding(6)
+                                    .background(focusedEntry == entry.id ? Color.coveOverlay : .clear)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    .focusable(!followsLive)
+                                    .focused($focusedEntry, equals: entry.id)
+                                    .id(entry.id)
                                 }
-                            }
+                                Color.clear.frame(height: 1).id("chat-bottom")
+                            }.padding(.horizontal, 24).padding(.vertical, 24)
+                        }
+                        .defaultScrollAnchor(.bottom)
+                        .onChange(of: entries.map(\.id)) { _, _ in
+                            guard followsLive else { return }
+                            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo("chat-bottom", anchor: .bottom) }
+                        }
+                        .onChange(of: focusedEntry) { _, entry in
+                            if let entry { proxy.scrollTo(entry, anchor: .center) }
                         }
                     }
                 }
             }
-        }
-        .background(Color.coveBackground)
-        .onAppear {
-            print("🔍 LiveChatView: Displaying chat for stream: \(stream.streamID)")
-            print("   eventAuthorPubkey: \(stream.eventAuthorPubkey ?? "nil")")
-            print("   Current message count: \(messages.count)")
-        }
-        .onChange(of: activityManager.updateTrigger) { oldValue, newValue in
-            print("🔍 LiveChatView: updateTrigger changed: \(oldValue) -> \(newValue)")
-            print("   Total messages: \(activityManager.chatMessages.count)")
-        }
+        }.frame(maxHeight: .infinity).background(Color.coveSurface)
+    }
+
+    private func zapRow(_ zap: ZapComment) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "bolt.fill").foregroundStyle(Color.coveGold)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("\(nostrClient.getProfile(for: zap.senderPubkey)?.displayNameOrName ?? zap.senderName ?? "Someone") sent \(zap.amountInSats.formatted()) sats")
+                    .font(.system(size: 21, weight: .semibold)).foregroundStyle(Color.coveGold)
+                if !zap.comment.isEmpty { Text(zap.comment).font(.system(size: 22)).foregroundStyle(.white) }
+            }
+        }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.coveGold.opacity(0.07)).clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+private enum CoveChatEntry: Identifiable {
+    case message(ChatMessage)
+    case zap(ZapComment)
+    var id: String {
+        switch self { case .message(let m): return "message-" + m.id; case .zap(let z): return "zap-" + z.id }
+    }
+    var timestamp: Date {
+        switch self { case .message(let m): return m.timestamp; case .zap(let z): return z.timestamp }
     }
 }
 
@@ -104,72 +99,35 @@ private struct ChatMessageRow: View {
         // Dynamically fetch profile name from NostrSDKClient
         let profile = nostrClient.getProfile(for: message.senderPubkey)
         let displayName = profile?.displayName ?? profile?.name ?? "Anonymous"
-        let pictureURL = profile?.picture
 
         // Use the trigger to force re-computation (SwiftUI dependency tracking)
         let _ = updateTrigger
 
-        HStack(alignment: .top, spacing: 8) {
-            // Profile picture (circular, 32x32)
-            if let pictureURL = pictureURL, let url = URL(string: pictureURL) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 32, height: 32)
-                            .clipShape(Circle())
-                    case .failure(_), .empty:
-                        // Fallback to default avatar
-                        Circle()
-                            .fill(Color.coveOverlay)
-                            .frame(width: 32, height: 32)
-                            .overlay(
-                                Text(String(displayName.prefix(1)).uppercased())
-                                    .font(.system(size: 14, weight: .bold))
-                                    .foregroundColor(.coveAccent)
-                            )
-                    @unknown default:
-                        Circle()
-                            .fill(Color.coveOverlay)
-                            .frame(width: 32, height: 32)
-                    }
-                }
-            } else {
-                // Default avatar with first letter
-                Circle()
-                    .fill(Color.coveOverlay)
-                    .frame(width: 32, height: 32)
-                    .overlay(
-                        Text(String(displayName.prefix(1)).uppercased())
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.coveAccent)
-                    )
-            }
+        HStack(alignment: .top, spacing: 14) {
+            CoveAvatar(profile: profile, size: 36)
 
             VStack(alignment: .leading, spacing: 4) {
                 // Username and timestamp
                 HStack(spacing: 8) {
                     Text(displayName)
-                        .font(.system(size: 16, weight: .bold))
+                        .font(.system(size: 20, weight: .semibold))
                         .foregroundColor(.coveAccent)
 
                     Text(timeString(from: message.timestamp))
-                        .font(.system(size: 14))
+                        .font(.system(size: 22))
                         .foregroundColor(.coveSecondary)
                 }
 
                 // Message content, with `nostr:` mentions resolved to names
                 messageContent
-                    .font(.system(size: 16))
+                    .font(.system(size: 22))
                     .foregroundColor(.white)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
-        .background(Color.coveOverlay.opacity(0.5))
+        .background(Color.clear)
         .cornerRadius(CoveUI.smallCornerRadius)
         .onAppear {
             // Fetch any mentioned profile we do not have yet. Done here rather than
@@ -222,7 +180,7 @@ private struct ChatMessageRow: View {
 
     private func timeString(from date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.dateStyle = .short  // Shows date (e.g., 1/8/26)
+        formatter.dateStyle = .none
         formatter.timeStyle = .short  // Shows time (e.g., 2:30 PM)
         return formatter.string(from: date)
     }
