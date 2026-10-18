@@ -100,9 +100,9 @@ struct ContentView: View {
         }
         selectedStream = stream.attachingProfile(stream.pubkey.flatMap { viewModel.getProfile(for: $0) })
         #if DEBUG
-        player = CoveUITestSupport.enabled ? AVPlayer() : AVPlayer(url: url)
+        player = CoveUITestSupport.enabled ? AVPlayer() : AVPlayer(playerItem: StreamPlayback.playerItem(for: url))
         #else
-        player = AVPlayer(url: url)
+        player = AVPlayer(playerItem: StreamPlayback.playerItem(for: url))
         #endif
         showPlayer = true
     }

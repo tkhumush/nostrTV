@@ -1,19 +1,31 @@
 import AVFoundation
 import Network
 import XCTest
+@testable import nostrTV
 
 /// Exercises AVPlayer on tvOS with a real, deterministic HLS master that points
 /// to independent video and audio playlists. No internet or broadcaster needed.
 final class SplitHLSPlaybackTests: XCTestCase {
     @MainActor
     func testPlaysVideoAndSelectsSeparateAudioRendition() async throws {
+        try await assertPlaysSplitFixture { AVPlayerItem(url: $0) }
+    }
+
+    /// The app's own path: playlists are rewritten by `HLSPlaylistLoader`.
+    @MainActor
+    func testPlaysSplitRenditionsThroughPlaylistLoader() async throws {
+        try await assertPlaysSplitFixture(StreamPlayback.playerItem(for:))
+    }
+
+    @MainActor
+    private func assertPlaysSplitFixture(_ makeItem: (URL) -> AVPlayerItem) async throws {
         let bundle = Bundle(for: Self.self)
         _ = try XCTUnwrap(bundle.url(forResource: "cove-split-0-0.ts", withExtension: "bin"))
         _ = try XCTUnwrap(bundle.url(forResource: "cove-split-1-0.ts", withExtension: "bin"))
         let server = try HLSFixtureServer(bundle: bundle)
         let url = try await server.start()
         defer { server.stop() }
-        let item = AVPlayerItem(url: url)
+        let item = makeItem(url)
         let output = AVPlayerItemVideoOutput(pixelBufferAttributes: nil)
         item.add(output)
         let player = AVPlayer(playerItem: item)

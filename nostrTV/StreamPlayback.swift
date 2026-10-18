@@ -1,8 +1,19 @@
-import Foundation
+import AVFoundation
 
 /// AVPlayer consumes the complete HLS multivariant playlist. Keeping it intact
 /// lets AVFoundation select and synchronize separate audio/video renditions.
 enum StreamPlayback {
+    /// HLS playlists are served through `HLSPlaylistLoader` so AVPlayer never
+    /// enters LL-HLS mode against origins that mishandle partial segments.
+    static func playerItem(for url: URL) -> AVPlayerItem {
+        guard url.pathExtension.lowercased() == "m3u8", let loaderURL = HLSPlaylistRewriter.loaderURL(for: url) else {
+            return AVPlayerItem(url: url)
+        }
+        let asset = AVURLAsset(url: loaderURL)
+        asset.resourceLoader.setDelegate(HLSPlaylistLoader.shared, queue: HLSPlaylistLoader.shared.queue)
+        return AVPlayerItem(asset: asset)
+    }
+
     private static func remoteURL(_ source: String) -> URL? {
         guard let url = URL(string: source.trimmingCharacters(in: .whitespacesAndNewlines)),
               let host = url.host?.lowercased(), !host.isEmpty,
