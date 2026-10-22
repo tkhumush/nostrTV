@@ -11,23 +11,23 @@ import SwiftUI
 // MARK: - Brand Colors
 
 extension Color {
-    /// Deep Harbor (#1A1F2C) — Soft desaturated navy for backgrounds
-    static let coveBackground = Color(red: 0.102, green: 0.122, blue: 0.173)
+    /// Deep Harbor (#10191E) — Soft desaturated navy for backgrounds
+    static let coveBackground = Color(red: 0.063, green: 0.098, blue: 0.118)
 
-    /// Sea Foam (#A3D9C9) — Muted friendly mint for primary actions and selections
-    static let coveAccent = Color(red: 0.639, green: 0.851, blue: 0.788)
+    /// Sea Foam (#B4DFCD) — Muted friendly mint for primary actions and selections
+    static let coveAccent = Color(red: 0.706, green: 0.875, blue: 0.804)
 
-    /// Sunset Gold (#FFB347) — Warm amber for live indicators and zaps
-    static let coveGold = Color(red: 1.0, green: 0.702, blue: 0.278)
+    /// Sunset Gold (#FFBF6E) — Warm amber for live indicators and zaps
+    static let coveGold = Color(red: 1.0, green: 0.749, blue: 0.431)
 
     /// Lighter variant of Deep Harbor for cards and elevated surfaces
-    static let coveSurface = Color(red: 0.14, green: 0.16, blue: 0.22)
+    static let coveSurface = Color(red: 0.110, green: 0.161, blue: 0.180)
 
     /// Subtle overlay for chat bubbles and secondary surfaces
-    static let coveOverlay = Color(red: 0.18, green: 0.20, blue: 0.27)
+    static let coveOverlay = Color(red: 0.165, green: 0.227, blue: 0.243)
 
     /// Muted text on dark backgrounds
-    static let coveSecondary = Color(red: 0.55, green: 0.58, blue: 0.65)
+    static let coveSecondary = Color(red: 0.655, green: 0.714, blue: 0.725)
 }
 
 // MARK: - Brand Typography

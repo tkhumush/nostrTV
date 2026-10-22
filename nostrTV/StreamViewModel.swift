@@ -27,6 +27,7 @@ class StreamViewModel: ObservableObject {
     // Active subscription tracking
     private var adminFollowSubscriptionId: String?
     private var profilesSubscriptionId: String? // kind 0 - filtered by authors, limit 30
+    private let profileCallbackID = "stream-profiles-\(UUID().uuidString)"
     private var streamsSubscriptionId: String?  // kind 30311 - unfiltered, pipeline handles filtering
     private var deletionsSubscriptionId: String? // kind 5 - stream deletion events
 
@@ -53,13 +54,10 @@ class StreamViewModel: ObservableObject {
     /// Maximum age for stream events (24 hours)
     private static let maxStreamAgeSeconds: TimeInterval = 24 * 60 * 60
 
-    /// Check if a URL is a playable stream URL (matches zap.stream's canPlayUrl)
+    /// Keep recognized broadcasts discoverable, including those whose format
+    /// needs an explanation rather than an AVPlayer failure on selection.
     private static func canPlayURL(_ url: String) -> Bool {
-        guard !url.isEmpty,
-              !url.contains("localhost"),
-              !url.contains("127.0.0.1"),
-              let components = URLComponents(string: url) else { return false }
-        return components.path.contains(".m3u8") || components.scheme == "moq"
+        StreamPlayback.isDiscoverable(url)
     }
 
     /// Check if a stream has any playable URL (streaming or recording)
@@ -114,6 +112,16 @@ class StreamViewModel: ObservableObject {
             }
         }
 
+        #if DEBUG
+        if CoveUITestSupport.enabled {
+            streams = CoveUITestSupport.streams
+            allCategorizedStreams = [StreamCategory(name: "Live", streams: streams)]
+            isInitialLoad = false
+            isLoadingAdminFollowList = false
+            return
+        }
+        #endif
+
         setupCallbacks()
 
         print("🔧 StreamViewModel init - isLoadingAdminFollowList: \(isLoadingAdminFollowList)")
@@ -128,6 +136,14 @@ class StreamViewModel: ObservableObject {
     }
 
     private func setupCallbacks() {
+        sdkClient.addProfileReceivedCallback(forSubscriptionId: profileCallbackID) { [weak self] profile in
+            guard let self, self.streams.contains(where: {
+                $0.pubkey?.caseInsensitiveCompare(profile.pubkey) == .orderedSame
+            }) else { return }
+            // Metadata can arrive after the stream list has stopped changing.
+            // Notify the observed list without rebuilding or reordering its cards.
+            self.objectWillChange.send()
+        }
         // Handle incoming streams — NIP-33 dedup (eventAuthorPubkey + d-tag)
         sdkClient.onStreamReceived = { [weak self] stream in
             DispatchQueue.main.async {
@@ -354,6 +370,9 @@ class StreamViewModel: ObservableObject {
 
     /// Update user follow list (called when user logs in)
     func updateFollowList(_ newFollowList: [String]) {
+        #if DEBUG
+        if CoveUITestSupport.enabled { return }
+        #endif
         let previousFollowList = followList
         // Hex pubkeys are case-insensitive; normalize so comparisons cannot miss.
         followList = Set(newFollowList.map { $0.lowercased() })
@@ -385,6 +404,7 @@ class StreamViewModel: ObservableObject {
     }
 
     deinit {
+        sdkClient.removeCallback(forSubscriptionId: profileCallbackID)
         // Close all active subscriptions
         if let subId = profilesSubscriptionId {
             sdkClient.closeSubscription(subId)
@@ -471,7 +491,7 @@ class StreamViewModel: ObservableObject {
         // Step 1: Age filter — discard events older than 24 hours
         let ageFiltered = streams.filter { Self.isWithinAgeWindow($0) }
 
-        // Step 2: Playability filter — must have valid .m3u8 or moq: URL
+        // Step 2: Keep recognized media sources; selection explains unsupported transports.
         let playable = ageFiltered.filter { Self.canPlayStream($0) }
 
         // Step 3: Remove deleted streams (kind 5)

@@ -26,7 +26,7 @@ class NostrAuthManager: ObservableObject {
     /// When `nostrSDKClient` is provided, it is used directly so the auth manager
     /// shares the same relay pool as the rest of the app. If it is nil or creation
     /// fails, a non-fatal error client is created and an error message is surfaced.
-    init(nostrSDKClient: NostrSDKClient? = nil) {
+    init(nostrSDKClient: NostrSDKClient? = nil, restoreSession: Bool = true) {
         if let client = nostrSDKClient {
             self.nostrSDKClient = client
         } else {
@@ -47,6 +47,12 @@ class NostrAuthManager: ObservableObject {
         if let initError = self.nostrSDKClient.initError {
             self.errorMessage = initError.localizedDescription
         }
+
+        #if DEBUG
+        if CoveUITestSupport.enabled { return }
+        #endif
+
+        guard restoreSession else { return }
 
         // Check for bunker session and restore if exists
         if let bunkerSession = bunkerSessionManager.loadSession(),
@@ -184,6 +190,15 @@ class NostrAuthManager: ObservableObject {
                 self.isLoadingProfile = false
                 self.saveProfileToCache(profile)
             }
+        }
+
+        // Discovery may already have resolved this account. Identical relay
+        // responses no longer notify every view, so use the shared cache now
+        // instead of waiting for a duplicate event to end the loading state.
+        if let cached = nostrSDKClient.getProfile(for: user.hexPubkey) {
+            currentProfile = cached
+            isLoadingProfile = false
+            saveProfileToCache(cached)
         }
 
         // Setup callback for follow list, keyed by the same subscription ID so it

@@ -1,260 +1,85 @@
-//
-//  ProfileSettingsView.swift
-//  nostrTV
-//
-//  Created by Taymur Khumush on 4/24/25.
-//
-
 import SwiftUI
 
 struct ProfileSettingsView: View {
     @ObservedObject var authManager: NostrAuthManager
     @Binding var isPresented: Bool
     @State private var showLoginSheet = false
+    @AppStorage("cove.showChat") private var showChat = true
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Title
-            Text("Profile")
-                .font(.coveHeading)
-                .foregroundColor(.white)
-                .padding(.top, 40)
-                .padding(.bottom, 40)
-
-            if !authManager.isAuthenticated {
-                // Not logged in - show login prompt
-                VStack(spacing: 30) {
-                    Spacer()
-
-                    Image(systemName: "person.crop.circle.badge.plus")
-                        .font(.system(size: 100))
-                        .foregroundColor(.coveAccent.opacity(0.6))
-
-                    Text(CoveCopy.loginPrompt)
-                        .font(.coveSubheading)
-                        .foregroundColor(.white)
-
-                    Text(CoveCopy.loginSubtitle)
-                        .font(.coveBody)
-                        .foregroundColor(.coveSecondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
-
-                    Button("Log In") {
-                        showLoginSheet = true
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.coveAccent)
-                    .font(.coveSubheading)
-                    .controlSize(.large)
-
-                    Spacer()
+        ScrollView {
+            VStack(alignment: .leading, spacing: 45) {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("YOUR SPACE").font(.coveCaption).tracking(4).foregroundStyle(Color.coveAccent)
+                    Text("Make yourself at home.").font(.coveHeading)
+                    Text("Your identity, your people, your way to watch.").font(.coveBody).foregroundStyle(Color.coveSecondary)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .fullScreenCover(isPresented: $showLoginSheet) {
-                    WelcomeView(authManager: authManager)
+                HStack(alignment: .top, spacing: 60) {
+                    identity.frame(width: 500)
+                    VStack(alignment: .leading, spacing: 30) {
+                        Text("While you watch").font(.coveSubheading)
+                        Button { showChat.toggle() } label: {
+                            HStack(spacing: 30) {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Show chat when a stream opens")
+                                    Text("Change this in the player anytime.").font(.coveCaption).foregroundStyle(Color.coveSecondary)
+                                }
+                                Spacer()
+                                Image(systemName: showChat ? "checkmark.circle.fill" : "circle").foregroundStyle(Color.coveAccent)
+                            }
+                        }.buttonStyle(CoveButtonStyle()).accessibilityValue(showChat ? "On" : "Off")
+                            .accessibilityIdentifier("preference-chat")
+                        Text("Focus animations follow your Apple TV Reduce Motion setting.").font(.coveCaption).foregroundStyle(Color.coveSecondary)
+                        if authManager.isAuthenticated {
+                            Divider()
+                            Label(signingDescription, systemImage: "key.horizontal").font(.coveBody)
+                            Text("Your Nostr identity stays with you across apps.").font(.coveCaption).foregroundStyle(Color.coveSecondary)
+                            Button("Refresh profile and follow list") { authManager.fetchUserData() }
+                                .buttonStyle(CoveButtonStyle())
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading).focusSection()
                 }
-            } else if let profile = authManager.currentProfile {
-                VStack(alignment: .center, spacing: 40) {
-                    // Three-column layout: Profile picture | Profile info | Bunker card
-                    HStack(alignment: .top, spacing: 60) {
-                        // Column 1: Profile picture
-                        AsyncImage(url: URL(string: profile.picture ?? "")) { image in
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                        } placeholder: {
-                            Circle()
-                                .fill(Color.coveOverlay)
-                                .overlay(
-                                    Image(systemName: "person.fill")
-                                        .font(.system(size: 120))
-                                        .foregroundColor(.coveAccent)
-                                )
-                        }
-                        .frame(width: 300, height: 300)
-                        .clipShape(Circle())
-
-                        // Column 2: Profile info
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text(profile.displayName ?? profile.name ?? "Nostr User")
-                                .font(.system(size: 50, weight: .semibold))
-                                .foregroundColor(.white)
-
-                            if let name = profile.name {
-                                Text("@\(name)")
-                                    .font(.system(size: 31))
-                                    .foregroundColor(.secondary)
-                            }
-
-                            if let nip05 = profile.nip05, !nip05.isEmpty {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "checkmark.seal.fill")
-                                        .font(.system(size: 25))
-                                        .foregroundColor(.coveAccent)
-                                    Text(nip05)
-                                        .font(.system(size: 28))
-                                        .foregroundColor(.coveAccent)
-                                }
-                            }
-
-                            if let about = profile.about, !about.isEmpty {
-                                Text(about)
-                                    .font(.system(size: 25))
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(3)
-                                    .padding(.top, 8)
-                            }
-
-                            if let lud16 = profile.lud16, !lud16.isEmpty {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "bolt.fill")
-                                        .font(.system(size: 25))
-                                        .foregroundColor(.coveGold)
-                                    Text(lud16)
-                                        .font(.system(size: 25))
-                                        .foregroundColor(.coveSecondary)
-                                }
-                            }
-
-                            // Following count
-                            if !authManager.followList.isEmpty {
-                                HStack(spacing: 12) {
-                                    Text("Following:")
-                                        .foregroundColor(.secondary)
-                                    Text("\(authManager.followList.count)")
-                                        .fontWeight(.semibold)
-                                }
-                                .font(.system(size: 28))
-                                .foregroundColor(.white)
-                                .padding(.top, 8)
-                            }
-                        }
-
-                        // Column 3: Bunker Connection Card
-                        VStack(alignment: .leading, spacing: 16) {
-                            HStack(spacing: 12) {
-                                Image(systemName: "lock.shield.fill")
-                                    .font(.system(size: 34))
-                                    .foregroundColor(.coveAccent)
-                                Text("Bunker Connection")
-                                    .font(.system(size: 34, weight: .semibold, design: .rounded))
-                                    .foregroundColor(.white)
-                            }
-
-                            HStack(spacing: 12) {
-                                Circle()
-                                    .fill(Color.coveAccent)
-                                    .frame(width: 14, height: 14)
-                                Text("Connected")
-                                    .font(.system(size: 25))
-                                    .foregroundColor(.coveAccent)
-                                    .fontWeight(.semibold)
-                            }
-
-                            HStack(spacing: 12) {
-                                Image(systemName: "key.fill")
-                                    .font(.system(size: 22))
-                                    .foregroundColor(.coveAccent)
-                                Text("Remote Signing Active")
-                                    .font(.system(size: 25))
-                                    .foregroundColor(.coveSecondary)
-                            }
-
-                            if let pubkey = authManager.currentUser?.hexPubkey {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text("Public Key:")
-                                        .font(.system(size: 22))
-                                        .foregroundColor(.secondary)
-                                    Text(pubkey.prefix(16) + "..." + pubkey.suffix(16))
-                                        .font(.system(size: 20, design: .monospaced))
-                                        .foregroundColor(.white.opacity(0.7))
-                                }
-                                .padding(.top, 8)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(34)
-                        .background(.ultraThinMaterial)
-                        .cornerRadius(CoveUI.cornerRadius)
-                    }
-
-                    Spacer()
-
-                    // Logout button
-                    VStack {
-                        Button("Log Out", action: {
-                            authManager.logout()
-                            isPresented = false
-                        })
-                        .buttonStyle(.borderedProminent)
-                        .tint(.coveSecondary)
-                        .font(.system(size: 39, weight: .semibold, design: .rounded))
-                        .controlSize(.large)
-                    }
-                    .focusSection()
-                    .padding(.bottom, 60)
-                }
-                .frame(maxWidth: .infinity)
-            } else {
-                // Loading or error state
-                VStack(spacing: 28) {
-                    if authManager.isLoadingProfile {
-                        ProgressView()
-                            .scaleEffect(3)
-                            .tint(.coveAccent)
-                        Text(CoveCopy.profileLoading)
-                            .font(.system(size: 39, weight: .regular, design: .rounded))
-                            .foregroundColor(.coveSecondary)
-                    } else {
-                        // Not loading but no profile - show error with escape hatch
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.system(size: 112))
-                            .foregroundColor(.coveGold)
-
-                        Text(authManager.errorMessage ?? "Profile not available")
-                            .font(.system(size: 39, weight: .regular, design: .rounded))
-                            .foregroundColor(.coveSecondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 40)
-
-                        HStack(spacing: 30) {
-                            Button("Retry", action: {
-                                authManager.fetchUserData()
-                            })
-                            .buttonStyle(.borderedProminent)
-                            .tint(.coveAccent)
-                            .font(.system(size: 39, weight: .semibold))
-                            .controlSize(.large)
-
-                            Button("Log Out", action: {
-                                authManager.logout()
-                                isPresented = false
-                            })
-                            .buttonStyle(.borderedProminent)
-                            .tint(.coveSecondary)
-                            .font(.system(size: 39, weight: .semibold))
-                            .controlSize(.large)
-                        }
-                        .padding(.top, 20)
-                    }
-                }
-            }
-
-            Spacer()
+            }.padding(.horizontal, 80).padding(.vertical, 45)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.coveBackground)
+        .fullScreenCover(isPresented: $showLoginSheet) { WelcomeView(authManager: authManager) }
+        .onChange(of: authManager.isAuthenticated) { _, authenticated in if authenticated { showLoginSheet = false } }
         .onAppear {
-            // If profile is not loaded but user is authenticated, fetch it.
-            // With the Bug #14 fix, the primary profile fetch happens
-            // deterministically inside `authenticateWithBunker` (and on session
-            // restore). This call is a harmless refresh for the case where the
-            // profile is still missing — it is non-forcing, so it no-ops when
-            // a fetch is already in flight. It is NOT the primary fetch path.
-            if authManager.currentProfile == nil && authManager.isAuthenticated {
-                authManager.fetchUserData()
-            }
+            if authManager.currentProfile == nil && authManager.isAuthenticated { authManager.fetchUserData() }
         }
+    }
+
+    private var signingDescription: String {
+        switch authManager.authMethod {
+        case .bunker: return "Signed in with a remote signer"
+        case .nsec: return "Signed in on this Apple TV"
+        case nil: return "Not signed in"
+        }
+    }
+
+    private var identity: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            CoveAvatar(profile: authManager.currentProfile, size: 110)
+            if !authManager.isAuthenticated {
+                Text("Welcome to Cove").font(.coveSection)
+                Text("Browse freely. Connect your Nostr identity to join the conversation and send zaps.").font(.coveBody).foregroundStyle(Color.coveSecondary)
+                Button("Sign in") { showLoginSheet = true }.buttonStyle(CoveButtonStyle(prominent: true))
+            } else if let profile = authManager.currentProfile {
+                Text(profile.displayNameOrName).font(.coveSection).lineLimit(2)
+                if let name = profile.name { Text("@\(name)").font(.coveBody).foregroundStyle(Color.coveSecondary) }
+                if let about = profile.about, !about.isEmpty { Text(about).font(.coveCaption).foregroundStyle(Color.coveSecondary).lineLimit(4) }
+                Text("Following \(authManager.followList.count) people").font(.coveBody).foregroundStyle(Color.coveAccent)
+                Button("Sign out") { authManager.logout() }.buttonStyle(CoveButtonStyle())
+            } else {
+                Text(authManager.isLoadingProfile ? "Finding your profile…" : "Profile unavailable").font(.coveSubheading)
+                if authManager.isLoadingProfile { ProgressView().tint(.coveAccent) }
+                else {
+                    Text(authManager.errorMessage ?? "Try refreshing your profile.").font(.coveCaption).foregroundStyle(Color.coveSecondary)
+                    Button("Try again") { authManager.fetchUserData() }.buttonStyle(CoveButtonStyle(prominent: true))
+                }
+                Button("Sign out") { authManager.logout() }.buttonStyle(CoveButtonStyle())
+            }
+        }.padding(35).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.coveSurface).clipShape(RoundedRectangle(cornerRadius: 24)).focusSection()
     }
 }

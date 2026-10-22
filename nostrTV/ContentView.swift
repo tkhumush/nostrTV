@@ -1,636 +1,278 @@
-//
-//  ContentView.swift
-//  nostrTV
-//
-//  Created by Taymur Khumush on 4/24/25.
-//
-
 import SwiftUI
 import AVKit
-import CoreImage.CIFilterBuiltins
 
-/// Loading view for Curated tab when admin follow list is being fetched
-struct CuratedLoadingView: View {
-    var body: some View {
-        VStack(spacing: 30) {
-            Spacer()
+struct ContentView: View {
+    @StateObject private var viewModel: StreamViewModel
+    @EnvironmentObject private var authManager: NostrAuthManager
+    @State private var page: Page = .discover
+    @State private var player: AVPlayer?
+    @State private var selectedStream: Stream?
+    @State private var showPlayer = false
+    @State private var showLoginSheet = false
+    @State private var showProfilePage = true
+    @State private var playbackError: String?
+    private let nostrSDKClient: NostrSDKClient
+    enum Page: String, CaseIterable { case discover = "Discover", following = "Following", profile = "Your space" }
 
-            ProgressView()
-                .scaleEffect(2)
-                .tint(.coveAccent)
-
-            Text(CoveCopy.appLoading)
-                .font(.coveSubheading)
-                .foregroundColor(.white)
-
-            Text(CoveCopy.loadingSubtitle)
-                .font(.coveBody)
-                .foregroundColor(.coveSecondary)
-
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.coveBackground)
+    init(nostrSDKClient: NostrSDKClient) {
+        self.nostrSDKClient = nostrSDKClient
+        _viewModel = StateObject(wrappedValue: StreamViewModel(nostrSDKClient: nostrSDKClient))
     }
-}
-
-/// Empty state view for Following tab when user is not logged in
-/// Shown on the Following tab when the user is logged in but the list is empty.
-///
-/// An empty list previously rendered as a completely blank page, which made three
-/// very different situations indistinguishable — the follow list never loading, the
-/// follow list loading fine with nobody currently streaming, and the filter being
-/// broken. This states which one it is.
-struct FollowingNoStreamsView: View {
-    /// Number of pubkeys in the user's kind 3 follow list.
-    let followCount: Int
-
-    private var isFollowListMissing: Bool { followCount == 0 }
 
     var body: some View {
-        VStack(spacing: 30) {
-            Spacer()
-
-            Image(systemName: isFollowListMissing ? "person.crop.circle.badge.questionmark" : "moon.zzz.fill")
-                .font(.system(size: 100))
-                .foregroundColor(.coveAccent.opacity(0.6))
-
-            Text(isFollowListMissing ? "Your follow list hasn't loaded" : "Nobody you follow is live")
-                .font(.coveSubheading)
-                .foregroundColor(.white)
-
-            Text(isFollowListMissing
-                 ? "We couldn't read your follow list from the relays. Check your connection, or open Profile to retry."
-                 : "You're following \(followCount) \(followCount == 1 ? "person" : "people"). None of them are streaming right now — check back later.")
-                .font(.coveBody)
-                .foregroundColor(.coveSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 80)
-
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.coveBackground)
-    }
-}
-
-struct FollowingEmptyStateView: View {
-    let onLoginTap: () -> Void
-
-    var body: some View {
-        VStack(spacing: 30) {
-            Spacer()
-
-            Image(systemName: "person.2.fill")
-                .font(.system(size: 100))
-                .foregroundColor(.coveAccent.opacity(0.6))
-
-            Text(CoveCopy.loginPrompt)
-                .font(.coveSubheading)
-                .foregroundColor(.white)
-
-            Text(CoveCopy.loginSubtitle)
-                .font(.coveBody)
-                .foregroundColor(.coveSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-
-            Button("Log In", action: onLoginTap)
-                .buttonStyle(.borderedProminent)
-                .tint(.coveAccent)
-                .font(.coveSubheading)
-                .controlSize(.large)
-
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.coveBackground)
-    }
-}
-
-struct FeaturedStreamCardView: View {
-    let stream: Stream
-    let viewModel: StreamViewModel
-    let onStreamSelected: (URL, String?, Stream) -> Void
-
-    var body: some View {
-        Button(action: {
-            if let url = URL(string: stream.streaming_url) {
-                let lightningAddress: String? = {
-                    if let pubkey = stream.pubkey, let profile = viewModel.getProfile(for: pubkey) {
-                        return profile.lud16
-                    }
-                    return nil
-                }()
-                onStreamSelected(url, lightningAddress, stream)
-            }
-        }) {
-            VStack(alignment: .leading, spacing: 12) {
-                // Large thumbnail with live indicator overlay
-                ZStack(alignment: .topLeading) {
-                    // Thumbnail
-                    if let imageURL = stream.imageURL, let url = URL(string: imageURL) {
-                        CachedAsyncImage(url: url) { image in
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(height: 400)
-                                .clipped()
-                                .cornerRadius(12)
-                        } placeholder: {
-                            Image("Top Shelf Image")
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(height: 400)
-                                .clipped()
-                                .cornerRadius(12)
-                        }
-                    } else if let pubkey = stream.pubkey,
-                              let profile = viewModel.getProfile(for: pubkey),
-                              let pictureURL = profile.picture,
-                              let url = URL(string: pictureURL) {
-                        CachedAsyncImage(url: url) { image in
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(height: 400)
-                                .clipped()
-                                .cornerRadius(12)
-                        } placeholder: {
-                            Image("Top Shelf Image")
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(height: 400)
-                                .clipped()
-                                .cornerRadius(12)
-                        }
-                    } else {
-                        Image("Top Shelf Image")
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(height: 400)
-                            .clipped()
-                            .cornerRadius(12)
-                    }
-
-                    // Live indicator badge — warm amber glow
-                    if stream.isLive {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(Color.coveGold)
-                                .frame(width: 10, height: 10)
-                                .shadow(color: .coveGold.opacity(0.8), radius: 4)
-                            Text("LIVE")
-                                .font(.system(size: 14, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(Color.coveBackground.opacity(0.85))
-                        .cornerRadius(CoveUI.badgeCornerRadius)
-                        .padding(16)
-                    }
+        VStack(spacing: 0) {
+            navigation
+            ZStack {
+                // Keep each shelf alive when switching tabs so its order and focus survive.
+                StreamListView(viewModel: viewModel, categories: viewModel.allCategorizedStreams,
+                               isFollowing: false, isLoading: viewModel.isInitialLoad,
+                               onStreamSelected: watch)
+                    .opacity(page == .discover ? 1 : 0).disabled(page != .discover)
+                    .accessibilityHidden(page != .discover)
+                if authManager.isAuthenticated {
+                    StreamListView(viewModel: viewModel, categories: viewModel.categorizedStreams,
+                                   isFollowing: true, isLoading: false, onStreamSelected: watch)
+                        .opacity(page == .following ? 1 : 0).disabled(page != .following)
+                        .accessibilityHidden(page != .following)
+                } else if page == .following {
+                    VStack(alignment: .leading, spacing: 35) {
+                        CoveEmptyState(symbol: "person.2", title: "Your people are here.", message: "Connect your Nostr identity to bring your follow list with you. You can always browse and watch without signing in.")
+                        Button("Sign in") { showLoginSheet = true }.buttonStyle(CoveButtonStyle(prominent: true))
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading).padding(80)
                 }
-
-                // Stream info
-                VStack(alignment: .leading, spacing: 8) {
-                    // Stream title
-                    Text(stream.title)
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                        .lineLimit(2)
-
-                    // Streamer info
-                    HStack(spacing: 8) {
-                        // Profile picture
-                        if let pubkey = stream.pubkey,
-                           let profile = viewModel.getProfile(for: pubkey),
-                           let pictureURL = profile.picture,
-                           let url = URL(string: pictureURL) {
-                            CachedAsyncImage(url: url) { image in
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                                    .frame(width: 32, height: 32)
-                                    .clipShape(Circle())
-                            } placeholder: {
-                                Circle()
-                                    .fill(Color.coveOverlay)
-                                    .frame(width: 32, height: 32)
-                            }
-                        } else {
-                            Circle()
-                                .fill(Color.coveAccent.opacity(0.3))
-                                .frame(width: 32, height: 32)
-                                .overlay(
-                                    Image(systemName: "person.fill")
-                                        .foregroundColor(.white)
-                                        .font(.system(size: 16))
-                                )
-                        }
-
-                        // Username
-                        Text({
-                            if let pubkey = stream.pubkey,
-                               let profile = viewModel.getProfile(for: pubkey) {
-                                return profile.displayNameOrName
-                            }
-                            return "Unknown"
-                        }())
-                        .font(.body)
-                        .foregroundColor(.coveSecondary)
-                    }
-
-                    // Category and viewer count
-                    HStack(spacing: 12) {
-                        Text(stream.category)
-                            .font(.subheadline)
-                            .foregroundColor(.coveSecondary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.coveOverlay)
-                            .cornerRadius(CoveUI.badgeCornerRadius)
-
-                        if stream.viewerCount > 0 {
-                            HStack(spacing: 4) {
-                                Image(systemName: "eye.fill")
-                                    .font(.caption)
-                                Text("\(stream.viewerCount)")
-                                    .font(.subheadline)
-                            }
-                            .foregroundColor(.coveSecondary)
-                        }
-                    }
+                if page == .profile {
+                    ProfileSettingsView(authManager: authManager, isPresented: $showProfilePage)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
         }
-        .buttonStyle(.card)
+        .background(Color.coveBackground).foregroundStyle(.white)
+        .ignoresSafeArea()
+        .fullScreenCover(isPresented: $showPlayer) {
+            if let player {
+                VideoPlayerView(player: player, lightningAddress: selectedStream?.profile?.lud16,
+                                stream: selectedStream, nostrSDKClient: nostrSDKClient, authManager: authManager)
+            }
+        }
+        .fullScreenCover(isPresented: $showLoginSheet) { WelcomeView(authManager: authManager) }
+        .alert("Stream unavailable", isPresented: Binding(get: { playbackError != nil }, set: { if !$0 { playbackError = nil } })) {
+            Button("OK", role: .cancel) { playbackError = nil }
+        } message: {
+            Text(playbackError ?? "")
+        }
+        .onAppear { viewModel.updateFollowList(authManager.followList) }
+        .onChange(of: authManager.followList) { _, list in viewModel.updateFollowList(list) }
+        .onChange(of: authManager.isAuthenticated) { _, authenticated in if authenticated { showLoginSheet = false } }
+        .onChange(of: showPlayer) { _, showing in
+            if !showing { player?.pause(); player = nil }
+        }
     }
-}
 
-struct CategoryHeaderView: View {
-    let categoryName: String
-    let streamCount: Int
-
-    var body: some View {
-        HStack {
-            Text(categoryName)
-                .font(.system(size: 22, weight: .semibold, design: .rounded))
+    private var navigation: some View {
+        HStack(spacing: 50) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("cove").font(.system(size: 50, weight: .bold, design: .rounded)).tracking(-3)
+                Circle().fill(Color.coveAccent).frame(width: 11, height: 11)
+            }.accessibilityLabel("Cove")
+            ForEach([Page.discover, .following], id: \.self) { item in
+                Button(item.rawValue) { page = item }
+                    .buttonStyle(CoveButtonStyle(selected: page == item))
+                    .accessibilityIdentifier("nav-\(item == .discover ? "discover" : "following")")
+                    .accessibilityAddTraits(page == item ? .isSelected : [])
+            }
             Spacer()
-            Text("\(streamCount)")
-                .font(.caption)
-                .foregroundColor(.coveSecondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.coveOverlay)
-                .cornerRadius(CoveUI.badgeCornerRadius)
+            Button { page = .profile } label: {
+                HStack(spacing: 14) {
+                    CoveAvatar(profile: authManager.currentProfile, size: 36)
+                    Text(authManager.isAuthenticated ? "Your space" : "Sign in")
+                }
+            }.buttonStyle(CoveButtonStyle(selected: page == .profile))
+                .accessibilityIdentifier("nav-profile")
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 80).padding(.top, 40).padding(.bottom, 20)
+        .focusSection()
     }
-}
 
-struct StreamRowView: View {
-    let stream: Stream
-    let viewModel: StreamViewModel
-    let onStreamSelected: (URL, String?, Stream) -> Void
-
-    var body: some View {
-        Button(action: {
-            if let url = URL(string: stream.streaming_url) {
-                let lightningAddress: String? = {
-                    if let pubkey = stream.pubkey, let profile = viewModel.getProfile(for: pubkey) {
-                        return profile.lud16
-                    }
-                    return nil
-                }()
-                onStreamSelected(url, lightningAddress, stream)
-            }
-        }) {
-            HStack(spacing: 12) {
-                // Stream thumbnail with profile picture fallback
-                if let imageURL = stream.imageURL, let url = URL(string: imageURL) {
-                    CachedAsyncImage(url: url) { image in
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 200, height: 120)
-                            .clipped()
-                            .cornerRadius(8)
-                    } placeholder: {
-                        Image("Top Shelf Image")
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 200, height: 120)
-                            .clipped()
-                            .cornerRadius(8)
-                    }
-                } else if let pubkey = stream.pubkey,
-                          let profile = viewModel.getProfile(for: pubkey),
-                          let pictureURL = profile.picture,
-                          let url = URL(string: pictureURL) {
-                    // Use profile picture as fallback thumbnail
-                    CachedAsyncImage(url: url) { image in
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 200, height: 120)
-                            .clipped()
-                            .cornerRadius(8)
-                    } placeholder: {
-                        Image("Top Shelf Image")
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 200, height: 120)
-                            .clipped()
-                            .cornerRadius(8)
-                    }
-                } else {
-                    Image("Top Shelf Image")
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 200, height: 120)
-                        .clipped()
-                        .cornerRadius(8)
-                }
-
-                // Stream info including profile
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(stream.title)
-                        .font(.headline)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-
-                    // Status indicator and tags
-                    HStack(spacing: 8) {
-                        // Live/Ended indicator — amber glow for live
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(stream.isLive ? Color.coveGold : Color.coveSecondary)
-                                .frame(width: 8, height: 8)
-                                .shadow(color: stream.isLive ? .coveGold.opacity(0.6) : .clear, radius: 3)
-                            Text(stream.isLive ? "LIVE" : "ENDED")
-                                .font(.system(size: 12, weight: .bold, design: .rounded))
-                                .foregroundColor(stream.isLive ? .coveGold : .coveSecondary)
-                        }
-
-                        // Tags
-                        if !stream.tags.isEmpty {
-                            Text(stream.tags.prefix(2).joined(separator: ", "))
-                                .font(.caption)
-                                .foregroundColor(.coveSecondary)
-                                .lineLimit(1)
-                        }
-                    }
-
-                    // Profile info
-                    HStack(spacing: 6) {
-                        // Profile picture
-                        if let pubkey = stream.pubkey,
-                           let profile = viewModel.getProfile(for: pubkey),
-                           let pictureURL = profile.picture,
-                           let url = URL(string: pictureURL) {
-                            CachedAsyncImage(url: url) { image in
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                                    .frame(width: 24, height: 24)
-                                    .clipShape(Circle())
-                            } placeholder: {
-                                Circle()
-                                    .fill(Color.coveOverlay)
-                                    .frame(width: 24, height: 24)
-                            }
-                        } else {
-                            // Default profile picture
-                            Circle()
-                                .fill(Color.coveAccent.opacity(0.3))
-                                .frame(width: 24, height: 24)
-                                .overlay(
-                                    Image(systemName: "person.fill")
-                                        .foregroundColor(.white)
-                                        .font(.system(size: 12))
-                                )
-                        }
-
-                        // Username
-                        Text({
-                            if let pubkey = stream.pubkey,
-                               let profile = viewModel.getProfile(for: pubkey) {
-                                return profile.displayNameOrName
-                            }
-                            return "Unknown"
-                        }())
-                        .font(.subheadline)
-                        .foregroundColor(.coveSecondary)
-                    }
-                }
-
-                Spacer()
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 6)
+    private func watch(_ stream: Stream) {
+        let source = stream.isLive ? stream.streaming_url : (stream.recording ?? stream.streaming_url)
+        guard let url = StreamPlayback.nativeURL(source) else {
+            playbackError = StreamPlayback.unavailableMessage(for: source)
+            return
         }
-        .buttonStyle(.card)
-        .opacity(stream.isLive ? 1.0 : 0.6) // Dim ended streams
+        selectedStream = stream.attachingProfile(stream.pubkey.flatMap { viewModel.getProfile(for: $0) })
+        #if DEBUG
+        player = CoveUITestSupport.enabled ? AVPlayer() : AVPlayer(playerItem: StreamPlayback.playerItem(for: url))
+        #else
+        player = AVPlayer(playerItem: StreamPlayback.playerItem(for: url))
+        #endif
+        showPlayer = true
     }
 }
 
 struct StreamListView: View {
     @ObservedObject var viewModel: StreamViewModel
-    let categorizedStreams: [StreamCategory]
-    let featuredStream: Stream?
-    let onStreamSelected: (URL, String?, Stream) -> Void
+    let categories: [StreamCategory]
+    let isFollowing: Bool
+    let isLoading: Bool
+    let onStreamSelected: (Stream) -> Void
+    @State private var order = CoveStreamOrder()
+    @State private var selectedCategory = "All live"
+    @FocusState private var focusedStream: String?
+
+    private var incoming: [Stream] { categories.flatMap(\.streams).filter(\.isLive) }
+    private var streams: [Stream] {
+        let lookup = Dictionary(incoming.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return order.ids.compactMap { lookup[$0] }
+    }
+    private var featured: Stream? { streams.first }
+    private var recordings: [Stream] { categories.flatMap(\.streams).filter { !$0.isLive && $0.recording?.isEmpty == false } }
+    private var categoryNames: [String] { Array(Set(incoming.map(\.category))).sorted() }
+    private var shelf: [Stream] {
+        streams.filter { ($0.id != featured?.id || selectedCategory != "All live") && (selectedCategory == "All live" || $0.category == selectedCategory) }
+    }
 
     var body: some View {
-        List {
-            // Featured stream section (stream with most viewers)
-            if let featured = featuredStream {
-                Section {
-                    FeaturedStreamCardView(stream: featured, viewModel: viewModel) { url, lightningAddress, selectedStream in
-                        onStreamSelected(url, lightningAddress, selectedStream)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 30) {
+                if isLoading {
+                    HStack(spacing: 24) { ProgressView().tint(.coveAccent); Text("Finding your company…").font(.coveSubheading) }
+                        .padding(80)
+                } else if let featured {
+                    FeaturedStreamCardView(stream: featured, profile: profile(for: featured), onWatch: { onStreamSelected(featured) })
+                        .focused($focusedStream, equals: featured.id)
+                        .id(featured.id)
+                    if !shelf.isEmpty || !categoryNames.isEmpty {
+                        VStack(alignment: .leading, spacing: 30) {
+                            HStack(alignment: .center, spacing: 40) {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(isFollowing ? "Live from your people" : "Find your company").font(.system(size: 32, weight: .semibold, design: .rounded))
+                                    Text(isFollowing ? "A familiar place to tune in." : "Independent voices. Happening now.").font(.coveCaption).foregroundStyle(Color.coveSecondary)
+                                }.frame(minWidth: 430, alignment: .leading)
+                                Spacer(minLength: 0)
+                                ScrollView(.horizontal) {
+                                    HStack(spacing: 16) {
+                                        ForEach(["All live"] + categoryNames, id: \.self) { name in
+                                            Button(name) { selectedCategory = name }
+                                                .buttonStyle(CoveButtonStyle(selected: name == selectedCategory))
+                                                .accessibilityAddTraits(name == selectedCategory ? .isSelected : [])
+                                        }
+                                    }.padding(10)
+                                }.scrollIndicators(.hidden).focusSection()
+                            }
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 30), count: 4), alignment: .leading, spacing: 40) {
+                                ForEach(shelf) { stream in
+                                    StreamRowView(stream: stream, profile: profile(for: stream)) { onStreamSelected(stream) }
+                                        .focused($focusedStream, equals: stream.id).id(stream.id)
+                                }
+                            }.focusSection()
+                        }.padding(.horizontal, 80)
                     }
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
+                } else {
+                    VStack(alignment: .leading, spacing: 30) {
+                        CoveEmptyState(symbol: isFollowing ? "moon.stars" : "antenna.radiowaves.left.and.right",
+                            title: emptyTitle, message: emptyMessage)
+                    }.padding(80).frame(minHeight: 600, alignment: .leading)
                 }
-            }
-
-            // Regular categorized streams
-            ForEach(categorizedStreams, id: \.name) { category in
-                Section(header: CategoryHeaderView(categoryName: category.name, streamCount: category.streams.count)) {
-                    ForEach(category.streams) { stream in
-                        // Don't show the featured stream again in the regular list
-                        if stream.id != featuredStream?.id {
-                            StreamRowView(stream: stream, viewModel: viewModel) { url, lightningAddress, selectedStream in
-                                onStreamSelected(url, lightningAddress, selectedStream)
+                if !recordings.isEmpty {
+                    VStack(alignment: .leading, spacing: 30) {
+                        Text("Catch up").font(.coveSubheading)
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 30), count: 4), spacing: 40) {
+                            ForEach(recordings) { stream in
+                                StreamRowView(stream: stream, profile: profile(for: stream)) { onStreamSelected(stream) }
                             }
                         }
-                    }
+                    }.padding(.horizontal, 80).focusSection()
                 }
             }
+            .padding(.bottom, 70)
         }
+
+        .onChange(of: incoming.map(\.id), initial: true) { _, ids in order.reconcile(ids) }
+        .onChange(of: categoryNames) { _, names in
+            if selectedCategory != "All live" && !names.contains(selectedCategory) { selectedCategory = "All live" }
+        }
+    }
+
+    private var emptyTitle: String {
+        if !isFollowing { return "It’s quiet here for now." }
+        return viewModel.followListCount == 0 ? "Your follow list hasn’t loaded." : "Nobody you follow is live."
+    }
+    private var emptyMessage: String {
+        if !isFollowing { return "No live streams are available yet. We’ll keep listening for new broadcasts. Try Following or check your connection if this continues." }
+        return viewModel.followListCount == 0 ? "Open Your space to refresh your profile and follow list, or discover someone new to watch." : "You’re following \(viewModel.followListCount) people. Check Discover for more live streams while they’re away."
+    }
+    private func profile(for stream: Stream) -> Profile? { stream.pubkey.flatMap { viewModel.getProfile(for: $0) } ?? stream.profile }
+}
+
+struct FeaturedStreamCardView: View {
+    let stream: Stream
+    let profile: Profile?
+    let onWatch: () -> Void
+    var body: some View {
+        ZStack(alignment: .leading) {
+            CoveArtwork(urls: stream.artworkURLs(profile: profile), streamID: stream.id)
+            LinearGradient(stops: [.init(color: .coveBackground, location: 0), .init(color: .coveBackground.opacity(0.9), location: 0.3), .init(color: .clear, location: 1)], startPoint: .leading, endPoint: .trailing)
+            LinearGradient(colors: [.clear, .coveBackground], startPoint: .center, endPoint: .bottom)
+            VStack(alignment: .leading, spacing: 23) {
+                HStack(spacing: 24) {
+                    CoveLiveBadge()
+                    Text(stream.category.uppercased()).font(.system(size: 18, weight: .semibold)).tracking(3).foregroundStyle(Color.coveAccent)
+                }
+                Text(stream.title).font(.system(size: 58, weight: .semibold, design: .rounded)).lineLimit(2).minimumScaleFactor(0.8)
+                    .frame(maxWidth: 850, alignment: .leading)
+                HStack(spacing: 16) {
+                    CoveAvatar(profile: profile)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(profile?.displayNameOrName ?? "Independent creator").font(.coveBody)
+                        Text("\(stream.viewerCount) watching").font(.coveCaption).foregroundStyle(Color.coveSecondary)
+                    }
+                }
+                Button(action: onWatch) { Label("Watch live", systemImage: "play.fill") }
+                    .buttonStyle(CoveButtonStyle(prominent: true)).accessibilityIdentifier("watch-featured")
+            }.padding(.horizontal, 80).padding(.vertical, 30)
+        }.frame(height: 400).clipped()
     }
 }
 
-struct ContentView: View {
-    @StateObject private var viewModel: StreamViewModel
-    @EnvironmentObject var authManager: NostrAuthManager
-    @State private var selectedStreamURL: URL?
-    @State private var showPlayer = false
-    @State private var player: AVPlayer?
-    @State private var selectedLightningAddress: String?
-    @State private var selectedStream: Stream?  // Track selected stream for live activity
-    @State private var showProfilePage = true  // Kept for ProfileSettingsView binding
-    @State private var showLoginSheet = false
-
-    /// The shared NostrSDKClient created at the app level.
-    /// ContentView passes it into StreamViewModel and forwards it to any child
-    /// views/managers that need relay access (VideoPlayerView, LiveActivityManager, etc.).
-    private let nostrSDKClient: NostrSDKClient
-
-    init(nostrSDKClient: NostrSDKClient) {
-        self.nostrSDKClient = nostrSDKClient
-        // Construct inside the autoclosure. Assigning to a local first defeats
-        // StateObject's laziness: SwiftUI re-initializes View structs freely, so a
-        // new view model would be built on every init — and each one registers
-        // callbacks on the shared client, letting a discarded instance win.
-        _viewModel = StateObject(wrappedValue: StreamViewModel(nostrSDKClient: nostrSDKClient))
-    }
-
+struct StreamRowView: View {
+    let stream: Stream
+    let profile: Profile?
+    let onWatch: () -> Void
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            TabView {
-                // Curated tab (filtered by admin follow list)
-                NavigationView {
-                    if viewModel.isInitialLoad {
-                        CuratedLoadingView()
-                    } else {
-                        StreamListView(
-                            viewModel: viewModel,
-                            categorizedStreams: viewModel.allCategorizedStreams,
-                            featuredStream: viewModel.discoverFeaturedStream
-                        ) { url, lightningAddress, selectedStream in
-                            let player = AVPlayer(url: url)
-                            self.player = player
-                            self.selectedLightningAddress = lightningAddress
-
-                            // Attach profile to stream before passing to VideoPlayerView
-                            var streamWithProfile = selectedStream
-                            if let pubkey = selectedStream.pubkey, let profile = viewModel.getProfile(for: pubkey) {
-                                streamWithProfile = Stream(
-                                    streamID: selectedStream.streamID,
-                                    eventID: selectedStream.eventID,
-                                    title: selectedStream.title,
-                                    streaming_url: selectedStream.streaming_url,
-                                    imageURL: selectedStream.imageURL,
-                                    pubkey: selectedStream.pubkey,
-                                    eventAuthorPubkey: selectedStream.eventAuthorPubkey,
-                                    profile: profile,
-                                    status: selectedStream.status,
-                                    tags: selectedStream.tags,
-                                    createdAt: selectedStream.createdAt,
-                                    viewerCount: selectedStream.viewerCount,
-                                    recording: selectedStream.recording,
-                                    startsAt: selectedStream.startsAt
-                                )
-                            }
-
-                            self.selectedStream = streamWithProfile
-                            self.showPlayer = true
-                        }
+        Button(action: onWatch) {
+            VStack(alignment: .leading, spacing: 18) {
+                CoveArtwork(urls: stream.artworkURLs(profile: profile), streamID: stream.id)
+                    .aspectRatio(16 / 9, contentMode: .fit)
+                    .overlay(alignment: .topLeading) { CoveLiveBadge(live: stream.isLive).padding(16).background(Color.coveBackground.opacity(0.8)).clipShape(RoundedRectangle(cornerRadius: 8)).padding(16) }
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                HStack(alignment: .top, spacing: 14) {
+                    CoveAvatar(profile: profile, size: 38)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(stream.title).font(.system(size: 26, weight: .semibold)).lineLimit(2).frame(height: 64, alignment: .topLeading)
+                        Text(profile?.displayNameOrName ?? "Independent creator").font(.coveCaption).foregroundStyle(Color.coveSecondary).lineLimit(1)
+                        Text("\(stream.viewerCount) watching · \(stream.category)").font(.system(size: 18)).foregroundStyle(Color.coveSecondary).lineLimit(1)
                     }
+                    Spacer(minLength: 0)
                 }
-                .tabItem {
-                    Label("Curated", systemImage: "star.fill")
-                }
+            }.padding(6)
+        }
+        .buttonStyle(CoveStreamCardStyle())
+        .accessibilityLabel("\(stream.title), by \(profile?.displayNameOrName ?? "Independent creator"), \(stream.viewerCount) watching")
+    }
+}
 
-                // Following tab
-                NavigationView {
-                    if authManager.isAuthenticated {
-                        if viewModel.categorizedStreams.isEmpty && viewModel.featuredStream == nil {
-                            FollowingNoStreamsView(followCount: viewModel.followListCount)
-                        } else {
-                            StreamListView(
-                                viewModel: viewModel,
-                                categorizedStreams: viewModel.categorizedStreams,
-                                featuredStream: viewModel.featuredStream
-                            ) { url, lightningAddress, selectedStream in
-                                let player = AVPlayer(url: url)
-                                self.player = player
-                                self.selectedLightningAddress = lightningAddress
-
-                                // Attach profile to stream before passing to VideoPlayerView
-                                var streamWithProfile = selectedStream
-                                if let pubkey = selectedStream.pubkey, let profile = viewModel.getProfile(for: pubkey) {
-                                    streamWithProfile = Stream(
-                                        streamID: selectedStream.streamID,
-                                        eventID: selectedStream.eventID,
-                                        title: selectedStream.title,
-                                        streaming_url: selectedStream.streaming_url,
-                                        imageURL: selectedStream.imageURL,
-                                        pubkey: selectedStream.pubkey,
-                                        eventAuthorPubkey: selectedStream.eventAuthorPubkey,
-                                        profile: profile,
-                                        status: selectedStream.status,
-                                        tags: selectedStream.tags,
-                                        createdAt: selectedStream.createdAt,
-                                        viewerCount: selectedStream.viewerCount,
-                                        recording: selectedStream.recording,
-                                        startsAt: selectedStream.startsAt
-                                    )
-                                }
-
-                                self.selectedStream = streamWithProfile
-                                self.showPlayer = true
-                            }
-                        }
-                    } else {
-                        FollowingEmptyStateView(onLoginTap: {
-                            showLoginSheet = true
-                        })
-                    }
-                }
-                .tabItem {
-                    Label("Following", systemImage: "person.2.fill")
-                }
-
-                // Profile tab
-                ProfileSettingsView(authManager: authManager, isPresented: $showProfilePage)
-                    .tabItem {
-                        Label("Profile", systemImage: "person.crop.circle.fill")
-                    }
-            }
-        }
-        .ignoresSafeArea()
-        .fullScreenCover(isPresented: $showPlayer) {
-            if let player = player {
-                VideoPlayerView(player: player, lightningAddress: selectedLightningAddress, stream: selectedStream, nostrSDKClient: nostrSDKClient, authManager: authManager)
-                    .ignoresSafeArea()
-            }
-        }
-        .fullScreenCover(isPresented: $showLoginSheet) {
-            WelcomeView(authManager: authManager)
-        }
-        .onAppear {
-            // Update follow list when view appears
-            viewModel.updateFollowList(authManager.followList)
-        }
-        .onChange(of: authManager.followList) { oldValue, newValue in
-            // Update filter when follow list changes
-            viewModel.updateFollowList(newValue)
-        }
-        .onChange(of: authManager.isAuthenticated) { oldValue, newValue in
-            // Close login sheet when user successfully authenticates
-            if newValue == true {
-                showLoginSheet = false
-            }
-        }
-        .onChange(of: showPlayer) { oldValue, newValue in
-            if oldValue == true && newValue == false {
-                player?.pause()
-                player = nil
-            }
-        }
+private struct CoveStreamCardStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { CoveStreamCardSurface(configuration: configuration) }
+}
+private struct CoveStreamCardSurface: View {
+    let configuration: ButtonStyleConfiguration
+    @Environment(\.isFocused) private var focused
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        configuration.label.foregroundStyle(.white)
+            .padding(10).background(focused ? Color.coveSurface : .clear)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(focused ? Color.coveAccent : .clear, lineWidth: 4))
+            .scaleEffect(focused && !reduceMotion ? 1.025 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: focused)
     }
 }
