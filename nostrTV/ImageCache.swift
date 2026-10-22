@@ -56,17 +56,29 @@ actor ImageCache {
 
         // Create new loading task
         let task = Task<UIImage?, Never> {
-            do {
-                let request = URLRequest(url: url, timeoutInterval: 10)
-                let (data, response) = try await session.data(for: request)
-                guard let response = response as? HTTPURLResponse,
-                      (200..<300).contains(response.statusCode) else { return nil }
-                if let image = UIImage(data: data) {
+            for attempt in 0..<2 {
+                do {
+                    let request = URLRequest(url: url, timeoutInterval: 10)
+                    let (data, response) = try await session.data(for: request)
+                    guard let response = response as? HTTPURLResponse else { return nil }
+                    if !(200..<300).contains(response.statusCode) {
+                        guard attempt == 0, [408, 429, 500, 502, 503, 504].contains(response.statusCode) else { return nil }
+                        try await Task.sleep(for: .milliseconds(500))
+                        continue
+                    }
+                    guard let image = UIImage(data: data) else { return nil }
                     self.setImage(image, for: url)
                     return image
+                } catch {
+                    let transient = (error as? URLError).map {
+                        [.timedOut, .networkConnectionLost, .notConnectedToInternet, .cannotConnectToHost, .cannotFindHost].contains($0.code)
+                    } ?? false
+                    guard attempt == 0, transient else {
+                        print("⚠️ ImageCache: Failed to load image: \(error.localizedDescription)")
+                        return nil
+                    }
+                    try? await Task.sleep(for: .milliseconds(500))
                 }
-            } catch {
-                print("\u{26A0}\u{FE0F} ImageCache: Failed to load image: \(error.localizedDescription)")
             }
             return nil
         }

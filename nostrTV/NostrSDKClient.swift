@@ -119,11 +119,10 @@ class NostrSDKClient {
     /// published a kind 0 is re-requested every time the pending marker expires — for
     /// an active chatter with no profile, forever.
     private var profileMisses: [String: Date] = [:]
-    private static let profileMissBackoff: TimeInterval = 60 * 60
-    private static let profileMissGrace: TimeInterval = 8.0
+    private static let profileMissBackoff: TimeInterval = 60
 
     /// Rate limiter for relay requests
-    private let rateLimiter = RelayRateLimiter()
+    private let rateLimiter: RelayRateLimiter
 
     /// Batch size for profile requests
     private let profileBatchSize = 30
@@ -226,6 +225,7 @@ class NostrSDKClient {
 
     /// Called when a profile metadata event (kind 0) is received, keyed by subscription ID
     private var profileReceivedCallbacks: [String: (Profile) -> Void] = [:]
+    private let profileCallbacksLock = NSLock()
 
     /// Called when a follow list event (kind 3) is received, keyed by subscription ID.
     /// Using the same `subscriptionId` replaces any existing callback for that subscription.
@@ -278,7 +278,8 @@ class NostrSDKClient {
 
     /// Initialize with relay URLs
     /// - Parameter relayURLs: Array of WebSocket relay URLs (e.g., ["wss://relay.damus.io"])
-    init(relayURLs: [String] = []) throws {
+    init(relayURLs: [String] = [], rateLimiter: RelayRateLimiter = RelayRateLimiter()) throws {
+        self.rateLimiter = rateLimiter
         print("🔧 NostrSDKClient: Initializing with \(relayURLs.count) relay URLs")
         // Convert strings to URLs
         let urls = relayURLs.compactMap { URL(string: $0) }
@@ -600,14 +601,7 @@ class NostrSDKClient {
     /// - Returns: Subscription ID for later reference
     @discardableResult
     func subscribe(with filter: Filter, purpose: String = "custom", oneShot: Bool = false) -> String {
-        let subscriptionId = relayPool.subscribe(with: filter)
-        subscriptionsLock.lock()
-        activeSubscriptions[subscriptionId] = StoredSubscription(
-            id: subscriptionId, filter: filter, purpose: purpose, isOneShot: oneShot
-        )
-        subscriptionsLock.unlock()
-        if oneShot { scheduleOneShotFallbackClose(subscriptionId) }
-        return subscriptionId
+        subscribe(with: filter, subscriptionId: UUID().uuidString, purpose: purpose, oneShot: oneShot)
     }
 
     /// Subscribe with an explicit subscription ID so reconnection can restore the exact same subscription.
@@ -623,12 +617,15 @@ class NostrSDKClient {
                   + "and no events will arrive: \(subscriptionId)")
         }
 
-        let actualId = relayPool.subscribe(with: filter, subscriptionId: subscriptionId)
+        // Register before sending. A relay can finish connecting during subscribe;
+        // its replay callback must already see this request, even if the initial
+        // send observed the socket as not connected.
         subscriptionsLock.lock()
-        activeSubscriptions[actualId] = StoredSubscription(
-            id: actualId, filter: filter, purpose: purpose, isOneShot: oneShot
+        activeSubscriptions[subscriptionId] = StoredSubscription(
+            id: subscriptionId, filter: filter, purpose: purpose, isOneShot: oneShot
         )
         subscriptionsLock.unlock()
+        let actualId = relayPool.subscribe(with: filter, subscriptionId: subscriptionId)
         if oneShot { scheduleOneShotFallbackClose(actualId) }
         return actualId
     }
@@ -788,7 +785,7 @@ class NostrSDKClient {
     /// Add a callback for profile received events, keyed by subscription ID.
     /// Using the same `subscriptionId` replaces any existing callback for that subscription.
     func addProfileReceivedCallback(forSubscriptionId subscriptionId: String, _ callback: @escaping (Profile) -> Void) {
-        profileReceivedCallbacks[subscriptionId] = callback
+        profileCallbacksLock.withLock { profileReceivedCallbacks[subscriptionId] = callback }
     }
 
 
@@ -818,7 +815,7 @@ class NostrSDKClient {
     /// Remove callbacks for a specific subscription ID.
     /// Removes profile, follow list, chat, AND zap callbacks registered under that key.
     func removeCallback(forSubscriptionId subscriptionId: String) {
-        profileReceivedCallbacks.removeValue(forKey: subscriptionId)
+        _ = profileCallbacksLock.withLock { profileReceivedCallbacks.removeValue(forKey: subscriptionId) }
         followListReceivedCallbacks.removeValue(forKey: subscriptionId)
         chatReceivedCallbacks.removeValue(forKey: subscriptionId)
         zapReceivedCallbacks.removeValue(forKey: subscriptionId)
@@ -840,49 +837,54 @@ class NostrSDKClient {
     /// - Returns: Cached profile if available and not expired
     func getProfile(for pubkey: String) -> Profile? {
         guard !pubkey.isEmpty else { return nil }
+        let pubkey = pubkey.lowercased()
 
-        // Thread-safe read
-        let result = profileQueue.sync { () -> (profile: Profile?, shouldUpdate: Bool, shouldRemove: Bool) in
-            guard let entry = profileCache[pubkey] else {
-                return (nil, false, false)
-            }
-
-            // Check expiration
+        return profileQueue.sync(flags: .barrier) {
+            guard var entry = profileCache[pubkey] else { return nil }
             let now = Date()
             if now.timeIntervalSince(entry.timestamp) > profileCacheTTL {
-                return (nil, false, true) // Expired
+                profileCache.removeValue(forKey: pubkey)
+                return nil
             }
-
-            return (entry.profile, true, false) // Valid
+            // Expiry and access updates share the read's critical section, so an
+            // old queued expiry cannot remove a freshly received replacement.
+            entry.lastAccessed = now
+            profileCache[pubkey] = entry
+            return entry.profile
         }
-
-        // Update access time or remove expired entry (outside sync block)
-        if result.shouldUpdate {
-            profileQueue.async(flags: .barrier) { [weak self] in
-                self?.profileCache[pubkey]?.lastAccessed = Date()
-            }
-        } else if result.shouldRemove {
-            profileQueue.async(flags: .barrier) { [weak self] in
-                self?.profileCache.removeValue(forKey: pubkey)
-            }
-        }
-
-        return result.profile
     }
 
-    /// Manually cache a profile
-    func cacheProfile(_ profile: Profile, for pubkey: String) {
-        profileQueue.async(flags: .barrier) { [weak self] in
-            guard let self = self else { return }
-
+    /// Kind 0 is replaceable. A slow relay must never roll a profile back to an
+    /// older avatar/name; equal timestamps use NIP-01's lowest-event-ID rule.
+    @discardableResult
+    func cacheProfile(_ profile: Profile, for pubkey: String, createdAt: TimeInterval, eventID: String) -> Bool {
+        let pubkey = pubkey.lowercased()
+        let changed: Bool? = profileQueue.sync(flags: .barrier) {
+            if let current = profileCache[pubkey] {
+                guard createdAt > current.createdAt ||
+                    (createdAt == current.createdAt && eventID < current.eventID) else { return nil }
+            }
+            let changed = profileCache[pubkey]?.profile != profile
             let now = Date()
-            let entry = ProfileCacheEntry(profile: profile, timestamp: now, lastAccessed: now)
-
-            // Evict if needed
-            self.evictOldProfilesIfNeeded()
-
-            self.profileCache[pubkey] = entry
+            let entry = ProfileCacheEntry(profile: profile, createdAt: createdAt, eventID: eventID,
+                timestamp: now, lastAccessed: now)
+            evictOldProfilesIfNeeded()
+            profileCache[pubkey] = entry
+            return changed
         }
+        guard let changed else { return false }
+        pendingRequestsQueue.async { [weak self] in
+            self?.pendingProfileRequests.remove(pubkey)
+            self?.profileMisses.removeValue(forKey: pubkey)
+        }
+        if changed {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.getProfile(for: pubkey) == profile else { return }
+                let callbacks = self.profileCallbacksLock.withLock { Array(self.profileReceivedCallbacks.values) }
+                for callback in callbacks { callback(profile) }
+            }
+        }
+        return true
     }
 
     /// Evict expired and least recently used profiles
@@ -954,7 +956,7 @@ class NostrSDKClient {
             self.closeSubscription(subscriptionId)
             self.removeCallback(forSubscriptionId: subscriptionId)
             print("🧹 NostrSDKClient: Closed one-shot subscription \(subscriptionId.prefix(8))… "
-                  + "(no EOSE within \(Int(Self.oneShotFallbackTimeout))s)")
+                  + "(lookup window of \(Int(Self.oneShotFallbackTimeout))s expired)")
         }
     }
 
@@ -962,6 +964,9 @@ class NostrSDKClient {
     private func scheduleOneShotCloseIfNeeded(_ subscriptionId: String) {
         subscriptionsLock.lock()
         let shouldSchedule = activeSubscriptions[subscriptionId]?.isOneShot == true
+            // A fast relay's empty answer says nothing about slower metadata
+            // relays. Profile batches get the full bounded lookup window.
+            && activeSubscriptions[subscriptionId]?.purpose.hasPrefix("profiles-batch-") != true
             && !oneShotClosesScheduled.contains(subscriptionId)
         if shouldSchedule {
             oneShotClosesScheduled.insert(subscriptionId)
@@ -990,7 +995,8 @@ class NostrSDKClient {
         var uncachedPubkeys: [String] = []
         pendingRequestsQueue.sync {
             let now = Date()
-            uncachedPubkeys = pubkeys.filter { pubkey in
+            uncachedPubkeys = Set(pubkeys.map { $0.lowercased() }).sorted().filter { pubkey in
+                guard !pubkey.isEmpty else { return false }
                 guard !pendingProfileRequests.contains(pubkey), getProfile(for: pubkey) == nil else {
                     return false
                 }
@@ -1001,16 +1007,12 @@ class NostrSDKClient {
                 }
                 return true
             }
+            // Reserve in the same critical section as filtering. Parallel callers
+            // otherwise both see a key as absent and enqueue duplicate lookups.
+            pendingProfileRequests.formUnion(uncachedPubkeys)
         }
 
         guard !uncachedPubkeys.isEmpty else { return }
-
-        // Mark all as pending
-        pendingRequestsQueue.async { [weak self] in
-            for pubkey in uncachedPubkeys {
-                self?.pendingProfileRequests.insert(pubkey)
-            }
-        }
 
         // Batch into groups
         let batches = uncachedPubkeys.chunked(into: profileBatchSize)
@@ -1022,43 +1024,33 @@ class NostrSDKClient {
             DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self = self else { return }
 
-                // Check rate limit
-                guard self.rateLimiter.shouldAllowRequest() else {
-                    // Retry after delay
-                    DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
-                        self.requestProfiles(for: batch)
-                    }
-                    return
-                }
-
-                guard let filter = Filter(authors: batch, kinds: [0], limit: batch.count) else {
-                    return
-                }
-
-                // One-shot: closed as soon as the relays report end-of-stored-events.
-                self.subscribe(with: filter, purpose: "profiles-batch-\(index)", oneShot: true)
-                print("📋 NostrSDKClient: Requested \(batch.count) profiles in batch \(index)")
-
-                // Whatever has not arrived by now is treated as absent rather than
-                // pending, so it is not re-requested the moment the marker expires.
-                DispatchQueue.global().asyncAfter(deadline: .now() + Self.profileMissGrace) { [weak self] in
-                    guard let self = self else { return }
-                    self.pendingRequestsQueue.async {
-                        let now = Date()
-                        for pubkey in batch where self.getProfile(for: pubkey) == nil {
-                            self.profileMisses[pubkey] = now
-                        }
-                    }
-                }
+                self.sendProfileBatch(batch, index: index)
             }
         }
 
-        // Clear pending after timeout
-        DispatchQueue.global().asyncAfter(deadline: .now() + 30) { [weak self] in
-            self?.pendingRequestsQueue.async {
-                for pubkey in uncachedPubkeys {
-                    self?.pendingProfileRequests.remove(pubkey)
-                }
+    }
+
+    private func sendProfileBatch(_ batch: [String], index: Int) {
+        guard rateLimiter.shouldAllowRequest() else {
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                // These keys are already reserved. Re-entering requestProfiles
+                // filtered them all out as pending and silently lost the retry.
+                self?.sendProfileBatch(batch, index: index)
+            }
+            return
+        }
+        guard let filter = Filter(authors: batch, kinds: [0], limit: batch.count) else {
+            pendingRequestsQueue.async { [weak self] in self?.pendingProfileRequests.subtract(batch) }
+            return
+        }
+        subscribe(with: filter, purpose: "profiles-batch-\(index)", oneShot: true)
+        print("📋 NostrSDKClient: Requested \(batch.count) profiles in batch \(index)")
+        pendingRequestsQueue.asyncAfter(deadline: .now() + Self.oneShotFallbackTimeout) { [weak self] in
+            guard let self else { return }
+            let now = Date()
+            for pubkey in batch {
+                self.pendingProfileRequests.remove(pubkey)
+                if self.getProfile(for: pubkey) == nil { self.profileMisses[pubkey] = now }
             }
         }
     }
@@ -1067,46 +1059,9 @@ class NostrSDKClient {
 
     /// Handle kind 0 (metadata/profile) events
     private func handleMetadataEvent(_ event: NostrSDK.NostrEvent) {
-        // SDK provides MetadataEvent subclass
-        guard let metadataEvent = event as? MetadataEvent else {
-            return
-        }
-
-        guard let metadata = metadataEvent.userMetadata else {
-            return
-        }
-
         let pubkey = event.pubkey
-
-        // Convert SDK UserMetadata to our Profile model
-        let profile = Profile(
-            pubkey: pubkey,
-            name: metadata.name,
-            displayName: metadata.displayName,
-            about: metadata.about,
-            picture: metadata.pictureURL?.absoluteString,
-            nip05: metadata.nostrAddress,
-            lud16: metadata.lightningAddress ?? metadata.lightningURLString
-        )
-
-        // Cache profile
-        cacheProfile(profile, for: pubkey)
-
-        // Remove from pending, and clear any recorded miss — this pubkey has a profile
-        // after all, so a later lookup should not be suppressed by the backoff.
-        pendingRequestsQueue.async { [weak self] in
-            self?.pendingProfileRequests.remove(pubkey)
-            self?.profileMisses.removeValue(forKey: pubkey)
-        }
-
-        // Notify callbacks
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            for callback in self.profileReceivedCallbacks.values {
-                callback(profile)
-            }
-        }
-
+        guard let profile = Profile.fromMetadata(pubkey: pubkey, content: event.content) else { return }
+        cacheProfile(profile, for: pubkey, createdAt: TimeInterval(event.createdAt), eventID: event.id)
     }
 
     /// Handle kind 3 (follow list) events
@@ -1605,6 +1560,8 @@ class NostrSDKClient {
 /// Cache entry for profile data with timestamp tracking
 private struct ProfileCacheEntry {
     let profile: Profile
+    let createdAt: TimeInterval
+    let eventID: String
     let timestamp: Date
     var lastAccessed: Date
 }

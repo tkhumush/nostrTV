@@ -20,6 +20,7 @@ private struct CoveButtonSurface: View {
     var body: some View {
         configuration.label
             .font(.system(size: 24, weight: .semibold))
+            .frame(minHeight: 36)
             .padding(.horizontal, 26).padding(.vertical, 18)
             .foregroundStyle(prominent ? Color.coveBackground : Color.white)
             .background(prominent ? Color.coveAccent : (selected ? Color.coveOverlay : Color.coveSurface))
@@ -35,7 +36,8 @@ struct CoveAvatar: View {
     let profile: Profile?
     var size: CGFloat = 48
     var body: some View {
-        CachedAsyncImage(url: URL(string: profile?.picture ?? "")) { image in
+        let urls = ArtworkSource.urls([profile?.picture])
+        CachedAsyncImage(urls: urls, preserveImageFor: urls.isEmpty ? nil : profile?.pubkey.lowercased()) { image in
             image.resizable().scaledToFill()
         } placeholder: {
             Circle().fill(Color.coveAccent.opacity(0.16))

@@ -62,7 +62,7 @@ struct VideoPlayerView: View {
                                 .onAppear { focusedControl = .cinemaSurface }
                         } else if surface != .playbackOptions {
                             playerChrome
-                                .task {
+                                .task(id: isChatVisible) {
                                     // Wait for the newly inserted controls to join the focus tree.
                                     do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
                                     guard surface == .controls else { return }
@@ -150,7 +150,7 @@ struct VideoPlayerView: View {
                         .accessibilityLabel(playback.isPlaying ? "Pause" : "Play")
                     Spacer(minLength: 5)
                     if stream != nil {
-                        Button { isChatVisible.toggle() } label: { Label(isChatVisible ? "Hide chat" : "Show chat", systemImage: "bubble.left") }
+                        Button { returnFocus = .chat; isChatVisible.toggle() } label: { Label(isChatVisible ? "Hide chat" : "Show chat", systemImage: "bubble.left") }
                             .buttonStyle(CoveButtonStyle()).focused($focusedControl, equals: .chat)
                             .accessibilityIdentifier("player-chat")
                         Button { openPanel(.zap, from: .zap) } label: { Label("Send a zap", systemImage: "bolt.fill") }
