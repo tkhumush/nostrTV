@@ -43,14 +43,32 @@ struct ArtworkTests {
         #expect(previous.artworkURLs(profile: nil).count == 3)
         #expect(previous.thumbnailURL == merged.thumbnailURL)
     }
+
+    @Test func transientAvatarFailureRetriesWithoutNeedingAnotherAppearance() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ArtworkURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let cache = ImageCache(session: session)
+        let url = URL(string: "https://artwork.example/\(UUID().uuidString)/transient")!
+        #expect(await cache.loadImage(from: url) != nil)
+        #expect(await cache.image(for: url) != nil)
+    }
 }
 
 private final class ArtworkURLProtocol: URLProtocol {
+    private static let lock = NSLock()
+    private static var attempts: [URL: Int] = [:]
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         let url = request.url!
-        let status = url.lastPathComponent == "missing" ? 404 : 200
+        let attempt = Self.lock.withLock {
+            Self.attempts[url, default: 0] += 1
+            return Self.attempts[url]!
+        }
+        let status = url.lastPathComponent == "missing" ? 404 :
+            (url.lastPathComponent == "transient" && attempt == 1 ? 503 : 200)
         // A valid PNG on a 404 must still be rejected; a 200 HTML page must not decode.
         let png = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=")!
         let data = url.lastPathComponent == "invalid" ? Data("<html>Unavailable</html>".utf8) : png

@@ -27,6 +27,7 @@ class StreamViewModel: ObservableObject {
     // Active subscription tracking
     private var adminFollowSubscriptionId: String?
     private var profilesSubscriptionId: String? // kind 0 - filtered by authors, limit 30
+    private let profileCallbackID = "stream-profiles-\(UUID().uuidString)"
     private var streamsSubscriptionId: String?  // kind 30311 - unfiltered, pipeline handles filtering
     private var deletionsSubscriptionId: String? // kind 5 - stream deletion events
 
@@ -135,6 +136,14 @@ class StreamViewModel: ObservableObject {
     }
 
     private func setupCallbacks() {
+        sdkClient.addProfileReceivedCallback(forSubscriptionId: profileCallbackID) { [weak self] profile in
+            guard let self, self.streams.contains(where: {
+                $0.pubkey?.caseInsensitiveCompare(profile.pubkey) == .orderedSame
+            }) else { return }
+            // Metadata can arrive after the stream list has stopped changing.
+            // Notify the observed list without rebuilding or reordering its cards.
+            self.objectWillChange.send()
+        }
         // Handle incoming streams — NIP-33 dedup (eventAuthorPubkey + d-tag)
         sdkClient.onStreamReceived = { [weak self] stream in
             DispatchQueue.main.async {
@@ -395,6 +404,7 @@ class StreamViewModel: ObservableObject {
     }
 
     deinit {
+        sdkClient.removeCallback(forSubscriptionId: profileCallbackID)
         // Close all active subscriptions
         if let subId = profilesSubscriptionId {
             sdkClient.closeSubscription(subId)

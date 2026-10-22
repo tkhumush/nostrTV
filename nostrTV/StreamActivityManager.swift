@@ -260,7 +260,10 @@ class StreamActivityManager: ObservableObject {
     /// Handle a profile arrival - trigger UI update if the profile belongs to a chat/zap sender
     private func handleProfileReceived(_ profile: Profile) {
         let pubkey = profile.pubkey
-        let isRelevant = chatMessages.contains { $0.senderPubkey == pubkey }
+        let isRelevant = chatMessages.contains {
+            $0.senderPubkey.caseInsensitiveCompare(pubkey) == .orderedSame ||
+                NostrMention.mentionTargets(in: $0.message).contains { $0.pubkey == pubkey }
+        }
             || zapComments.contains { $0.senderPubkey == pubkey }
 
         if isRelevant {

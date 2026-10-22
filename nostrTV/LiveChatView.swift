@@ -69,7 +69,7 @@ struct LiveChatView: View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "bolt.fill").foregroundStyle(Color.coveGold)
             VStack(alignment: .leading, spacing: 8) {
-                Text("\(nostrClient.getProfile(for: zap.senderPubkey)?.displayNameOrName ?? zap.senderName ?? "Someone") sent \(zap.amountInSats.formatted()) sats")
+                Text("\(Profile.chatName(profile: nostrClient.getProfile(for: zap.senderPubkey), pubkey: zap.senderPubkey, fallbackName: zap.senderName)) sent \(zap.amountInSats.formatted()) sats")
                     .font(.system(size: 21, weight: .semibold)).foregroundStyle(Color.coveGold)
                 if !zap.comment.isEmpty { Text(zap.comment).font(.system(size: 22)).foregroundStyle(.white) }
             }
@@ -98,7 +98,7 @@ private struct ChatMessageRow: View {
     var body: some View {
         // Dynamically fetch profile name from NostrSDKClient
         let profile = nostrClient.getProfile(for: message.senderPubkey)
-        let displayName = profile?.displayName ?? profile?.name ?? "Anonymous"
+        let displayName = Profile.chatName(profile: profile, pubkey: message.senderPubkey)
 
         // Use the trigger to force re-computation (SwiftUI dependency tracking)
         let _ = updateTrigger
@@ -130,6 +130,9 @@ private struct ChatMessageRow: View {
         .background(Color.clear)
         .cornerRadius(CoveUI.smallCornerRadius)
         .onAppear {
+            if nostrClient.getProfile(for: message.senderPubkey) == nil {
+                nostrClient.requestProfile(for: message.senderPubkey)
+            }
             // Fetch any mentioned profile we do not have yet. Done here rather than
             // while building the body so rendering stays free of side effects; the
             // client debounces and deduplicates, so repeat rows are cheap. When a
@@ -171,7 +174,7 @@ private struct ChatMessageRow: View {
     /// published one — neither should render as sixty characters of base32.
     private func mentionLabel(pubkey: String, identifier: String) -> String {
         if let profile = nostrClient.getProfile(for: pubkey) {
-            if let name = profile.displayName ?? profile.name, !name.isEmpty {
+            if let name = profile.preferredName {
                 return "@\(name)"
             }
         }
