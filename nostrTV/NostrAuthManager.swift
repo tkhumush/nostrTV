@@ -308,7 +308,7 @@ class NostrAuthManager: ObservableObject {
             throw NostrAuthError.invalidNsec
         }
 
-        KeychainHelper.save(nsec)
+        guard KeychainHelper.save(nsec) else { throw NostrAuthError.credentialStorageFailed }
         authMethod = .nsec(keyPair: keyPair)
         currentUser = UserSession(nip05: "", hexPubkey: keyPair.publicKeyHex)
         isAuthenticated = true
@@ -413,6 +413,7 @@ enum NostrAuthError: LocalizedError {
     case notAuthenticated
     case bunkerNotConnected
     case invalidNsec
+    case credentialStorageFailed
 
     var errorDescription: String? {
         switch self {
@@ -422,6 +423,8 @@ enum NostrAuthError: LocalizedError {
             return "Bunker client not connected"
         case .invalidNsec:
             return "Invalid nsec key. Please check and try again."
+        case .credentialStorageFailed:
+            return "Your key could not be saved in Keychain. Please try again."
         }
     }
 }
