@@ -43,10 +43,10 @@ enum StreamPlayback {
 
     static func unavailableMessage(for source: String) -> String {
         if URL(string: source)?.scheme?.lowercased() == "moq" {
-            return "This broadcaster only offers MoQ. Cove needs an HLS stream to play it on Apple TV."
+            return "This broadcaster only offers MoQ. Cove needs an HLS stream to play it on this device."
         }
         if URL(string: source)?.pathExtension.lowercased() == "mpd" {
-            return "This broadcaster only offers MPEG-DASH. Cove needs an HLS stream to play it on Apple TV."
+            return "This broadcaster only offers MPEG-DASH. Cove needs an HLS stream to play it on this device."
         }
         return "This broadcast doesn’t include a supported playback URL. Try another stream."
     }
