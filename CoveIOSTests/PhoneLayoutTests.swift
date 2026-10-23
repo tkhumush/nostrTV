@@ -15,6 +15,13 @@ struct PhoneLayoutTests {
         #expect(PhoneLayout.watchArrangement(size: size, accessibilityText: false) == .sideBySide)
         #expect(size.width - PhoneLayout.chatWidth(in: size) >= 380)
     }
+    @Test func duoLandscapeGivesThePictureMostOfTheWidth() {
+        // Open Duo in landscape, including the vertical bar the chat runs beneath.
+        let size = CGSize(width: 951, height: 669)
+        let chat = PhoneLayout.chatWidth(in: size)
+        #expect(chat >= 260 && chat <= size.width * 0.30)
+        #expect(PhoneLayout.splitVideoHeight(in: CGSize(width: size.width - chat, height: size.height), accessibilityText: false) >= 370)
+    }
     @Test func narrowSplitViewAndAccessibilityRemainStacked() {
         #expect(PhoneLayout.watchArrangement(size: CGSize(width: 450, height: 320), accessibilityText: false) == .stacked)
         #expect(PhoneLayout.watchArrangement(size: CGSize(width: 890, height: 540), accessibilityText: true) == .stacked)

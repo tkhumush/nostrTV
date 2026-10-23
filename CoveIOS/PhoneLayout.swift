@@ -8,7 +8,8 @@ struct PhoneLayout {
         guard !accessibilityText, size.width >= 640, size.width > size.height else { return .stacked }
         return .sideBySide
     }
-    static func chatWidth(in size: CGSize) -> CGFloat { min(380, max(260, size.width * 0.34)) }
+    /// On Duo `size` includes the vertical bar the chat runs beneath, so the share is smaller.
+    static func chatWidth(in size: CGSize) -> CGFloat { min(360, max(260, size.width * 0.30)) }
     static func splitVideoHeight(in size: CGSize, accessibilityText: Bool) -> CGFloat {
         // Fit the picture at the top rather than centering it in unused vertical
         // space. Reserve room for the creator row, including with the keyboard.

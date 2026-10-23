@@ -4,6 +4,10 @@ struct PhoneChatView: View {
     @ObservedObject var session: PhoneWatchSession
     @EnvironmentObject private var auth: NostrAuthManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Width of system controls this panel runs underneath (Duo's vertical bar).
+    var controlsInset: CGFloat = 0
+    /// A raised keyboard lifts the composer up alongside those controls.
+    var keyboardRaised = false
     let onSignIn: () -> Void
     @State private var followsLive = true
 
@@ -26,7 +30,7 @@ struct PhoneChatView: View {
                             followsLive.toggle()
                             if followsLive { proxy.scrollTo("bottom", anchor: .bottom) }
                         }.font(.caption).accessibilityIdentifier("phone-chat-history")
-                    }.padding(.horizontal).padding(.vertical, 12)
+                    }.padding(.horizontal).padding(.vertical, 12).padding(.trailing, controlsInset)
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 16) {
                             if entries.isEmpty { Text("It’s quiet in here. Say hello!").font(.callout).foregroundStyle(Color.coveSecondary) }
@@ -66,13 +70,19 @@ struct PhoneChatView: View {
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
             if auth.isAuthenticated {
-                HStack(alignment: .bottom) {
+                // Field and button share a 44 pt line, so a single line is centred
+                // and the button stays beside the last line as the field grows.
+                HStack(alignment: .bottom, spacing: 8) {
                     TextField("Say hello…", text: $session.draft, axis: .vertical)
-                        .lineLimit(1...4).textFieldStyle(.roundedBorder).accessibilityIdentifier("phone-chat-message")
+                        .lineLimit(1...4).accessibilityIdentifier("phone-chat-message")
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .frame(minHeight: 44)
+                        .background(Color.coveBackground, in: RoundedRectangle(cornerRadius: 22))
+                        .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(Color.coveOverlay))
                     Button { Task { await session.send(using: auth) } } label: {
                         if session.sending { ProgressView() }
                         else { Image(systemName: "arrow.up.circle.fill").font(.title) }
-                    }.frame(minWidth: 44, minHeight: 44)
+                    }.frame(width: 44, height: 44)
                         .disabled(session.sending || session.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         .accessibilityLabel("Send message")
                 }
@@ -81,6 +91,9 @@ struct PhoneChatView: View {
                 Button("Sign in to join the conversation", action: onSignIn).frame(maxWidth: .infinity, minHeight: 44)
             }
         }.padding()
+            // Below the vertical bar the composer can reach the edge, clear of the
+            // display's rounded corner; with the keyboard up it sits beside the bar.
+            .padding(.trailing, keyboardRaised ? controlsInset : min(controlsInset, 8))
     }
 
     private func messageText(_ content: String) -> String {

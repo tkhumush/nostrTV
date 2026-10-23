@@ -56,6 +56,14 @@ wide layout, the picture fits at the top of its column instead of being centered
 inside a tall black region. Stream details remain below it and chat stays beside
 it. Open portrait keeps video above chat.
 
+In open landscape the chat column is narrower and runs beneath the system's
+trailing vertical bar, giving that width to the picture. The chat header stays
+clear of the bar and clock, the composer reaches the edge below the bar, and it
+moves back beside the bar while the keyboard is raised. This only happens when
+the leading edge has no inset, so a landscape iPhone never places chat under
+the Dynamic Island. The space under the creator row shows live time, viewers,
+likes, sats zapped and the top supporters.
+
 Apple deliberately retains horizontal controls on the inner display in portrait.
 Cove follows that placement, floating the native controls over the picture;
 it does not force a custom right-side toolbar in that pose. Native bars also
