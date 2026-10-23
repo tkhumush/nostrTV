@@ -34,6 +34,10 @@ nostrTV brings decentralized live streaming to your living room. The app connect
 
 ## Installation
 
+Cove for iPhone is available in the same Xcode project as the **CoveIOS**
+scheme (iOS 18+), with adaptive iPhone Duo layouts, playback, chat, sign-in, and
+zaps. See [iPhone setup, Duo behavior, and testing](docs/IPHONE_APP.md).
+
 ### From Source
 
 1. Clone the repository:
