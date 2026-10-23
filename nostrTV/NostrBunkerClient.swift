@@ -22,6 +22,7 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
     private var clientKeyPair: NostrKeyPair?
     private var expectedSecret: String?  // For nostrconnect:// flow validation
     private var connectContinuation: CheckedContinuation<Void, Error>?  // For waiting on connect response
+    private var connectTimeoutTask: Task<Void, Never>?
 
     /// Get the client's private key (for session persistence)
     var clientPrivateKeyHex: String? {
@@ -43,6 +44,11 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
     /// Wait for signer to connect after scanning nostrconnect:// QR code (reverse flow)
     /// - Parameter nostrConnectURI: The nostrconnect URI we displayed
     func waitForSignerConnection(bunkerURI: String) async throws {
+        connectTimeoutTask?.cancel()
+        connectTimeoutTask = nil
+        let previousConnection = connectContinuation
+        connectContinuation = nil
+        previousConnection?.resume(throwing: BunkerError.notConnected)
         // Clean up any previous connection state before starting fresh
         print("🧹 Cleaning up previous connection state...")
 
@@ -76,9 +82,12 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
         // For nostrconnect://, the pubkey is OUR client pubkey
         // We extract the relay and secret
         let components = try parseNostrConnectURI(bunkerURI)
+        guard let secret = components.secret, !secret.isEmpty else {
+            throw BunkerError.invalidURI("A nostrconnect connection requires a secret")
+        }
 
         bunkerRelays = components.relays
-        expectedSecret = components.secret  // Store for validation
+        expectedSecret = secret
 
         // Use the keypair from NostrKeyManager (which matches the URI)
         guard let keyPair = keyManager.currentKeyPair else {
@@ -96,21 +105,19 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
 
         print("🔄 Waiting for signer to scan QR and send connect response...")
 
+        try Task.checkCancellation()
         // Actually wait for the signer to send connect response
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             self.connectContinuation = continuation
 
             // Set a timeout (3 minutes for user to scan and approve)
-            Task {
-                try? await Task.sleep(nanoseconds: 180_000_000_000) // 180 seconds (3 minutes)
-
-                if self.connectContinuation != nil {
-                    self.connectContinuation?.resume(throwing: BunkerError.timeout)
-                    self.connectContinuation = nil
-                    await MainActor.run {
-                        self.connectionState = .error("Timeout waiting for signer (3 minutes)")
-                    }
-                }
+            connectTimeoutTask = Task { [weak self] in
+                do { try await Task.sleep(nanoseconds: 180_000_000_000) }
+                catch { return }
+                guard let self, let connection = self.connectContinuation else { return }
+                self.connectContinuation = nil
+                connection.resume(throwing: BunkerError.timeout)
+                self.connectionState = .error("Timeout waiting for signer (3 minutes)")
             }
         }
 
@@ -257,6 +264,14 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
 
     /// Disconnect from bunker
     func disconnect() {
+        connectTimeoutTask?.cancel()
+        connectTimeoutTask = nil
+        // Dismissing sign-in must also release the task awaiting the QR handshake.
+        // Clear the continuation before resuming so the timeout cannot resume it twice.
+        let connection = connectContinuation
+        connectContinuation = nil
+        connection?.resume(throwing: BunkerError.notConnected)
+
         // Cancel all pending requests
         for (_, pending) in pendingRequests {
             pending.timeoutTask.cancel()
@@ -451,13 +466,9 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
 
             print("📨 Received kind 24133 event from: \(senderPubkey.prefix(8))...")
 
-            // If this is the first message and we don't have bunkerPubkey yet,
-            // this is the initial connect response from the signer
-            if bunkerPubkey == nil {
-                print("📩 First message - setting bunkerPubkey to: \(senderPubkey.prefix(8))...")
-                bunkerPubkey = senderPubkey
-                connectionState = .waitingForApproval
-            }
+            // Bind the signer only after it proves possession of the connection secret.
+            if let bunkerPubkey, senderPubkey != bunkerPubkey { return }
+            try NostrEventValidator.validate(event)
 
             // Create NostrSDK keys for decryption
             let clientPrivateKey = clientKeyPair.privateKey
@@ -498,13 +509,16 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
 
                 // Check if this response has a result field
                 if let result = response.result, !result.isEmpty {
-                    // The result should be "ack" or match the secret
-                    if result == "ack" || result == secret {
-                        print("✅ Secret validated successfully! (result: \(result.prefix(10))...)")
+                    if response.validatesConnection(secret: secret) {
+                        bunkerPubkey = senderPubkey
+                        connectionState = .waitingForApproval
+                        print("✅ Connection secret validated")
                         expectedSecret = nil  // Clear it after validation
 
                         // Resume the waiting continuation - connection established!
                         if let continuation = connectContinuation {
+                            connectTimeoutTask?.cancel()
+                            connectTimeoutTask = nil
                             print("✅ Resuming connect continuation...")
                             connectContinuation = nil
                             continuation.resume()

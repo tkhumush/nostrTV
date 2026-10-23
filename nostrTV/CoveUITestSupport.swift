@@ -5,6 +5,13 @@ import Foundation
 /// They never restore an identity, connect to relays, sign events, or request invoices.
 enum CoveUITestSupport {
     static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("--cove-ui-testing") }
+    /// Only explicit offline tests can load a test runner's loopback media fixture.
+    static var playbackFixtureURL: URL? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard enabled, let index = arguments.firstIndex(of: "--cove-test-media"), index + 1 < arguments.count,
+              let url = URL(string: arguments[index + 1]), url.scheme == "http", url.host == "127.0.0.1" else { return nil }
+        return url
+    }
     static var streams: [Stream] {
         [
             ("An afternoon by the Pacific", "Coastline Radio", "music"),

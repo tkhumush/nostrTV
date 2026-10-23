@@ -26,6 +26,11 @@ struct BunkerResponse: Codable {
     var isSuccess: Bool {
         return error == nil
     }
+
+    /// Client-initiated connections must echo the QR/link secret, not a generic ack.
+    func validatesConnection(secret: String) -> Bool {
+        !secret.isEmpty && error == nil && result == secret
+    }
 }
 
 // MARK: - Session Models

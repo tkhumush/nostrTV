@@ -4,6 +4,10 @@
       "filename" : "back_appstore.png",
       "idiom" : "tv",
       "scale" : "1x"
+    },
+    {
+      "idiom" : "tv",
+      "scale" : "2x"
     }
   ],
   "info" : {

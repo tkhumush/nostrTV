@@ -229,6 +229,13 @@ class LiveActivityManager: ObservableObject {
             throw LiveActivityError.noActiveStream
         }
 
+        try await sendChatMessage(message, to: stream)
+    }
+
+    /// Publish to an explicit stream without announcing viewer presence.
+    /// Both phone and TV use the same tags, signing, and relay publication path.
+    func sendChatMessage(_ message: String, to stream: Stream) async throws {
+
         // IMPORTANT: Use eventAuthorPubkey (not host pubkey) for a-tag
         // Chat messages must reference: "30311:<event-author-pubkey>:<d-tag>"
         guard let eventAuthorPubkey = stream.eventAuthorPubkey else {
