@@ -10,6 +10,7 @@ final class PhoneWatchSession: ObservableObject {
     let client: NostrSDKClient
     let player = AVPlayer()
     let activity = StreamActivityManager()
+    let stats: StreamStatsManager
     @Published var draft = ""
     @Published private(set) var sending = false
     @Published private(set) var sendError: String?
@@ -25,6 +26,7 @@ final class PhoneWatchSession: ObservableObject {
     init(stream: Stream, client: NostrSDKClient) {
         self.stream = stream
         self.client = client
+        self.stats = StreamStatsManager(stream: stream)
         activity.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &observations)
         player.publisher(for: \.timeControlStatus).receive(on: DispatchQueue.main).sink { [weak self] status in
             self?.buffering = status == .waitingToPlayAtSpecifiedRate
@@ -40,9 +42,10 @@ final class PhoneWatchSession: ObservableObject {
         previousIdleTimer = UIApplication.shared.isIdleTimerDisabled
         UIApplication.shared.isIdleTimerDisabled = true
         #if DEBUG
-        if CoveUITestSupport.enabled { loadPlayer(); return }
+        if CoveUITestSupport.enabled { stats.showPreview(); loadPlayer(); return }
         #endif
         activity.startListening(for: stream, using: client)
+        stats.startListening(using: client)
         loadPlayer()
     }
 
@@ -76,6 +79,7 @@ final class PhoneWatchSession: ObservableObject {
     func stop() {
         guard started else { return }
         activity.stopListening()
+        stats.stopListening()
         player.pause()
         player.replaceCurrentItem(with: nil)
         itemStatus = nil

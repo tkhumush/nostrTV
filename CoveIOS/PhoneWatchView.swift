@@ -110,6 +110,11 @@ struct PhoneWatchView: View {
                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(Color.coveSecondary)
                 }.padding().contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityIdentifier("phone-creator")
+            // Beside chat (or with chat hidden) the column has room to spare below the creator.
+            if split || !showChat {
+                PhoneStreamStatsView(stats: session.stats, stream: session.stream, onZap: { sheet = .zap })
+                    .frame(maxHeight: .infinity, alignment: .top)
+            }
             #if DEBUG
             if CoveUITestSupport.enabled {
                 PhonePlaybackProbe(session: session)

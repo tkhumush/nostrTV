@@ -268,6 +268,14 @@ class NostrSDKClient {
     /// Called when a live chat message (kind 1311) is received, keyed by subscription ID
     private var chatReceivedCallbacks: [String: (ZapComment) -> Void] = [:]
 
+    /// Called when a reaction (kind 7) to an addressable event is received, keyed by subscription ID
+    private var reactionReceivedCallbacks: [String: (StreamReaction) -> Void] = [:]
+
+    /// Called when a live stream event (kind 30311) is received, keyed by subscription ID.
+    /// `onStreamReceived` belongs to the stream list; this lets an open player follow
+    /// its own stream's updates (viewer counts, status) without replacing that handler.
+    private var streamUpdateCallbacks: [String: (Stream) -> Void] = [:]
+
     /// Called when a bunker message (kind 24133) is received
     var onBunkerMessageReceived: ((LegacyNostrEvent) -> Void)?
 
@@ -581,6 +589,8 @@ class NostrSDKClient {
             handleLiveChatEvent(event)
         case 9735:
             handleZapReceiptEvent(event)
+        case 7:
+            handleReactionEvent(event)
         case 10002:
             handleRelayListEvent(event)
         case 24133:
@@ -812,13 +822,29 @@ class NostrSDKClient {
     }
 
 
+    /// Add a callback for reaction (kind 7) events, keyed by subscription ID.
+    /// Using the same `subscriptionId` replaces any existing callback for that subscription.
+    func addReactionReceivedCallback(forSubscriptionId subscriptionId: String, _ callback: @escaping (StreamReaction) -> Void) {
+        reactionReceivedCallbacks[subscriptionId] = callback
+    }
+
+
+    /// Add a callback for live stream (kind 30311) events, keyed by subscription ID.
+    /// Using the same `subscriptionId` replaces any existing callback for that subscription.
+    func addStreamUpdateCallback(forSubscriptionId subscriptionId: String, _ callback: @escaping (Stream) -> Void) {
+        streamUpdateCallbacks[subscriptionId] = callback
+    }
+
+
     /// Remove callbacks for a specific subscription ID.
-    /// Removes profile, follow list, chat, AND zap callbacks registered under that key.
+    /// Removes profile, follow list, chat, zap, reaction AND stream update callbacks registered under that key.
     func removeCallback(forSubscriptionId subscriptionId: String) {
         _ = profileCallbacksLock.withLock { profileReceivedCallbacks.removeValue(forKey: subscriptionId) }
         followListReceivedCallbacks.removeValue(forKey: subscriptionId)
         chatReceivedCallbacks.removeValue(forKey: subscriptionId)
         zapReceivedCallbacks.removeValue(forKey: subscriptionId)
+        reactionReceivedCallbacks.removeValue(forKey: subscriptionId)
+        streamUpdateCallbacks.removeValue(forKey: subscriptionId)
     }
 
     /// Remove chat/zap callbacks. If a subscription ID is provided, only that subscription's callbacks are removed.
@@ -1239,6 +1265,26 @@ class NostrSDKClient {
         }
     }
 
+    /// Handle kind 7 (reaction) events that target an addressable event such as a live stream
+    private func handleReactionEvent(_ event: NostrSDK.NostrEvent) {
+        let callbacks = reactionReceivedCallbacks
+        // NIP-25: the last `a` tag is the coordinate being reacted to.
+        guard !callbacks.isEmpty,
+              let aTag = event.tags.last(where: { $0.name == "a" })?.value else { return }
+        let reaction = StreamReaction(
+            id: event.id,
+            senderPubkey: event.pubkey,
+            content: event.content,
+            streamATag: aTag,
+            timestamp: Date(timeIntervalSince1970: TimeInterval(event.createdAt))
+        )
+        DispatchQueue.main.async {
+            for callback in callbacks.values {
+                callback(reaction)
+            }
+        }
+    }
+
     /// Handle kind 24133 (bunker message) events
     private func handleBunkerMessageEvent(_ event: NostrSDK.NostrEvent) {
 
@@ -1399,8 +1445,12 @@ class NostrSDKClient {
         )
 
         // Notify callback
+        let updateCallbacks = streamUpdateCallbacks
         DispatchQueue.main.async { [weak self] in
             self?.onStreamReceived?(stream)
+            for callback in updateCallbacks.values {
+                callback(stream)
+            }
         }
 
         // Request profile for host if not cached
