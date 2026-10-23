@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		1091B1412F0F1F8C0019A1AF /* NostrSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 1091B1402F0F1F8C0019A1AF /* NostrSDK */; };
+		C01000000000000000000001 /* NostrSDK in Frameworks */ = {isa = PBXBuildFile; productRef = C01000000000000000000002 /* NostrSDK */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -25,17 +26,66 @@
 			remoteGlobalIDString = 10BC75D82DBB150C00D5062B;
 			remoteInfo = nostrTV;
 		};
+		C0110000000000000000000A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 10BC75D12DBB150C00D5062B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C01000000000000000000005;
+			remoteInfo = CoveIOS;
+		};
+		C0120000000000000000000A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 10BC75D12DBB150C00D5062B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C01000000000000000000005;
+			remoteInfo = CoveIOS;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		10BC75D92DBB150C00D5062B /* nostrTV.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = nostrTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		10BC75E62DBB150D00D5062B /* nostrTVTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = nostrTVTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		10BC75F02DBB150D00D5062B /* nostrTVUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = nostrTVUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C01000000000000000000003 /* CoveIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CoveIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C01100000000000000000002 /* CoveIOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = CoveIOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C01200000000000000000002 /* CoveIOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = CoveIOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		C01000000000000000000004 /* Exceptions for "nostrTV" folder in "CoveIOS" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Assets.xcassets,
+				BunkerLoginView.swift,
+				ContentView.swift,
+				LiveChatView.swift,
+				LoginFlowView.swift,
+				nostrTVApp.swift,
+				NsecLoginView.swift,
+				ProfileConfirmationView.swift,
+				ProfileSettingsView.swift,
+				StreamerProfilePopupView.swift,
+				VideoPlayerView.swift,
+				WelcomeView.swift,
+				ZapChyronView.swift,
+			);
+			target = C01000000000000000000005 /* CoveIOS */;
+		};
+		C01300000000000000000001 /* Exceptions for "CoveIOS" folder in "CoveIOS" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = C01000000000000000000005 /* CoveIOS */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		10BC75DB2DBB150C00D5062B /* nostrTV */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				C01000000000000000000004 /* Exceptions for "nostrTV" folder in "CoveIOS" target */,
+			);
 			path = nostrTV;
 			sourceTree = "<group>";
 		};
@@ -47,6 +97,24 @@
 		10BC75F32DBB150D00D5062B /* nostrTVUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = nostrTVUITests;
+			sourceTree = "<group>";
+		};
+		C01000000000000000000006 /* CoveIOS */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				C01300000000000000000001 /* Exceptions for "CoveIOS" folder in "CoveIOS" target */,
+			);
+			path = CoveIOS;
+			sourceTree = "<group>";
+		};
+		C01100000000000000000003 /* CoveIOSTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = CoveIOSTests;
+			sourceTree = "<group>";
+		};
+		C01200000000000000000003 /* CoveIOSUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = CoveIOSUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -74,12 +142,37 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C01000000000000000000007 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C01000000000000000000001 /* NostrSDK in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C01100000000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C01200000000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		10BC75D02DBB150C00D5062B = {
 			isa = PBXGroup;
 			children = (
+				C01100000000000000000003 /* CoveIOSTests */,
+				C01200000000000000000003 /* CoveIOSUITests */,
+				C01000000000000000000006 /* CoveIOS */,
 				10BC75DB2DBB150C00D5062B /* nostrTV */,
 				10BC75E92DBB150D00D5062B /* nostrTVTests */,
 				10BC75F32DBB150D00D5062B /* nostrTVUITests */,
@@ -90,6 +183,9 @@
 		10BC75DA2DBB150C00D5062B /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				C01100000000000000000002 /* CoveIOSTests.xctest */,
+				C01200000000000000000002 /* CoveIOSUITests.xctest */,
+				C01000000000000000000003 /* CoveIOS.app */,
 				10BC75D92DBB150C00D5062B /* nostrTV.app */,
 				10BC75E62DBB150D00D5062B /* nostrTVTests.xctest */,
 				10BC75F02DBB150D00D5062B /* nostrTVUITests.xctest */,
@@ -169,6 +265,72 @@
 			productReference = 10BC75F02DBB150D00D5062B /* nostrTVUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		C01000000000000000000005 /* CoveIOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C01000000000000000000008 /* Build configuration list for PBXNativeTarget "CoveIOS" */;
+			buildPhases = (
+				C01000000000000000000009 /* Sources */,
+				C01000000000000000000007 /* Frameworks */,
+				C0100000000000000000000A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				10BC75DB2DBB150C00D5062B /* nostrTV */,
+				C01000000000000000000006 /* CoveIOS */,
+			);
+			name = CoveIOS;
+			packageProductDependencies = (
+				C01000000000000000000002 /* NostrSDK */,
+			);
+			productName = CoveIOS;
+			productReference = C01000000000000000000003 /* CoveIOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+		C01100000000000000000001 /* CoveIOSTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C01100000000000000000007 /* Build configuration list for PBXNativeTarget "CoveIOSTests" */;
+			buildPhases = (
+				C01100000000000000000004 /* Sources */,
+				C01100000000000000000005 /* Frameworks */,
+				C01100000000000000000006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C0110000000000000000000B /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				C01100000000000000000003 /* CoveIOSTests */,
+			);
+			name = CoveIOSTests;
+			productName = CoveIOSTests;
+			productReference = C01100000000000000000002 /* CoveIOSTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		C01200000000000000000001 /* CoveIOSUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C01200000000000000000007 /* Build configuration list for PBXNativeTarget "CoveIOSUITests" */;
+			buildPhases = (
+				C01200000000000000000004 /* Sources */,
+				C01200000000000000000005 /* Frameworks */,
+				C01200000000000000000006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C0120000000000000000000B /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				C01200000000000000000003 /* CoveIOSUITests */,
+			);
+			name = CoveIOSUITests;
+			productName = CoveIOSUITests;
+			productReference = C01200000000000000000002 /* CoveIOSUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -190,6 +352,17 @@
 						CreatedOnToolsVersion = 16.3;
 						TestTargetID = 10BC75D82DBB150C00D5062B;
 					};
+					C01000000000000000000005 = {
+						CreatedOnToolsVersion = 27.0;
+					};
+					C01100000000000000000001 = {
+						CreatedOnToolsVersion = 27.1;
+						TestTargetID = C01000000000000000000005;
+					};
+					C01200000000000000000001 = {
+						CreatedOnToolsVersion = 27.1;
+						TestTargetID = C01000000000000000000005;
+					};
 				};
 			};
 			buildConfigurationList = 10BC75D42DBB150C00D5062B /* Build configuration list for PBXProject "nostrTV" */;
@@ -209,6 +382,9 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				C01200000000000000000001 /* CoveIOSUITests */,
+				C01100000000000000000001 /* CoveIOSTests */,
+				C01000000000000000000005 /* CoveIOS */,
 				10BC75D82DBB150C00D5062B /* nostrTV */,
 				10BC75E52DBB150D00D5062B /* nostrTVTests */,
 				10BC75EF2DBB150D00D5062B /* nostrTVUITests */,
@@ -232,6 +408,27 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		10BC75EE2DBB150D00D5062B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C0100000000000000000000A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C01100000000000000000006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C01200000000000000000006 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -262,6 +459,27 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C01000000000000000000009 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C01100000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C01200000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -274,6 +492,16 @@
 			isa = PBXTargetDependency;
 			target = 10BC75D82DBB150C00D5062B /* nostrTV */;
 			targetProxy = 10BC75F12DBB150D00D5062B /* PBXContainerItemProxy */;
+		};
+		C0110000000000000000000B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C01000000000000000000005 /* CoveIOS */;
+			targetProxy = C0110000000000000000000A /* PBXContainerItemProxy */;
+		};
+		C0120000000000000000000B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C01000000000000000000005 /* CoveIOS */;
+			targetProxy = C0120000000000000000000A /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -539,6 +767,138 @@
 			};
 			name = Release;
 		};
+		C0100000000000000000000B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = CoveIOS/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Cove;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = stream.nostrTV.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		C0100000000000000000000C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = CoveIOS/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Cove;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = stream.nostrTV.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		C01100000000000000000008 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				PRODUCT_BUNDLE_IDENTIFIER = stream.nostrTV.ios.CoveIOSTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CoveIOS.app/CoveIOS";
+			};
+			name = Debug;
+		};
+		C01100000000000000000009 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				PRODUCT_BUNDLE_IDENTIFIER = stream.nostrTV.ios.CoveIOSTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CoveIOS.app/CoveIOS";
+			};
+			name = Release;
+		};
+		C01200000000000000000008 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				PRODUCT_BUNDLE_IDENTIFIER = stream.nostrTV.ios.CoveIOSUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = CoveIOS;
+			};
+			name = Debug;
+		};
+		C01200000000000000000009 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				PRODUCT_BUNDLE_IDENTIFIER = stream.nostrTV.ios.CoveIOSUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = CoveIOS;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -578,6 +938,33 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		C01000000000000000000008 /* Build configuration list for PBXNativeTarget "CoveIOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C0100000000000000000000B /* Debug */,
+				C0100000000000000000000C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C01100000000000000000007 /* Build configuration list for PBXNativeTarget "CoveIOSTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C01100000000000000000008 /* Debug */,
+				C01100000000000000000009 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C01200000000000000000007 /* Build configuration list for PBXNativeTarget "CoveIOSUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C01200000000000000000008 /* Debug */,
+				C01200000000000000000009 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -593,6 +980,11 @@
 
 /* Begin XCSwiftPackageProductDependency section */
 		1091B1402F0F1F8C0019A1AF /* NostrSDK */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1091B13F2F0F1F8C0019A1AF /* XCRemoteSwiftPackageReference "nostr-sdk-ios" */;
+			productName = NostrSDK;
+		};
+		C01000000000000000000002 /* NostrSDK */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 1091B13F2F0F1F8C0019A1AF /* XCRemoteSwiftPackageReference "nostr-sdk-ios" */;
 			productName = NostrSDK;
