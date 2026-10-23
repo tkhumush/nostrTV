@@ -1159,6 +1159,12 @@ class NostrSDKClient {
 
     /// Handle kind 9735 (zap receipt) events
     private func handleZapReceiptEvent(_ event: NostrSDK.NostrEvent) {
+        // A receipt can confirm a payment. Verify it rather than trusting relay claims.
+        let signedReceipt = LegacyNostrEvent(kind: event.kind.rawValue,
+            tags: event.tags.map { [$0.name, $0.value] + $0.otherParameters },
+            id: event.id, pubkey: event.pubkey, created_at: Int(event.createdAt),
+            content: event.content, sig: event.signature)
+        guard (try? NostrEventValidator.validate(signedReceipt)) != nil else { return }
 
         let zapReceiptId = event.id
         let createdAt = Date(timeIntervalSince1970: TimeInterval(event.createdAt))
@@ -1214,7 +1220,8 @@ class NostrSDKClient {
             comment: comment,
             timestamp: createdAt,
             streamEventId: streamEventId,
-            bolt11: bolt11
+            bolt11: bolt11,
+            receiptPubkey: event.pubkey
         )
 
 
