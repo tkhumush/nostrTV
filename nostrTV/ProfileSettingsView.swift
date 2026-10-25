@@ -59,6 +59,9 @@ struct ProfileSettingsView: View {
 
     private var identity: some View {
         VStack(alignment: .leading, spacing: 24) {
+            if let error = authManager.errorMessage {
+                Text(error).font(.coveCaption).foregroundStyle(Color.coveGold)
+            }
             CoveAvatar(profile: authManager.currentProfile, size: 110)
             if !authManager.isAuthenticated {
                 Text("Welcome to Cove").font(.coveSection)

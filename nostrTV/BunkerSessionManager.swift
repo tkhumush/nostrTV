@@ -1,78 +1,56 @@
 import Foundation
 
-/// Manages persistence of bunker sessions to UserDefaults
-class BunkerSessionManager {
-
-    // MARK: - Constants
-
+/// The client key authorizes remote signing and is a credential, not a preference.
+final class BunkerSessionManager {
     private let sessionKey = "nostr_bunker_session"
-    private let userDefaults = UserDefaults.standard
+    private let userDefaults: UserDefaults
+    private let credentials: any CredentialStore
 
-    // MARK: - Public Methods
-
-    /// Save a bunker session to persistent storage
-    /// - Parameter session: The bunker session to save
-    func saveSession(_ session: BunkerSession) {
-        do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            let data = try encoder.encode(session)
-            userDefaults.set(data, forKey: sessionKey)
-            userDefaults.synchronize()
-            print("✅ Bunker session saved: \(session.bunkerPubkey.prefix(8))...")
-        } catch {
-            print("❌ Failed to save bunker session: \(error.localizedDescription)")
-        }
+    init(userDefaults: UserDefaults = .standard, credentials: any CredentialStore = KeychainStore()) {
+        self.userDefaults = userDefaults
+        self.credentials = credentials
     }
 
-    /// Load the saved bunker session from persistent storage
-    /// - Returns: The saved session, or nil if none exists
+    @discardableResult
+    func saveSession(_ session: BunkerSession) -> Bool {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(session),
+              credentials.save(data, account: KeychainHelper.bunkerAccount) else { return false }
+        userDefaults.removeObject(forKey: sessionKey)
+        return true
+    }
+
     func loadSession() -> BunkerSession? {
-        guard let data = userDefaults.data(forKey: sessionKey) else {
-            print("ℹ️ No saved bunker session found")
-            return nil
+        // Remove the legacy plaintext even if migration fails. Reauthentication is
+        // safer than retaining a signing credential in preferences/backups.
+        let legacy = userDefaults.data(forKey: sessionKey)
+        userDefaults.removeObject(forKey: sessionKey)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        if let data = credentials.load(account: KeychainHelper.bunkerAccount) {
+            return try? decoder.decode(BunkerSession.self, from: data)
         }
-
-        do {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            let session = try decoder.decode(BunkerSession.self, from: data)
-            print("✅ Bunker session loaded: \(session.bunkerPubkey.prefix(8))...")
-            return session
-        } catch {
-            print("❌ Failed to load bunker session: \(error.localizedDescription)")
-            return nil
-        }
+        guard let legacy,
+              let session = try? decoder.decode(BunkerSession.self, from: legacy),
+              saveSession(session) else { return nil }
+        return session
     }
 
-    /// Update the last used timestamp for the current session
     func updateLastUsed() {
-        guard var session = loadSession() else {
-            return
-        }
-
+        guard var session = loadSession() else { return }
         session.lastUsed = Date()
         saveSession(session)
     }
 
-    /// Clear the saved bunker session
-    func clearSession() {
+    @discardableResult
+    func clearSession() -> Bool {
         userDefaults.removeObject(forKey: sessionKey)
-        userDefaults.synchronize()
-        print("✅ Bunker session cleared")
+        return credentials.delete(account: KeychainHelper.bunkerAccount)
     }
 
-    /// Check if a valid session exists
-    /// - Returns: true if a session is saved and not expired
     func hasValidSession() -> Bool {
-        guard let session = loadSession() else {
-            return false
-        }
-
-        // Check if session is not too old (e.g., 30 days)
-        let maxAge: TimeInterval = 30 * 24 * 60 * 60 // 30 days
-        let age = Date().timeIntervalSince(session.lastUsed)
-
-        return age < maxAge
+        guard let session = loadSession() else { return false }
+        return Date().timeIntervalSince(session.lastUsed) < 30 * 24 * 60 * 60
     }
 }

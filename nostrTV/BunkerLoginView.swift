@@ -9,6 +9,9 @@ struct BunkerLoginView: View {
     @ObservedObject var authManager: NostrAuthManager
     @StateObject private var bunkerClient: NostrBunkerClient
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var connectionTask: Task<Void, Never>?
+    @State private var handedOff = false
 
     @State private var qrCodeImage: UIImage?
     @State private var bunkerURI: String = ""
@@ -77,6 +80,12 @@ struct BunkerLoginView: View {
         .onAppear {
             startBunkerFlow()
         }
+        .onDisappear {
+            connectionTask?.cancel()
+            bunkerURI = ""
+            qrCodeImage = nil
+            if !handedOff { bunkerClient.disconnect() }
+        }
         .onChange(of: bunkerClient.connectionState) { _, newState in
             handleConnectionStateChange(newState)
         }
@@ -86,7 +95,9 @@ struct BunkerLoginView: View {
 
     @ViewBuilder
     private var qrCodeSection: some View {
-        if let qrImage = qrCodeImage {
+        if scenePhase != .active {
+            Color.coveBackground.frame(width: 500, height: 500)
+        } else if let qrImage = qrCodeImage {
             Image(uiImage: qrImage)
                 .interpolation(.none)
                 .resizable()
@@ -216,7 +227,9 @@ struct BunkerLoginView: View {
     // MARK: - Bunker Flow
 
     private func startBunkerFlow() {
-        Task {
+        connectionTask?.cancel()
+        bunkerClient.disconnect()
+        connectionTask = Task {
             do {
                 isGenerating = true
                 errorMessage = nil
@@ -236,16 +249,22 @@ struct BunkerLoginView: View {
                 // Once signer connects and secret is validated, get public key
                 let userPubkey = try await bunkerClient.getPublicKey()
 
+                try Task.checkCancellation()
                 // Authenticate with auth manager
-                await authManager.authenticateWithBunker(
+                try await authManager.authenticateWithBunker(
                     bunkerClient: bunkerClient,
                     userPubkey: userPubkey
                 )
 
+                guard authManager.isAuthenticated else {
+                    throw NostrAuthError.credentialStorageFailed
+                }
+                handedOff = true
                 // Close this view
                 dismiss()
 
             } catch {
+                guard !Task.isCancelled else { return }
                 isGenerating = false
                 errorMessage = error.localizedDescription
                 bunkerClient.connectionState = .error(error.localizedDescription)
@@ -255,10 +274,8 @@ struct BunkerLoginView: View {
 
     /// Generate nostrconnect:// URI for QR code (reverse flow)
     private func generateBunkerURI() async throws -> String {
-        // Ensure key manager has a keypair for bunker handshake
-        if !NostrKeyManager.shared.hasKeyPair {
-            try NostrKeyManager.shared.generateEphemeralKeyPair()
-        }
+        // A new pairing always gets a new client identity. Session restoration uses the saved key.
+        try NostrKeyManager.shared.generateEphemeralKeyPair()
 
         guard let clientPubkey = NostrKeyManager.shared.publicKeyHex else {
             throw BunkerError.connectionFailed("Failed to generate client keys")

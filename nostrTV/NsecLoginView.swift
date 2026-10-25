@@ -3,6 +3,7 @@ import SwiftUI
 struct NsecLoginView: View {
     @ObservedObject var authManager: NostrAuthManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var nsecInput: String = ""
     @State private var isLoading: Bool = false
@@ -28,6 +29,9 @@ struct NsecLoginView: View {
 
                     VStack(spacing: 16) {
                         SecureField("nsec1...", text: $nsecInput)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .privacySensitive()
                             .font(.system(size: 24, design: .monospaced))
                             .foregroundColor(.white)
                             .padding()
@@ -105,10 +109,16 @@ struct NsecLoginView: View {
             }
             .padding(60)
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in nsecInput = "" }
+        .onDisappear { nsecInput = "" }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { nsecInput = "" }
+        }
     }
 
     private func signIn() {
         let trimmed = nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        nsecInput = ""
         guard !trimmed.isEmpty else { return }
 
         isLoading = true

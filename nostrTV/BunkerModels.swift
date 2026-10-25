@@ -36,7 +36,10 @@ struct BunkerResponse: Codable {
 // MARK: - Session Models
 
 /// Represents a persisted bunker session
-struct BunkerSession: Codable {
+struct BunkerSession: Codable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
+    var description: String { "BunkerSession(clientPrivateKey: [redacted])" }
+    var debugDescription: String { description }
+    var customMirror: Mirror { Mirror(self, children: ["bunkerPubkey": bunkerPubkey]) }
     let bunkerPubkey: String       // Remote signer's public key
     let relay: String               // Relay URL for communication
     var userPubkey: String?         // User's actual Nostr public key (after connect)
@@ -256,8 +259,8 @@ enum BunkerError: LocalizedError {
             return "Invalid response from bunker"
         case .authenticationFailed:
             return "Authentication failed - secret validation error"
-        case .remoteError(let msg):
-            return "Bunker error: \(msg)"
+        case .remoteError:
+            return "The remote signer rejected the request."
         case .connectionFailed(let reason):
             return "Connection failed: \(reason)"
         case .encryptionFailed:

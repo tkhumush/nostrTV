@@ -4,7 +4,10 @@ import secp256k1
 
 /// Represents a Nostr key pair with private and public keys
 /// Implementation based on NostrSDK
-struct NostrKeyPair {
+struct NostrKeyPair: CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
+    var description: String { "NostrKeyPair(privateKey: [redacted])" }
+    var debugDescription: String { description }
+    var customMirror: Mirror { Mirror(self, children: ["publicKey": publicKeyHex]) }
     let privateKey: PrivateKey  // NostrSDK PrivateKey
     let publicKey: PublicKey   // NostrSDK PublicKey
 
@@ -19,7 +22,8 @@ struct NostrKeyPair {
 
     /// Initialize from existing private key (hex format)
     init(privateKeyHex: String) throws {
-        guard let privateKey = PrivateKey(hex: privateKeyHex) else {
+        guard privateKeyHex.count == 64,
+              let privateKey = PrivateKey(hex: privateKeyHex) else {
             throw NostrKeyError.invalidPrivateKey
         }
 
@@ -33,7 +37,8 @@ struct NostrKeyPair {
 
     /// Initialize from nsec (bech32-encoded private key)
     init(nsec: String) throws {
-        guard let privateKey = PrivateKey(nsec: nsec) else {
+        guard nsec.count == 63, nsec.hasPrefix("nsec1"),
+              let privateKey = PrivateKey(nsec: nsec) else {
             throw NostrKeyError.invalidNsec
         }
 

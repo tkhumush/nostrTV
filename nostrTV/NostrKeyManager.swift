@@ -2,11 +2,12 @@ import Foundation
 import Combine
 
 /// Manages ephemeral Nostr key pairs for bunker client communication only
-/// No persistence - keys are generated on-demand for bunker handshake
+/// Holds pending pairing keys only. The accepted connection persists its client
+/// credential in Keychain until the user deletes that saved connection.
 class NostrKeyManager: ObservableObject {
     static let shared = NostrKeyManager()
 
-    @Published private(set) var currentKeyPair: NostrKeyPair?
+    private(set) var currentKeyPair: NostrKeyPair?
     @Published private(set) var isKeyGenerated: Bool = false
 
     private init() {}
