@@ -109,6 +109,7 @@ struct NsecLoginView: View {
             }
             .padding(60)
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in nsecInput = "" }
         .onDisappear { nsecInput = "" }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { nsecInput = "" }

@@ -17,7 +17,13 @@ final class CredentialInputTests: XCTestCase {
         let fixture = "not-a-real-private-key"
         field.typeText(fixture)
         XCTAssertFalse((field.value as? String ?? "").contains(fixture))
-        XCUIDevice.shared.press(.home)
+        // Activate another app explicitly and verify the background transition
+        // before checking field clearing, including on multi-display simulators.
+        XCUIApplication(bundleIdentifier: "com.apple.mobilesafari").activate()
+        let backgrounded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.state == .runningBackground || app.state == .runningBackgroundSuspended
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [backgrounded], timeout: 10), .completed)
         app.activate()
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         // Empty SecureField exposes its placeholder; input remains masked otherwise.

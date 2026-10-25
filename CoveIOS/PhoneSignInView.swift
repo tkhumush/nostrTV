@@ -65,6 +65,7 @@ private struct PhoneNsecSignInView: View {
             }
         }
         .scrollContentBackground(.hidden).background(Color.coveBackground).navigationTitle("Private key")
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in nsec = "" }
         .onDisappear { nsec = "" }
         .onChange(of: scenePhase) { _, phase in if phase != .active { nsec = "" } }
     }
