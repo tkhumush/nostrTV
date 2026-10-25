@@ -1,54 +1,56 @@
 import Foundation
 import Security
 
-enum KeychainHelper {
-    private static let nsecKey = "nostrNsecPrivateKey"
-    private static let service = Bundle.main.bundleIdentifier ?? "com.nostrtv.app"
+/// Secrets use app-scoped, non-synchronizing, device-bound Keychain items.
+protocol CredentialStore {
+    func save(_ data: Data, account: String) -> Bool
+    func load(account: String) -> Data?
+    func delete(account: String) -> Bool
+}
 
-    @discardableResult
-    static func save(_ nsec: String) -> Bool {
-        guard let data = nsec.data(using: .utf8) else { return false }
+struct KeychainStore: CredentialStore {
+    let service: String
 
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: service,
-            kSecAttrAccount: nsecKey,
+    init(service: String = Bundle.main.bundleIdentifier ?? "com.nostrtv.app") {
+        self.service = service
+    }
+
+    private func query(account: String) -> [CFString: Any] {
+        [kSecClass: kSecClassGenericPassword,
+         kSecAttrService: service,
+         kSecAttrAccount: account,
+         kSecAttrSynchronizable: false]
+    }
+
+    func save(_ data: Data, account: String) -> Bool {
+        let identity = query(account: account)
+        let attributes: [CFString: Any] = [
             kSecValueData: data,
             kSecAttrAccessible: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         ]
-
-        SecItemDelete(query as CFDictionary)
-        return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
+        // Update in place: a failed write must not first destroy the saved key.
+        let status = SecItemUpdate(identity as CFDictionary, attributes as CFDictionary)
+        if status == errSecSuccess { return true }
+        guard status == errSecItemNotFound else { return false }
+        return SecItemAdd(identity.merging(attributes) { _, new in new } as CFDictionary, nil) == errSecSuccess
     }
 
-    static func load() -> String? {
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: service,
-            kSecAttrAccount: nsecKey,
-            kSecReturnData: true,
-            kSecMatchLimit: kSecMatchLimitOne
-        ]
-
+    func load(account: String) -> Data? {
+        var request = query(account: account)
+        request[kSecReturnData] = true
+        request[kSecMatchLimit] = kSecMatchLimitOne
         var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let nsec = String(data: data, encoding: .utf8) else {
-            return nil
-        }
-
-        return nsec
+        guard SecItemCopyMatching(request as CFDictionary, &result) == errSecSuccess else { return nil }
+        return result as? Data
     }
 
-    @discardableResult
-    static func delete() -> Bool {
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: service,
-            kSecAttrAccount: nsecKey
-        ]
-        return SecItemDelete(query as CFDictionary) == errSecSuccess
+    func delete(account: String) -> Bool {
+        let status = SecItemDelete(query(account: account) as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
     }
+}
+
+enum KeychainHelper {
+    static let nsecAccount = "nostrNsecPrivateKey"
+    static let bunkerAccount = "nostrBunkerSession"
 }

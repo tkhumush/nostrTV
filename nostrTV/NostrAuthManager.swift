@@ -16,17 +16,20 @@ class NostrAuthManager: ObservableObject {
     @Published var followList: [String] = []
     @Published var isLoadingProfile: Bool = false
     @Published var errorMessage: String?
-    @Published var authMethod: AuthMethod? = nil
+    @Published private(set) var authMethod: AuthMethod? = nil
     @Published var bunkerClient: NostrBunkerClient?
 
     private var nostrSDKClient: NostrSDKClient
-    private let bunkerSessionManager = BunkerSessionManager()
+    private let bunkerSessionManager: BunkerSessionManager
+    private let credentials: any CredentialStore
 
     /// Initialize with an optional shared NostrSDKClient.
     /// When `nostrSDKClient` is provided, it is used directly so the auth manager
     /// shares the same relay pool as the rest of the app. If it is nil or creation
     /// fails, a non-fatal error client is created and an error message is surfaced.
-    init(nostrSDKClient: NostrSDKClient? = nil, restoreSession: Bool = true) {
+    init(nostrSDKClient: NostrSDKClient? = nil, restoreSession: Bool = true, credentials: any CredentialStore = KeychainStore(), userDefaults: UserDefaults = .standard) {
+        self.credentials = credentials
+        self.bunkerSessionManager = BunkerSessionManager(userDefaults: userDefaults, credentials: credentials)
         if let client = nostrSDKClient {
             self.nostrSDKClient = client
         } else {
@@ -58,7 +61,7 @@ class NostrAuthManager: ObservableObject {
         if let bunkerSession = bunkerSessionManager.loadSession(),
            let userPubkey = bunkerSession.userPubkey {
             // Restore bunker session
-            authMethod = .bunker(session: bunkerSession)
+            authMethod = .bunker
             currentUser = UserSession(nip05: "bunker:\(bunkerSession.bunkerPubkey.prefix(8))...", hexPubkey: userPubkey)
             isAuthenticated = true
 
@@ -76,10 +79,11 @@ class NostrAuthManager: ObservableObject {
             Task { @MainActor in
                 await restoreBunkerSession(bunkerSession)
             }
-        } else if let storedNsec = KeychainHelper.load(),
+        } else if let data = credentials.load(account: KeychainHelper.nsecAccount),
+                  let storedNsec = String(data: data, encoding: .utf8),
                   let keyPair = try? NostrKeyPair(nsec: storedNsec) {
             // Restore nsec session
-            authMethod = .nsec(keyPair: keyPair)
+            authMethod = .nsec
             currentUser = UserSession(nip05: "", hexPubkey: keyPair.publicKeyHex)
             isAuthenticated = true
             loadCachedProfile()
@@ -258,14 +262,11 @@ class NostrAuthManager: ObservableObject {
 
     /// Authenticate with a remote bunker
     @MainActor
-    func authenticateWithBunker(bunkerClient: NostrBunkerClient, userPubkey: String) async {
-        self.bunkerClient = bunkerClient
-
+    func authenticateWithBunker(bunkerClient: NostrBunkerClient, userPubkey: String) async throws {
         guard let bunkerPubkey = bunkerClient.bunkerPubkey,
               let relay = bunkerClient.bunkerRelays.first,
               let clientPrivateKeyHex = bunkerClient.clientPrivateKeyHex else {
-            errorMessage = "Invalid bunker configuration"
-            return
+            throw NostrAuthError.bunkerNotConnected
         }
 
         // Create and save session with client keypair for persistence
@@ -278,8 +279,15 @@ class NostrAuthManager: ObservableObject {
             lastUsed: Date()
         )
 
-        bunkerSessionManager.saveSession(session)
-        authMethod = .bunker(session: session)
+        guard credentials.delete(account: KeychainHelper.nsecAccount),
+              bunkerSessionManager.saveSession(session) else {
+            errorMessage = NostrAuthError.credentialStorageFailed.localizedDescription
+            bunkerClient.disconnect()
+            throw NostrAuthError.credentialStorageFailed
+        }
+        if self.bunkerClient !== bunkerClient { self.bunkerClient?.disconnect() }
+        self.bunkerClient = bunkerClient
+        authMethod = .bunker
 
         // Update user session
         currentUser = UserSession(nip05: "bunker:\(bunkerPubkey.prefix(8))...", hexPubkey: userPubkey)
@@ -308,8 +316,14 @@ class NostrAuthManager: ObservableObject {
             throw NostrAuthError.invalidNsec
         }
 
-        guard KeychainHelper.save(nsec) else { throw NostrAuthError.credentialStorageFailed }
-        authMethod = .nsec(keyPair: keyPair)
+        guard bunkerSessionManager.clearSession(),
+              credentials.save(Data(nsec.utf8), account: KeychainHelper.nsecAccount) else {
+            throw NostrAuthError.credentialStorageFailed
+        }
+        bunkerClient?.disconnect()
+        bunkerClient = nil
+        NostrKeyManager.shared.clearKeyPair()
+        authMethod = .nsec
         currentUser = UserSession(nip05: "", hexPubkey: keyPair.publicKeyHex)
         isAuthenticated = true
         isLoadingProfile = true
@@ -320,6 +334,9 @@ class NostrAuthManager: ObservableObject {
     /// Relay connection is deferred until the first actual signing request
     @MainActor
     private func restoreBunkerSession(_ session: BunkerSession) async {
+        guard isAuthenticated, case .bunker = authMethod,
+              bunkerClient == nil,
+              currentUser?.hexPubkey == session.userPubkey else { return }
         do {
             // Recreate bunker client
             let client = NostrBunkerClient(keyManager: NostrKeyManager.shared)
@@ -344,20 +361,19 @@ class NostrAuthManager: ObservableObject {
         }
     }
 
-    func logout() {
-        // Disconnect bunker client
-        if let client = bunkerClient {
-            Task { @MainActor in
-                client.disconnect()
-            }
+    @MainActor
+    @discardableResult
+    func logout() -> Bool {
+        let bunkerDeleted = bunkerSessionManager.clearSession()
+        let nsecDeleted = credentials.delete(account: KeychainHelper.nsecAccount)
+        guard bunkerDeleted && nsecDeleted else {
+            errorMessage = "Could not remove the saved credentials. Unlock your device and try signing out again."
+            return false
         }
+        NostrKeyManager.shared.clearKeyPair()
+        // Disconnect bunker client
+        bunkerClient?.disconnect()
         bunkerClient = nil
-
-        // Clear bunker session
-        bunkerSessionManager.clearSession()
-
-        // Clear nsec from Keychain
-        KeychainHelper.delete()
 
         // Clear UserDefaults
         UserDefaults.standard.removeObject(forKey: "nostrUserProfile")
@@ -382,11 +398,13 @@ class NostrAuthManager: ObservableObject {
         // filters to replay). Logging out must not take the whole app offline.
         nostrSDKClient.closeSubscription(Self.userDataSubscriptionId)
         nostrSDKClient.removeCallback(forSubscriptionId: Self.userDataSubscriptionId)
+        return true
     }
 
     // MARK: - Event Signing
 
     /// Sign a Nostr event using the active auth method
+    @MainActor
     func signEvent(_ event: LegacyNostrEvent) async throws -> LegacyNostrEvent {
         switch authMethod {
         case .bunker:
@@ -394,7 +412,15 @@ class NostrAuthManager: ObservableObject {
                 throw NostrAuthError.bunkerNotConnected
             }
             return try await bunkerClient.signEvent(event)
-        case .nsec(let keyPair):
+        case .nsec:
+            // Do not retain private keys in observable UI/session state. Locked
+            // Keychain access fails closed, even if the UI still shows a profile.
+            guard let data = credentials.load(account: KeychainHelper.nsecAccount),
+                  let nsec = String(data: data, encoding: .utf8),
+                  let keyPair = try? NostrKeyPair(nsec: nsec),
+                  keyPair.publicKeyHex == currentUser?.hexPubkey else {
+                throw NostrAuthError.credentialUnavailable
+            }
             return try nostrSDKClient.createSignedEvent(
                 kind: event.kind,
                 content: event.content ?? "",
@@ -414,6 +440,7 @@ enum NostrAuthError: LocalizedError {
     case bunkerNotConnected
     case invalidNsec
     case credentialStorageFailed
+    case credentialUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -423,6 +450,8 @@ enum NostrAuthError: LocalizedError {
             return "Bunker client not connected"
         case .invalidNsec:
             return "Invalid nsec key. Please check and try again."
+        case .credentialUnavailable:
+            return "Your signing key is unavailable. Unlock your device or sign in again."
         case .credentialStorageFailed:
             return "Your key could not be saved in Keychain. Please try again."
         }
@@ -432,8 +461,8 @@ enum NostrAuthError: LocalizedError {
 // MARK: - Auth Method Enum
 
 enum AuthMethod {
-    case bunker(session: BunkerSession)
-    case nsec(keyPair: NostrKeyPair)
+    case bunker
+    case nsec
 }
 
 struct UserSession {

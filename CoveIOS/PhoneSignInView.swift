@@ -31,6 +31,7 @@ struct PhoneSignInView: View {
 }
 
 private struct PhoneNsecSignInView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var auth: NostrAuthManager
     @State private var nsec = ""
     @State private var error: String?
@@ -46,6 +47,8 @@ private struct PhoneNsecSignInView: View {
             if let error { Section { Text(error).foregroundStyle(Color.coveGold) } }
             Section {
                 Button("Sign in") {
+                    let submittedKey = nsec.trimmingCharacters(in: .whitespacesAndNewlines)
+                    nsec = ""
                     busy = true
                     error = nil
                     Task { @MainActor in
@@ -53,20 +56,23 @@ private struct PhoneNsecSignInView: View {
                         #if DEBUG
                         if CoveUITestSupport.enabled { error = "Sign-in is disabled in the offline preview."; return }
                         #endif
-                        do { try await auth.authenticateWithNsec(nsec.trimmingCharacters(in: .whitespacesAndNewlines)); nsec = "" }
+                        do { try await auth.authenticateWithNsec(submittedKey) }
                         catch { self.error = error.localizedDescription }
                     }
                 }.disabled(busy || nsec.isEmpty)
+                    .accessibilityIdentifier("phone-nsec-submit")
                 if busy { ProgressView("Signing in…") }
             }
         }
         .scrollContentBackground(.hidden).background(Color.coveBackground).navigationTitle("Private key")
         .onDisappear { nsec = "" }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { nsec = "" } }
     }
 }
 
 /// Reuse the NIP-46 handshake with a link for this phone and a QR for another device.
 private struct PhoneRemoteSignInView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var auth: NostrAuthManager
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
@@ -83,7 +89,7 @@ private struct PhoneRemoteSignInView: View {
                     Text("Bring your identity").font(.largeTitle.bold())
                     Text("Open the connection in a compatible NIP-46 signer, or scan the code from another device. Approve it there, then return to Cove.")
                         .foregroundStyle(.secondary)
-                    if let qr {
+                    if scenePhase == .active, let qr {
                         Image(uiImage: qr).interpolation(.none).resizable().scaledToFit()
                             .frame(maxWidth: 280).padding(16).background(.white, in: RoundedRectangle(cornerRadius: 16))
                             .frame(maxWidth: .infinity)
@@ -111,7 +117,11 @@ private struct PhoneRemoteSignInView: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
         }
         .task { await connect() }
-        .onDisappear { if !handedOff { signer.disconnect() } }
+        .onDisappear {
+            uri = nil
+            qr = nil
+            if !handedOff { signer.disconnect() }
+        }
     }
 
     @MainActor
@@ -123,7 +133,8 @@ private struct PhoneRemoteSignInView: View {
         }
         #endif
         do {
-            if !NostrKeyManager.shared.hasKeyPair { try NostrKeyManager.shared.generateEphemeralKeyPair() }
+            // A new pairing always gets a new client identity. Session restoration uses the saved key.
+            try NostrKeyManager.shared.generateEphemeralKeyPair()
             guard let clientPubkey = NostrKeyManager.shared.publicKeyHex else { throw BunkerError.notConnected }
             let connection = BunkerURIComponents(clientPubkey: clientPubkey,
                 relays: ["wss://relay.primal.net", "wss://relay.damus.io", "wss://bucket.coracle.social"],
@@ -135,7 +146,7 @@ private struct PhoneRemoteSignInView: View {
             try Task.checkCancellation()
             let pubkey = try await signer.getPublicKey()
             try Task.checkCancellation()
-            await auth.authenticateWithBunker(bunkerClient: signer, userPubkey: pubkey)
+            try await auth.authenticateWithBunker(bunkerClient: signer, userPubkey: pubkey)
             guard auth.isAuthenticated else { throw BunkerError.connectionFailed(auth.errorMessage ?? "Could not sign in") }
             handedOff = true
             dismiss()

@@ -6,7 +6,7 @@ import Combine
 class NostrKeyManager: ObservableObject {
     static let shared = NostrKeyManager()
 
-    @Published private(set) var currentKeyPair: NostrKeyPair?
+    private(set) var currentKeyPair: NostrKeyPair?
     @Published private(set) var isKeyGenerated: Bool = false
 
     private init() {}

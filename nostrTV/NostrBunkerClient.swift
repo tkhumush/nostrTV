@@ -94,6 +94,7 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
             throw BunkerError.notConnected
         }
         clientKeyPair = keyPair
+        keyManager.clearKeyPair()
 
         // Connect to the relays
         try await connectToRelays(components.relays)
@@ -116,6 +117,7 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
                 catch { return }
                 guard let self, let connection = self.connectContinuation else { return }
                 self.connectContinuation = nil
+                self.expectedSecret = nil
                 connection.resume(throwing: BunkerError.timeout)
                 self.connectionState = .error("Timeout waiting for signer (3 minutes)")
             }
@@ -148,8 +150,8 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
                 print("⚠️ Failed to restore client keypair, generating new one: \(error.localizedDescription)")
                 clientKeyPair = try NostrKeyPair.generate()
             }
-        } else if clientKeyPair == nil {
-            // Generate ephemeral keypair for this bunker session if not already set
+        } else {
+            // Every fresh pairing gets a new client identity, even when this client is reused.
             clientKeyPair = try NostrKeyPair.generate()
             print("✅ Generated new client keypair")
         }
@@ -285,7 +287,10 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
             _ = subId
         }
 
+        nostrSDKClient?.disconnect()
         nostrSDKClient = nil
+        expectedSecret = nil
+        keyManager.clearKeyPair()
         bunkerPubkey = nil
         bunkerRelays = []
         clientKeyPair = nil
@@ -434,7 +439,7 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
 
                 } catch {
                     Task { @MainActor in
-                        self.pendingRequests.removeValue(forKey: requestId)
+                        guard self.pendingRequests.removeValue(forKey: requestId) != nil else { return }
                         timeoutTask.cancel()
                         continuation.resume(throwing: error)
                     }
@@ -500,7 +505,7 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
                 return
             }
 
-            print("✅ Parsed response - ID: \(response.id)")
+            print("✅ Parsed bunker response")
 
             // If we're actively waiting for a connection AND expecting a secret, validate it
             // Only validate when we have both an active connection attempt and an expected secret
@@ -526,7 +531,7 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
                         return  // Don't process as regular response
                     } else {
                         // Only log mismatch, don't fail immediately - might be an old message
-                        print("⚠️ Secret mismatch (expected: \(secret.prefix(10))..., got: \(result.prefix(10))...)")
+                        print("⚠️ Connection secret mismatch; ignoring response")
                         print("   Ignoring this message, waiting for correct connect response...")
                         return  // Ignore this message and wait for the right one
                     }
@@ -541,14 +546,14 @@ class NostrBunkerClient: ObservableObject, NIP44v2Encrypting {
             await handleBunkerResponse(response)
 
         } catch {
-            print("❌ Failed to process bunker message: \(error.localizedDescription)")
+            print("❌ Failed to process bunker message")
         }
     }
 
     /// Handle parsed bunker response
     private func handleBunkerResponse(_ response: BunkerResponse) async {
         guard let pending = pendingRequests.removeValue(forKey: response.id) else {
-            print("⚠️ Received response for unknown request: \(response.id)")
+            print("⚠️ Received response for unknown request")
             return
         }
 
